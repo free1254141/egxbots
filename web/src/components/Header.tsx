@@ -519,13 +519,9 @@ export default function Header() {
     const navItems = isGccChatOnly
         ? [
               { href: "/chat", label: language === "ar" ? "الشات الذكي AI" : "AI Chat", icon: <Bot className="w-4 h-4 shrink-0" />, activePath: "/chat", badge: "AI" },
-              {
-                  href: isUae ? "/markets/uae" : "/markets/qatar",
-                  label: language === "ar" ? (isUae ? "أسهم الإمارات" : "أسهم قطر") : (isUae ? "UAE Stocks" : "Qatar Stocks"),
-                  icon: <TrendingUp className="w-4 h-4 shrink-0" />,
-                  activePath: isUae ? "/markets/uae" : "/markets/qatar",
-              },
-              { href: "/markets/gold-silver", label: language === "ar" ? "الذهب والفضة" : "Gold & Silver", icon: <Sparkles className="w-4 h-4 shrink-0" />, activePath: "/markets/gold-silver" },
+              { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI" },
+              { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW" },
+              { href: "/scanner/technical", label: t("nav.scanner.tech"), icon: <Activity className="w-4 h-4 shrink-0" />, activePath: "/scanner/technical" },
               { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
           ]
         : [
@@ -537,20 +533,17 @@ export default function Header() {
               { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
           ];
 
-    // Auto-redirect away from unavailable routes when Saudi or UAE/Qatar market is active
+    // Auto-redirect away from unavailable routes (e.g. recommendations/backtests) when UAE/Qatar or Saudi is active
     useEffect(() => {
         if (!pathname) return;
         if (isGccChatOnly) {
             const unavailableForGcc =
-                pathname.startsWith("/scanner") ||
-                pathname.startsWith("/disclosures") ||
-                pathname.startsWith("/news") ||
+                pathname.startsWith("/scanner/backtests") ||
+                pathname.startsWith("/scanner/bots") ||
                 pathname.startsWith("/reports") ||
-                pathname.startsWith("/fair-value") ||
-                pathname.startsWith("/sharia") ||
                 pathname.startsWith("/b2b");
             if (unavailableForGcc) {
-                router.replace(isUae ? "/markets/uae" : "/markets/qatar");
+                router.replace("/disclosures");
             }
             return;
         }

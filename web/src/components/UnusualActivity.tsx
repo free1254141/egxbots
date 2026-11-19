@@ -70,14 +70,14 @@ export default function UnusualActivity() {
     setExpanded(false);
 
     const requests: Promise<unknown>[] = [
-      fetchUnusualActivity(controller.signal, isSaudi ? "tasi" : "egx")
+      fetchUnusualActivity(controller.signal, market)
         .then(setSnapshot)
         .catch((cause) => {
           if (cause?.name !== "AbortError") setError(true);
         }),
     ];
 
-    if (isSaudi) {
+    if (market !== "egx") {
       setPerf(null);
     } else {
       requests.push(
@@ -120,7 +120,25 @@ export default function UnusualActivity() {
           </span>
           <Activity className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
           <h2 className="text-sm font-black text-zinc-950 dark:text-white">
-            {ar ? `نشاط غير طبيعي وانفجار سعري — ${isSaudi ? "تاسي" : "EGX"}` : `Unusual Activity & Volume Breakout — ${isSaudi ? "TASI" : "EGX"}`}
+            {ar
+              ? `نشاط غير طبيعي وانفجار سعري — ${
+                  market === "uae"
+                    ? "الإمارات (DFM & ADX)"
+                    : market === "qatar"
+                    ? "بورصة قطر (QSE)"
+                    : isSaudi
+                    ? "تاسي"
+                    : "EGX"
+                }`
+              : `Unusual Activity & Volume Breakout — ${
+                  market === "uae"
+                    ? "UAE (DFM & ADX)"
+                    : market === "qatar"
+                    ? "Qatar (QSE)"
+                    : isSaudi
+                    ? "TASI"
+                    : "EGX"
+                }`}
           </h2>
           {snapshot && (
             <span className="shrink-0 border border-amber-500/40 bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-900 dark:bg-amber-400/10 dark:text-amber-300">
@@ -338,7 +356,16 @@ export default function UnusualActivity() {
                 <Link
                   prefetch={false}
                   aria-label={`${ar ? "فتح" : "Open"} ${row.symbol}`}
-                  href={`/chart?symbol=${encodeURIComponent(row.symbol)}&exchange=${isSaudi ? "TADAWUL" : "EGX"}`}
+                  href={`/chart?symbol=${encodeURIComponent(row.symbol)}&exchange=${encodeURIComponent(
+                    row.exchange ||
+                      (market === "uae"
+                        ? "DFM"
+                        : market === "qatar"
+                        ? "QSE"
+                        : isSaudi
+                        ? "TADAWUL"
+                        : "EGX")
+                  )}`}
                   className="absolute inset-0"
                 />
               </div>

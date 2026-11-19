@@ -455,9 +455,13 @@ def _compute_and_upsert_indicators(
                 return None
 
         vol_val = int(round(float(last.get("Volume") or 0)))
-        vol_sma_f = _f("Vol_SMA20") or _f("Volume_SMA_20") or 0.0
+        vol_tail = df["Volume"].tail(20)
+        vol_pos = vol_tail[vol_tail > 0]
+        vol_sma_fallback = float(vol_pos.mean()) if len(vol_pos) > 0 else 0.0
+        vol_sma_f = _f("Vol_SMA20") or _f("Volume_SMA_20") or vol_sma_fallback
         vol_sma = int(round(vol_sma_f))
         r_vol = round(vol_val / vol_sma, 2) if vol_sma > 0 else 1.0
+        sma_20_val = _f("SMA_20") or _f("BB_Middle") or round(float(df["Close"].tail(20).mean()), 4)
 
         ind_rows.append({
             "symbol": sym,
@@ -474,7 +478,7 @@ def _compute_and_upsert_indicators(
             "ema_20": _f("EMA_20"),
             "ema_50": _f("EMA_50"),
             "ema_200": _f("EMA_200"),
-            "sma_20": _f("SMA_20"),
+            "sma_20": sma_20_val,
             "sma_50": _f("SMA_50"),
             "sma_200": _f("SMA_200"),
             "macd": _f("MACD"),

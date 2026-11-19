@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import {
   resolveRequestMarket,
   getMarketExchange,
+  getMarketExchanges,
   getMarketSupabaseServiceClient,
   type MarketMode,
 } from "@/lib/supabase/route-data";
@@ -45,7 +46,7 @@ function finite(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function fetchTrapsIndicators(supabase: any, exchange: string, asOf: string) {
+async function fetchTrapsIndicators(supabase: any, exchanges: string[], asOf: string) {
   const attempts = [
     "symbol,close,change_pct,rsi_14,r_vol,ema_20,sma_20,bb_upper,bb_lower,egx_ai_score",
     "symbol,close,change_pct,rsi_14,r_vol,ema_20,sma_20,bb_upper,bb_lower",
@@ -57,7 +58,7 @@ async function fetchTrapsIndicators(supabase: any, exchange: string, asOf: strin
     const res = await supabase
       .from("stock_technical_indicators")
       .select(selectFields)
-      .eq("exchange", exchange)
+      .in("exchange", exchanges)
       .eq("date", asOf)
       .limit(500);
     if (!res.error) return res;
@@ -69,46 +70,50 @@ async function fetchTrapsIndicators(supabase: any, exchange: string, asOf: strin
 async function loadTrapsSnapshot(market: MarketMode): Promise<TrapsSnapshot> {
   const supabase = getMarketSupabaseServiceClient(market, { cacheMarketData: true });
   const exchange = getMarketExchange(market);
-  const currency = market === "tasi" ? "SAR" : "EGP";
-  const cacheKeys =
-    market === "tasi"
-      ? ["scanner_traps_TADAWUL", "scanner_traps_TASI", "daily_traps_snapshot_tasi"]
-      : ["scanner_traps_EGX", "daily_traps_snapshot"];
+  const exchanges = getMarketExchanges(market);
+  const currency =
+    market === "uae" ? "AED" : market === "qatar" ? "QAR" : market === "tasi" ? "SAR" : "EGP";
 
-  // 1. Try precomputed daily traps cache first
-  try {
-    const { data: cacheRows } = await supabase
-      .from("market_cache")
-      .select("payload, computed_at")
-      .in("cache_key", cacheKeys)
-      .order("computed_at", { ascending: false })
-      .limit(1);
+  // 1. Try precomputed daily traps cache first (EGX / TASI)
+  if (market === "egx" || market === "tasi") {
+    const cacheKeys =
+      market === "tasi"
+        ? ["scanner_traps_TADAWUL", "scanner_traps_TASI", "daily_traps_snapshot_tasi"]
+        : ["scanner_traps_EGX", "daily_traps_snapshot"];
+    try {
+      const { data: cacheRows } = await supabase
+        .from("market_cache")
+        .select("payload, computed_at")
+        .in("cache_key", cacheKeys)
+        .order("computed_at", { ascending: false })
+        .limit(1);
 
-    const cacheRow = cacheRows?.[0];
+      const cacheRow = cacheRows?.[0];
 
-    if (
-      cacheRow?.payload &&
-      Array.isArray(cacheRow.payload.bearTraps) &&
-      (cacheRow.payload.bearTraps.length > 0 || (cacheRow.payload.bullTraps || []).length > 0)
-    ) {
-      return {
-        asOf: cacheRow.payload.asOf || null,
-        exchange,
-        currency,
-        bearTraps: cacheRow.payload.bearTraps.slice(0, 8),
-        bullTraps: (cacheRow.payload.bullTraps || []).slice(0, 8),
-        totalBearTraps: cacheRow.payload.totalBearTraps ?? cacheRow.payload.bearTraps.length,
-        totalBullTraps: cacheRow.payload.totalBullTraps ?? (cacheRow.payload.bullTraps || []).length,
-      };
+      if (
+        cacheRow?.payload &&
+        Array.isArray(cacheRow.payload.bearTraps) &&
+        (cacheRow.payload.bearTraps.length > 0 || (cacheRow.payload.bullTraps || []).length > 0)
+      ) {
+        return {
+          asOf: cacheRow.payload.asOf || null,
+          exchange,
+          currency,
+          bearTraps: cacheRow.payload.bearTraps.slice(0, 8),
+          bullTraps: (cacheRow.payload.bullTraps || []).slice(0, 8),
+          totalBearTraps: cacheRow.payload.totalBearTraps ?? cacheRow.payload.bearTraps.length,
+          totalBullTraps: cacheRow.payload.totalBullTraps ?? (cacheRow.payload.bullTraps || []).length,
+        };
+      }
+    } catch (e) {
+      console.warn(`[api/scan/traps:${market}] market_cache read fallback:`, e);
     }
-  } catch (e) {
-    console.warn(`[api/scan/traps:${market}] market_cache read fallback:`, e);
   }
 
   const { data: latestRows, error: latestError } = await supabase
     .from("stock_technical_indicators")
     .select("date")
-    .eq("exchange", exchange)
+    .in("exchange", exchanges)
     .order("date", { ascending: false })
     .limit(1);
   if (latestError) throw latestError;
@@ -119,11 +124,11 @@ async function loadTrapsSnapshot(market: MarketMode): Promise<TrapsSnapshot> {
   }
 
   const [indRes, barsRes] = await Promise.all([
-    fetchTrapsIndicators(supabase, exchange, asOf),
+    fetchTrapsIndicators(supabase, exchanges, asOf),
     supabase
       .from("stock_prices")
       .select("symbol,open,high,low,close")
-      .eq("exchange", exchange)
+      .in("exchange", exchanges)
       .eq("date", asOf)
       .limit(500),
   ]);
@@ -215,19 +220,19 @@ async function loadTrapsSnapshot(market: MarketMode): Promise<TrapsSnapshot> {
   const topBear = bearTraps.slice(0, 8);
   const topBull = bullTraps.slice(0, 8);
 
-  if (market === "tasi" && (topBear.length > 0 || topBull.length > 0)) {
+  if (market !== "egx" && (topBear.length > 0 || topBull.length > 0)) {
     const matchedSyms = Array.from(new Set([...topBear, ...topBull].map((r) => r.symbol)));
     let { data: stockNames, error: namesErr } = await supabase
       .from("stocks")
       .select("symbol,name_ar,name")
-      .eq("exchange", exchange)
+      .in("exchange", exchanges)
       .in("symbol", matchedSyms)
       .limit(matchedSyms.length);
     if (namesErr) {
       ({ data: stockNames } = await supabase
         .from("stocks")
         .select("symbol,name")
-        .eq("exchange", exchange)
+        .in("exchange", exchanges)
         .in("symbol", matchedSyms)
         .limit(matchedSyms.length));
     }
@@ -265,6 +270,18 @@ const getCachedTasiTrapsSnapshot = unstable_cache(
   { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] }
 );
 
+const getCachedUaeTrapsSnapshot = unstable_cache(
+  async (): Promise<TrapsSnapshot> => loadTrapsSnapshot("uae"),
+  ["trap-detector-uae-daily"],
+  { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] }
+);
+
+const getCachedQatarTrapsSnapshot = unstable_cache(
+  async (): Promise<TrapsSnapshot> => loadTrapsSnapshot("qatar"),
+  ["trap-detector-qatar-daily"],
+  { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] }
+);
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -276,7 +293,11 @@ export async function GET(req: NextRequest) {
     const payload =
       market === "tasi"
         ? await getCachedTasiTrapsSnapshot()
-        : await getCachedEgxTrapsSnapshot();
+        : market === "uae"
+          ? await getCachedUaeTrapsSnapshot()
+          : market === "qatar"
+            ? await getCachedQatarTrapsSnapshot()
+            : await getCachedEgxTrapsSnapshot();
     const headers = explicitMarketParam
       ? dailyCacheHeaders(DAILY_CACHE_TAGS.market)
       : {

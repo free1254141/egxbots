@@ -90,17 +90,18 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
       }
       if (plan.id === "pro_6m") {
         const backend6m = plan.amount_egp != null ? Number(plan.amount_egp) : 750;
-        const orig6m = Number(plan.discount?.original_amount_egp ?? (backend6m > 500 ? backend6m : 750));
+        const p6Amt = effectivePrice * 5;
+        const orig6m = Number(plan.discount?.original_amount_egp ?? (backend6m > p6Amt ? backend6m : 750));
         return {
           ...plan,
-          amount_egp: hasSpecialRate ? 500 : backend6m,
-          founders_lock_rate: hasSpecialRate ? 100 : null,
+          amount_egp: hasSpecialRate ? p6Amt : backend6m,
+          founders_lock_rate: hasSpecialRate ? effectivePrice : null,
           discount: hasSpecialRate
             ? {
                 active: true,
                 kind: "founders",
-                label_ar: `عرض المؤسسين (500 بدل ${orig6m.toLocaleString()} ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥`,
-                label_en: `Founders Offer (500 instead of ${orig6m.toLocaleString()} EGP + locks 100 EGP/mo for life) 🔥`,
+                label_ar: `عرض المؤسسين (${p6Amt.toLocaleString()} بدل ${orig6m.toLocaleString()} ج.م + تثبيت ${effectivePrice.toLocaleString()} ج.م/شهر مدى الحياة) 🔥`,
+                label_en: `Founders Offer (${p6Amt.toLocaleString()} instead of ${orig6m.toLocaleString()} EGP + locks ${effectivePrice.toLocaleString()} EGP/mo for life) 🔥`,
                 original_amount_egp: orig6m,
                 ends_at: isOpen ? configEndsAt : null,
               }
@@ -109,17 +110,18 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
       }
       if (plan.id === "pro_1y") {
         const backend1y = plan.amount_egp != null ? Number(plan.amount_egp) : 1350;
-        const orig1y = Number(plan.discount?.original_amount_egp ?? (backend1y > 1000 ? backend1y : 1350));
+        const p1yAmt = effectivePrice * 9;
+        const orig1y = Number(plan.discount?.original_amount_egp ?? (backend1y > p1yAmt ? backend1y : 1350));
         return {
           ...plan,
-          amount_egp: hasSpecialRate ? 1000 : backend1y,
-          founders_lock_rate: hasSpecialRate ? 100 : null,
+          amount_egp: hasSpecialRate ? p1yAmt : backend1y,
+          founders_lock_rate: hasSpecialRate ? effectivePrice : null,
           discount: hasSpecialRate
             ? {
                 active: true,
                 kind: "founders",
-                label_ar: `عرض المؤسسين (1,000 بدل ${orig1y.toLocaleString()} ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥`,
-                label_en: `Founders Offer (1,000 instead of ${orig1y.toLocaleString()} EGP + locks 100 EGP/mo for life) 🔥`,
+                label_ar: `عرض المؤسسين (${p1yAmt.toLocaleString()} بدل ${orig1y.toLocaleString()} ج.م + تثبيت ${effectivePrice.toLocaleString()} ج.م/شهر مدى الحياة) 🔥`,
+                label_en: `Founders Offer (${p1yAmt.toLocaleString()} instead of ${orig1y.toLocaleString()} EGP + locks ${effectivePrice.toLocaleString()} EGP/mo for life) 🔥`,
                 original_amount_egp: orig1y,
                 ends_at: isOpen ? configEndsAt : null,
               }

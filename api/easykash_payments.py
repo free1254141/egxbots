@@ -313,13 +313,17 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits, chat_
 
 
 
-    plan_6m: Dict[str, Any] = {"id": "pro_6m", "name_ar": "6 شهور", "name_en": "6 Months", "amount_egp": int(plan_amount_egp("pro_6m", user_id=user_id)), "days": 180, "founders_lock_rate": 100 if (_founders_is_open or is_eligible_50 or is_eligible_100) else None}
+    _founders_lock_rate = 50 if is_eligible_50 else (100 if (_founders_is_open or is_eligible_100) else None)
 
-    plan_1y: Dict[str, Any] = {"id": "pro_1y", "name_ar": "سنة", "name_en": "1 Year", "amount_egp": int(plan_amount_egp("pro_1y", user_id=user_id)), "days": 365, "founders_lock_rate": 100 if (_founders_is_open or is_eligible_50 or is_eligible_100) else None}
+    plan_6m: Dict[str, Any] = {"id": "pro_6m", "name_ar": "6 شهور", "name_en": "6 Months", "amount_egp": int(plan_amount_egp("pro_6m", user_id=user_id)), "days": 180, "founders_lock_rate": _founders_lock_rate}
+
+    plan_1y: Dict[str, Any] = {"id": "pro_1y", "name_ar": "سنة", "name_en": "1 Year", "amount_egp": int(plan_amount_egp("pro_1y", user_id=user_id)), "days": 365, "founders_lock_rate": _founders_lock_rate}
 
     if _founders_is_open or is_eligible_50 or is_eligible_100:
 
         base_6m_orig = int(round(float(settings["pro_6m_price_egp"]) if settings.get("pro_6m_price_egp") is not None else float(os.getenv("PRO_6M_PRICE_EGP", "750"))))
+
+        plan_6m_amt = int(plan_6m["amount_egp"])
 
         plan_6m["discount"] = {
 
@@ -327,9 +331,9 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits, chat_
 
             "kind": "founders",
 
-            "label_ar": f"عرض المؤسسين (500 بدل {base_6m_orig:,} ج.م) 🔥",
+            "label_ar": f"عرض المؤسسين ({plan_6m_amt:,} بدل {base_6m_orig:,} ج.م) 🔥",
 
-            "label_en": f"Founders Offer (500 instead of {base_6m_orig:,} EGP) 🔥",
+            "label_en": f"Founders Offer ({plan_6m_amt:,} instead of {base_6m_orig:,} EGP) 🔥",
 
             "original_amount_egp": base_6m_orig,
 
@@ -339,15 +343,17 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits, chat_
 
         base_1y_orig = int(round(float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else float(os.getenv("PRO_1Y_PRICE_EGP", "1350"))))
 
+        plan_1y_amt = int(plan_1y["amount_egp"])
+
         plan_1y["discount"] = {
 
             "active": True,
 
             "kind": "founders",
 
-            "label_ar": f"عرض المؤسسين (1,000 بدل {base_1y_orig:,} ج.م) 🔥",
+            "label_ar": f"عرض المؤسسين ({plan_1y_amt:,} بدل {base_1y_orig:,} ج.م) 🔥",
 
-            "label_en": f"Founders Offer (1,000 instead of {base_1y_orig:,} EGP) 🔥",
+            "label_en": f"Founders Offer ({plan_1y_amt:,} instead of {base_1y_orig:,} EGP) 🔥",
 
             "original_amount_egp": base_1y_orig,
 
@@ -500,7 +506,7 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits, chat_
                     "ترخيص وربط جروب تليجرام واحد",
                     "كوتة 50 استفسار يومياً (~1,100 شهرياً)",
                     "توقيع مخصص باسم قناتك أسفل كل تحليل",
-                    "تحليل شامل لجميع أسهم البورصة المصرية ومؤشراتها",
+                    "تحليل شامل لجميع أسهم الأسواق العربية (مصر، السعودية، الإمارات، قطر) والذهب والفضة",
                     "حماية مانع السبام والتكرار التلقائي (90 ثانية كولد داون)",
                     "لوحة تحكم لمتابعة الاستهلاك وتعديل التوقيع",
                 ],
@@ -778,6 +784,90 @@ def validate_affiliate_code(code: str, track_click: bool = False) -> Dict[str, A
 
 
 
+def _first_row(res: Any) -> Dict[str, Any] | None:
+    """Safely extract the first dict row from a .limit(1).execute() response (postgrest 0.16.11 safe)."""
+    data = getattr(res, "data", None) if res is not None else None
+    if isinstance(data, list):
+        return data[0] if data and isinstance(data[0], dict) else None
+    return data if isinstance(data, dict) else None
+
+
+def _is_submitted_lease_expired(updated_at: Any, ttl_seconds: float = 300.0) -> bool:
+    """Return True if a 'submitted' processing lease is missing, malformed, or older than ttl_seconds."""
+    if not updated_at:
+        return True
+    try:
+        dt = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds() > ttl_seconds
+    except (ValueError, TypeError):
+        return True
+
+
+def _merge_customer_note(existing: Any, addition: str) -> str:
+    """Append pipe-delimited metadata (e.g. EasyKash ref / tg_welcomed) without losing Market tag."""
+    existing_clean = str(existing or "").strip()
+    add_clean = str(addition or "").strip()
+    if not existing_clean:
+        return add_clean
+    if not add_clean:
+        return existing_clean
+    parts = [p.strip() for p in existing_clean.split("|") if p.strip()]
+    for seg in (s.strip() for s in add_clean.split("|") if s.strip()):
+        if seg not in parts:
+            parts.append(seg)
+    return " | ".join(parts)
+
+
+def _guard_active_subscription_transition(user_id: str, requested_plan: str) -> None:
+    """Prevent accidental downgrade or wipeout of an active retail subscription."""
+    if not user_id or not supabase or requested_plan.startswith("b2b_"):
+        return
+    try:
+        sub_res = (
+            supabase.table("subscriptions")
+            .select("plan_id,status,current_period_end")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .order("current_period_end", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(sub_res, "data", None) or []
+        sub = rows[0] if isinstance(rows, list) and rows else None
+    except Exception:
+        return
+    if not isinstance(sub, dict):
+        return
+
+    current_plan = str(sub.get("plan_id") or "").strip().lower()
+    if not current_plan:
+        return
+    if current_plan in {"lifetime", "pro_lifetime"}:
+        raise ValueError("اشتراكك الدائم (مدى الحياة) مفعّل بالفعل مدى الحياة ولا تحتاج لتجديد أو شراء باقة أخرى.")
+
+    end_raw = sub.get("current_period_end")
+    is_unexpired = False
+    if end_raw:
+        try:
+            end_dt = datetime.fromisoformat(str(end_raw).replace("Z", "+00:00"))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            is_unexpired = end_dt > datetime.now(timezone.utc)
+        except Exception:
+            is_unexpired = False
+    if not is_unexpired:
+        return
+
+    if current_plan in {"pro", "pro_renewal", "pro_6m", "pro_1y"} and requested_plan in {"chat_only", "vip_only"}:
+        raise ValueError("أنت مشترك بالفعل في الباقة الشاملة (Pro) التي تضم الشات وتليجرام VIP معاً؛ يمكنك تجديد الباقة الشاملة للحفاظ على كل صلاحياتك.")
+    if current_plan == "chat_only" and requested_plan == "vip_only":
+        raise ValueError("لديك اشتراك نشط في باقة الشات الذكي. بدلاً من شراء باقة منفصلة، اختر الباقة الشاملة (Pro) للجمع بين الشات وتليجرام VIP معاً دون فقدان أيامك المتبقية.")
+    if current_plan == "vip_only" and requested_plan == "chat_only":
+        raise ValueError("لديك اشتراك نشط في باقة تليجرام VIP. بدلاً من شراء باقة منفصلة، اختر الباقة الشاملة (Pro) للجمع بين الشات وتليجرام VIP معاً دون فقدان أيامك المتبقية.")
+
+
 def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: str, promo_code: str = "", market: str = "egx", duration_months: int | None = None) -> Dict[str, Any]:
 
     if not is_payments_enabled():
@@ -818,6 +908,8 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
     if not supabase:
 
         raise RuntimeError("Supabase is not initialized")
+
+    _guard_active_subscription_transition(user_id, plan_id)
 
 
 
@@ -1209,7 +1301,7 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         return {"ok": False, "status_code": 503, "code": "database_unavailable"}
 
-    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,duration_days,status,provider,updated_at,affiliate_id,affiliate_code,commission_amount_egp,commission_status,discount_amount_egp").eq("id", order_id).maybe_single().execute()
+    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,duration_days,status,provider,updated_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status,discount_amount_egp").eq("id", order_id).maybe_single().execute()
 
     order = result.data if result else None
 
@@ -1287,15 +1379,7 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         updated_at = order.get("updated_at")
 
-        try:
-
-            lease_expired = updated_at and (datetime.now(timezone.utc) - datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))).total_seconds() > 300
-
-        except ValueError:
-
-            lease_expired = True
-
-        if not lease_expired:
+        if not _is_submitted_lease_expired(updated_at):
 
             return {"ok": False, "status_code": 503, "code": "callback_processing"}
 
@@ -1327,6 +1411,11 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
             duration_days=order.get("duration_days"),
         )
 
+        merged_note = _merge_customer_note(
+            order.get("customer_note"),
+            f"EasyKash reference: {str(payload.get('easykashRef') or '')[:100]}",
+        )
+
         update_payload = {
 
             "status": "approved",
@@ -1335,13 +1424,15 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             "payment_reviewed_at": now,
 
-            "customer_note": f"EasyKash reference: {str(payload.get('easykashRef') or '')[:100]}",
+            "customer_note": merged_note,
 
             "updated_at": now,
 
         }
 
         supabase.table("local_payment_orders").update(update_payload).eq("id", order_id).eq("status", "submitted").execute()
+
+        order["customer_note"] = merged_note
 
         _credit_affiliate_commission(order, float(expected_amount), now)
 
@@ -1416,13 +1507,15 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
                     if sent:
 
-                        note = str(order.get("customer_note") or "")
+                        merged_welcome_note = _merge_customer_note(order.get("customer_note"), "tg_welcomed")
 
                         supabase.table("local_payment_orders").update({
 
-                            "customer_note": f"{note} | tg_welcomed".strip(" |")
+                            "customer_note": merged_welcome_note
 
                         }).eq("id", order_id).execute()
+
+                        order["customer_note"] = merged_welcome_note
 
                 except Exception as tg_err:
 
@@ -1516,6 +1609,57 @@ def sync_easykash_order_status(order: Dict[str, Any]) -> Dict[str, Any]:
             now = datetime.now(timezone.utc).isoformat()
 
             if ek_status == "PAID":
+                inq_raw_amount = data.get("Amount") if data.get("Amount") is not None else data.get("amount")
+                if inq_raw_amount is not None and str(inq_raw_amount).strip() != "":
+                    try:
+                        inq_amt = Decimal(str(inq_raw_amount)).quantize(Decimal("0.01"))
+                        exp_amt = Decimal(str(order.get("amount_egp"))).quantize(Decimal("0.01"))
+                        if inq_amt != exp_amt:
+                            print(f"[EASYKASH] sync amount mismatch for {order_id}: received={inq_amt} expected={exp_amt}")
+                            return order
+                    except (InvalidOperation, TypeError):
+                        print(f"[EASYKASH] sync invalid amount for {order_id}")
+                        return order
+
+                claimed_here = False
+                if current_status == "submitted":
+                    updated_at = order.get("updated_at")
+                    if not _is_submitted_lease_expired(updated_at):
+                        return order
+                    claim_q = (
+                        supabase.table("local_payment_orders")
+                        .update({"updated_at": now})
+                        .eq("id", order_id)
+                        .eq("status", "submitted")
+                    )
+                    if updated_at is not None:
+                        claim_q = claim_q.eq("updated_at", updated_at)
+                    claimed = claim_q.execute()
+                    if not (claimed and getattr(claimed, "data", None)):
+                        return order
+                    claimed_here = True
+                elif current_status == "pending":
+                    claimed = (
+                        supabase.table("local_payment_orders")
+                        .update({"status": "submitted", "updated_at": now})
+                        .eq("id", order_id)
+                        .eq("status", "pending")
+                        .execute()
+                    )
+                    if not (claimed and getattr(claimed, "data", None)):
+                        refreshed = (
+                            supabase.table("local_payment_orders")
+                            .select("id,user_id,plan_id,amount_egp,duration_days,status,provider,updated_at,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
+                            .eq("id", order_id)
+                            .limit(1)
+                            .execute()
+                        )
+                        refreshed_row = _first_row(refreshed)
+                        if refreshed_row:
+                            order.update(refreshed_row)
+                        return order
+                    claimed_here = True
+
                 try:
                     activate_subscription(
                         order["user_id"],
@@ -1524,37 +1668,69 @@ def sync_easykash_order_status(order: Dict[str, Any]) -> Dict[str, Any]:
                         payment_order_id=order_id,
                         duration_days=order.get("duration_days"),
                     )
+                    merged_note = _merge_customer_note(
+                        order.get("customer_note"),
+                        f"EasyKash reference: {easykash_ref[:100]} | {method}".strip(" |"),
+                    )
                     update_data = {
                         "status": "approved",
                         "payment_review_status": "reviewed",
                         "payment_reviewed_at": now,
-                        "customer_note": f"EasyKash reference: {easykash_ref[:100]} | {method}",
+                        "customer_note": merged_note,
                         "updated_at": now,
                     }
-                    supabase.table("local_payment_orders").update(update_data).eq("id", order_id).execute()
+                    supabase.table("local_payment_orders").update(update_data).eq("id", order_id).eq("status", "submitted").execute()
                     order.update(update_data)
                     _credit_affiliate_commission(order, float(order.get("amount_egp") or 0), now)
                 except Exception as act_err:
+                    if claimed_here:
+                        supabase.table("local_payment_orders").update({"status": "pending", "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", order_id).eq("status", "submitted").execute()
                     print(f"[EASYKASH] sync activation error for {order_id}: {act_err}")
             elif ek_status in ("FAILED", "FAIL", "REJECTED"):
-                note = f"EasyKash: {ek_status} ({method}) | ref: {easykash_ref}".strip()
-                supabase.table("local_payment_orders").update({
+                if current_status == "submitted" and not _is_submitted_lease_expired(order.get("updated_at")):
+                    return order
+                note = _merge_customer_note(
+                    order.get("customer_note"),
+                    f"EasyKash: {ek_status} ({method}) | ref: {easykash_ref}".strip(),
+                )
+                upd_q = supabase.table("local_payment_orders").update({
                     "status": "failed",
                     "payment_review_status": "rejected",
                     "customer_note": note,
                     "updated_at": now,
-                }).eq("id", order_id).execute()
-                order["status"] = "failed"
-                order["customer_note"] = note
+                }).eq("id", order_id)
+                if current_status == "submitted":
+                    upd_q = upd_q.eq("status", "submitted")
+                    if order.get("updated_at") is not None:
+                        upd_q = upd_q.eq("updated_at", order.get("updated_at"))
+                else:
+                    upd_q = upd_q.eq("status", "pending")
+                upd = upd_q.execute()
+                if upd is not None and getattr(upd, "data", None):
+                    order["status"] = "failed"
+                    order["customer_note"] = note
             elif ek_status in ("EXPIRED", "CANCELLED", "CANCELED"):
-                note = f"EasyKash: {ek_status} ({method}) | ref: {easykash_ref}".strip()
-                supabase.table("local_payment_orders").update({
+                if current_status == "submitted" and not _is_submitted_lease_expired(order.get("updated_at")):
+                    return order
+                note = _merge_customer_note(
+                    order.get("customer_note"),
+                    f"EasyKash: {ek_status} ({method}) | ref: {easykash_ref}".strip(),
+                )
+                upd_q = supabase.table("local_payment_orders").update({
                     "status": "expired",
                     "customer_note": note,
                     "updated_at": now,
-                }).eq("id", order_id).execute()
-                order["status"] = "expired"
-                order["customer_note"] = note
+                }).eq("id", order_id)
+                if current_status == "submitted":
+                    upd_q = upd_q.eq("status", "submitted")
+                    if order.get("updated_at") is not None:
+                        upd_q = upd_q.eq("updated_at", order.get("updated_at"))
+                else:
+                    upd_q = upd_q.eq("status", "pending")
+                upd = upd_q.execute()
+                if upd is not None and getattr(upd, "data", None):
+                    order["status"] = "expired"
+                    order["customer_note"] = note
     except Exception as exc:
         print(f"[EASYKASH] sync inquiry failed for {order_id}: {exc}")
 
@@ -1567,9 +1743,9 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
     _init_supabase()
 
-    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status").eq("id", order_id).eq("user_id", user_id).eq("provider", "easykash").maybe_single().execute()
+    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,duration_days,status,provider,updated_at,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status").eq("id", order_id).eq("user_id", user_id).eq("provider", "easykash").limit(1).execute()
 
-    order = result.data if result else None
+    order = _first_row(result)
 
     if not order:
 
@@ -1590,9 +1766,10 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
         if is_b2b_order:
 
-            lic = supabase.table("b2b_group_licenses").select("expires_at").eq("owner_user_id", user_id).eq("status", "active").order("expires_at", desc=True).limit(1).maybe_single().execute()
+            lic = supabase.table("b2b_group_licenses").select("expires_at").eq("owner_user_id", user_id).eq("status", "active").order("expires_at", desc=True).limit(1).execute()
 
-            end = (lic.data or {}).get("expires_at") if lic and lic.data else None
+            lic_row = _first_row(lic)
+            end = lic_row.get("expires_at") if lic_row else None
 
             b2b_dashboard_url = "/b2b/dashboard"
 
@@ -1606,15 +1783,20 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
                 else ("رادار تليجرام VIP" if order_plan == "vip_only" else "Pro")
             )
 
-            sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", user_id).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).maybe_single().execute()
+            sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", user_id).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).execute()
 
-            end = (sub.data or {}).get("current_period_end") if sub and sub.data else None
+            sub_row = _first_row(sub)
+            end = sub_row.get("current_period_end") if sub_row else None
 
             if end:
 
                 if include_vip:
-                    invite = ensure_pro_invite(user_id, str(end))
-                    invite_link = str(invite.get("invite_link") or "")
+                    try:
+                        invite = ensure_pro_invite(user_id, str(end))
+                        invite_link = str((invite or {}).get("invite_link") or "")
+                    except Exception as inv_err:
+                        print(f"[EASYKASH] Status VIP invite fallback for order {order_id}: {type(inv_err).__name__}")
+                        invite_link = str(order.get("telegram_invite_link") or "")
 
                 note = str(order.get("customer_note") or "")
 
@@ -1634,11 +1816,15 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
                         if sent:
 
+                            merged_welcome_note = _merge_customer_note(note, "tg_welcomed")
+
                             supabase.table("local_payment_orders").update({
 
-                                "customer_note": f"{note} | tg_welcomed".strip(" |")
+                                "customer_note": merged_welcome_note
 
                             }).eq("id", order_id).execute()
+
+                            order["customer_note"] = merged_welcome_note
 
                     except Exception as tg_status_err:
 

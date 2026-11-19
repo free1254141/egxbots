@@ -103,7 +103,7 @@ export default function TrapDetector() {
         }),
     ];
 
-    if (isSaudi) {
+    if (market !== "egx") {
       setPerf(null);
     } else {
       requests.push(
@@ -138,7 +138,26 @@ export default function TrapDetector() {
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-emerald-500 shrink-0" />
           <h2 className="text-sm font-black uppercase tracking-wide">
-            🪤 {ar ? `كاشف المصائد والانعكاسات — ${isSaudi ? "تاسي" : "EGX"} (إغلاق الجلسة)` : `Trap Detector — ${isSaudi ? "TASI" : "EGX"} (Daily Close)`}
+            🪤{" "}
+            {ar
+              ? `كاشف المصائد والانعكاسات — ${
+                  market === "uae"
+                    ? "الإمارات (DFM & ADX)"
+                    : market === "qatar"
+                    ? "بورصة قطر (QSE)"
+                    : isSaudi
+                    ? "تاسي"
+                    : "EGX"
+                } (إغلاق الجلسة)`
+              : `Trap Detector — ${
+                  market === "uae"
+                    ? "UAE (DFM & ADX)"
+                    : market === "qatar"
+                    ? "Qatar (QSE)"
+                    : isSaudi
+                    ? "TASI"
+                    : "EGX"
+                } (Daily Close)`}
           </h2>
           {snapshot?.asOf && (
             <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">

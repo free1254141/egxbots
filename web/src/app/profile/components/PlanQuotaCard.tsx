@@ -31,6 +31,8 @@ interface QuotaData {
     id: string;
     label: string;
     is_pro: boolean;
+    has_chat_pro?: boolean;
+    has_vip_access?: boolean;
     is_lifetime?: boolean;
     status: string;
     current_period_end: string | null;
@@ -114,8 +116,12 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
         onQuotaLoaded?.(json);
         if (!fromBroadcast && json.plan?.is_pro === true) {
           try {
-            if (localStorage.getItem("egx_pro_active") !== "true") {
-              broadcastEntitlements(true);
+            const hasChatPro = json.plan?.has_chat_pro ?? json.plan?.id !== "vip_only";
+            if (
+              localStorage.getItem("egx_pro_active") !== "true" ||
+              localStorage.getItem("egx_chat_pro_active") !== String(hasChatPro)
+            ) {
+              broadcastEntitlements(true, hasChatPro);
             }
           } catch {}
         }

@@ -160,12 +160,16 @@ def clear_perf_caches() -> None:
 
 
 def normalize_market_hint(raw: Optional[str]) -> Optional[str]:
-    """Normalize explicit market/country/exchange string to 'tasi' or 'egx'."""
+    """Normalize explicit market/country/exchange string to 'egx', 'tasi', 'uae', or 'qatar'."""
     val = (raw or "").strip().lower()
     if not val:
         return None
     if val in ("tasi", "tadawul", "sa", "sar", "saudi", "saudi arabia", "sr", "ksa"):
         return "tasi"
+    if val in ("uae", "ae", "aed", "dfm", "adx", "dubai", "abudhabi", "abu dhabi", "emirates", "الإمارات", "دبي", "أبوظبي"):
+        return "uae"
+    if val in ("qatar", "qa", "qar", "qse", "doha", "قطر", "بورصة قطر"):
+        return "qatar"
     if val in ("egx", "eg", "egp", "egypt", "ca", "cairo"):
         return "egx"
     return None
@@ -200,7 +204,24 @@ def resolve_request_market(request: Request, explicit_hint: Optional[str] = None
 
 
 def get_market_exchange(market: str) -> str:
-    return "TADAWUL" if market == "tasi" else "EGX"
+    if market == "tasi":
+        return "TADAWUL"
+    if market == "uae":
+        return "DFM"
+    if market == "qatar":
+        return "QSE"
+    return "EGX"
+
+
+def get_market_exchanges(market: str) -> list[str]:
+    """Return all Supabase exchange codes belonging to a market."""
+    if market == "tasi":
+        return ["TADAWUL"]
+    if market == "uae":
+        return ["DFM", "ADX"]
+    if market == "qatar":
+        return ["QSE"]
+    return ["EGX"]
 
 
 def get_primary_supabase():
@@ -211,8 +232,8 @@ def get_primary_supabase():
 
 
 def get_market_supabase(market: str):
-    """Return primary (egx) or Saudi (tasi) Supabase client."""
-    if market != "tasi":
+    """Return primary (egx) or GCC/Saudi (tasi/uae/qatar) Supabase client."""
+    if market not in ("tasi", "uae", "qatar"):
         return get_primary_supabase()
 
     global _SAUDI_CLIENT

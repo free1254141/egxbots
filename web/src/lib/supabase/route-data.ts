@@ -52,7 +52,7 @@ export function getPublicMarketClient(): any {
   });
 }
 
-export type MarketMode = "egx" | "tasi";
+export type MarketMode = "egx" | "tasi" | "uae" | "qatar";
 
 const SAUDI_MARKET_TOKENS = new Set([
   "tasi",
@@ -66,6 +66,31 @@ const SAUDI_MARKET_TOKENS = new Set([
   "تاسي",
   "السعودية",
   "تداول",
+]);
+
+const UAE_MARKET_TOKENS = new Set([
+  "uae",
+  "ae",
+  "aed",
+  "dfm",
+  "adx",
+  "dubai",
+  "abudhabi",
+  "abu dhabi",
+  "emirates",
+  "الإمارات",
+  "دبي",
+  "أبوظبي",
+]);
+
+const QATAR_MARKET_TOKENS = new Set([
+  "qatar",
+  "qa",
+  "qar",
+  "qse",
+  "doha",
+  "قطر",
+  "بورصة قطر",
 ]);
 
 const EGX_MARKET_TOKENS = new Set([
@@ -84,6 +109,8 @@ function parseMarketToken(raw?: string | null): MarketMode | null {
   const clean = raw.trim().toLowerCase();
   if (!clean) return null;
   if (SAUDI_MARKET_TOKENS.has(clean)) return "tasi";
+  if (UAE_MARKET_TOKENS.has(clean)) return "uae";
+  if (QATAR_MARKET_TOKENS.has(clean)) return "qatar";
   if (EGX_MARKET_TOKENS.has(clean)) return "egx";
   return null;
 }
@@ -146,8 +173,18 @@ export function resolveRequestMarket(
   return "egx";
 }
 
-export function getMarketExchange(market: MarketMode): "EGX" | "TADAWUL" {
-  return market === "tasi" ? "TADAWUL" : "EGX";
+export function getMarketExchange(market: MarketMode): "EGX" | "TADAWUL" | "DFM" | "QSE" {
+  if (market === "tasi") return "TADAWUL";
+  if (market === "uae") return "DFM";
+  if (market === "qatar") return "QSE";
+  return "EGX";
+}
+
+export function getMarketExchanges(market: MarketMode): string[] {
+  if (market === "tasi") return ["TADAWUL"];
+  if (market === "uae") return ["DFM", "ADX"];
+  if (market === "qatar") return ["QSE"];
+  return ["EGX"];
 }
 
 function createSaudiSupabaseClient(
@@ -173,7 +210,7 @@ function createSaudiSupabaseClient(
 
 /** Market-aware public/cached Supabase client (`"egx"` -> Primary, `"tasi"` -> Saudi). */
 export function getMarketSupabaseClient(market: MarketMode = "egx"): any {
-  if (market !== "tasi") {
+  if (market !== "tasi" && market !== "uae" && market !== "qatar") {
     return getSupabaseClient();
   }
 
@@ -196,7 +233,7 @@ export function getMarketSupabaseServiceClient(
   market: MarketMode = "egx",
   options: { cacheMarketData?: boolean } = {},
 ): any {
-  if (market !== "tasi") {
+  if (market !== "tasi" && market !== "uae" && market !== "qatar") {
     return getSupabaseServiceClient(options);
   }
 

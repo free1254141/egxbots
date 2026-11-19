@@ -105,6 +105,8 @@ flowchart LR
   - تحديث `check_founders_checkout_amount()` بشرط `AND COALESCE(new.duration_days, 30) = 30` كي لا تُرفض فواتير الباقات متعددة الشهور.
 - `supabase/migrations/20261119045000_gcc_markets_founders_trigger.sql`:
   - تحديث `check_founders_checkout_amount()` لإعفاء فواتير الإمارات (`Market: uae%`) وقطر (`Market: qatar%`) بجانب السعودية (`Market: tasi%`) من فحص سقف الـ 1 شهر بالجنيه المصري.
+- `supabase/migrations/20261119131500_subscription_upgrade_safety.sql`:
+  - تحصين `activate_easykash_subscription()` ضد مسح/تخفيض الاشتراكات النشطة: منع استبدال `lifetime`، منع تخفيض `pro` النشط، الترقية التلقائية إلى `pro` عند تداخل باقتين فرديتين، وحفظ الأيام المتبقية عند الترقية من `chat_only`/`vip_only` إلى `pro`.
 
 ### ب) خادم بايثون الخلفي (`api/` — يعمل على Hugging Face FastAPI)
 - `api/perf_utils.py`: تعريف `FULL_PRO_PLAN_IDS`, `CHAT_PRO_PLAN_IDS`, `VIP_TELEGRAM_PLAN_IDS`, `ALL_PAID_PLAN_IDS` ودوال `has_active_chat_pro`, `has_active_vip_telegram`, `_get_user_plan_flags`, `resolve_verified_viewer`, `resolve_subscription_quota_window`.

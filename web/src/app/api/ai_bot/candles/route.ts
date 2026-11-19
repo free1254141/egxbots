@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   resolveRequestMarket,
   getMarketExchange,
+  getMarketExchanges,
   getMarketSupabaseClient,
 } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
@@ -44,14 +45,16 @@ export async function GET(req: NextRequest) {
       /^(\^)?TASI(\.SR)?$/i.test(rawSymbol);
     const isEgxSuffix = /\.CA$/i.test(rawSymbol);
     const isSaudiExchange = ["TADAWUL", "TASI", "SR"].includes(rawExchangeUpper);
+    const isUaeExchange = ["DFM", "ADX", "UAE"].includes(rawExchangeUpper);
+    const isQatarExchange = ["QSE", "QATAR"].includes(rawExchangeUpper);
     const isSupportedExchange =
-      rawExchangeUpper === "" || rawExchangeUpper === "EGX" || isSaudiExchange;
+      rawExchangeUpper === "" || rawExchangeUpper === "EGX" || isSaudiExchange || isUaeExchange || isQatarExchange;
 
-    // Preserve 410 for non-Saudi, non-EGX explicit exchanges (e.g. AAPL with exchange=US),
+    // Preserve 410 for non-supported explicit exchanges (e.g. AAPL with exchange=US),
     // while allowing legacy callers that pass exchange=US on 4-digit Saudi tickers.
     if (!isSaudiSymbol && !isEgxSuffix && !isSupportedExchange) {
       return NextResponse.json(
-        { candles: [], markers: [], error: "Only EGX and Saudi Tadawul (TASI) market data is available." },
+        { candles: [], markers: [], error: "Only EGX and GCC (TASI, DFM, ADX, QSE) market data is available." },
         { status: 410 }
       );
     }
@@ -59,19 +62,25 @@ export async function GET(req: NextRequest) {
     const explicitMarketHint =
       url.searchParams.get("market") ||
       url.searchParams.get("country") ||
-      (isSaudiExchange ? "TADAWUL" : rawExchangeUpper === "EGX" ? "EGX" : null);
+      (isSaudiExchange ? "TADAWUL" : isUaeExchange ? "DFM" : isQatarExchange ? "QSE" : rawExchangeUpper === "EGX" ? "EGX" : null);
 
     const market =
       isSaudiSymbol || isSaudiExchange
         ? "tasi"
-        : isEgxSuffix || rawExchangeUpper === "EGX"
-          ? "egx"
-          : resolveRequestMarket(req, explicitMarketHint);
-    const exchange = getMarketExchange(market);
-    const currency = market === "tasi" ? "SAR" : "EGP";
+        : isUaeExchange
+          ? "uae"
+          : isQatarExchange
+            ? "qatar"
+            : isEgxSuffix || rawExchangeUpper === "EGX"
+              ? "egx"
+              : resolveRequestMarket(req, explicitMarketHint);
+    const exchange = rawExchangeUpper && rawExchangeUpper !== "UAE" ? rawExchangeUpper : getMarketExchange(market);
+    const exchanges = getMarketExchanges(market);
+    const currency =
+      market === "uae" ? "AED" : market === "qatar" ? "QAR" : market === "tasi" ? "SAR" : "EGP";
     const symbol =
-      market === "tasi"
-        ? rawSymbol.replace(/\.(SR|SA|TADAWUL)$/i, "").toUpperCase()
+      market !== "egx"
+        ? rawSymbol.replace(/\.(SR|SA|TADAWUL|AE|DU|AD|QA)$/i, "").toUpperCase()
         : rawSymbol;
 
     const explicitMarketInUrl =
@@ -79,6 +88,8 @@ export async function GET(req: NextRequest) {
       url.searchParams.has("country") ||
       isSaudiSymbol ||
       isSaudiExchange ||
+      isUaeExchange ||
+      isQatarExchange ||
       isEgxSuffix ||
       rawExchangeUpper === "EGX";
     const responseHeaders =
@@ -121,7 +132,7 @@ export async function GET(req: NextRequest) {
       .from("stock_prices")
       .select("date,open,high,low,close,volume")
       .eq("symbol", symbol)
-      .eq("exchange", exchange)
+      .in("exchange", exchanges)
       .order("date", { ascending: false })
       .limit(limit);
 

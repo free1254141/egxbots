@@ -26,14 +26,17 @@ import {
 import { toast } from "sonner";
 
 function normalizeAffiliatePhone(raw: string): string {
-  const clean = raw.trim().replace(/[\s\-()]/g, "");
+  let clean = raw.trim().replace(/[\s\-()]/g, "");
+  if (clean.startsWith("00")) {
+    clean = `+${clean.slice(2)}`;
+  }
   if (/^\+?20(1[0125]\d{8})$/.test(clean)) {
     return `0${clean.replace(/^\+?20/, "")}`;
   }
   if (/^05\d{8}$/.test(clean)) {
     return `+966${clean.slice(1)}`;
   }
-  if (/^9665\d{8}$/.test(clean)) {
+  if (/^(966|971|974|965|973|968)\d{7,9}$/.test(clean)) {
     return `+${clean}`;
   }
   return clean;
@@ -44,13 +47,45 @@ function isValidAffiliatePhone(normalized: string): boolean {
   return /^01[0125]\d{8}$/.test(normalized) || /^(\+?[1-9]\d{7,14})$/.test(normalized);
 }
 
+function formatReferralPlanLabel(planId: string, isAr: boolean): string {
+  const clean = (planId || "").trim().toLowerCase();
+  const labels: Record<string, [string, string]> = {
+    chat_only: ["الشات الذكي (AI Chat)", "AI Chat Pro"],
+    vip_only: ["تليجرام VIP فقط", "VIP Telegram Only"],
+    pro: ["الباقة الشاملة Pro", "Pro Full Bundle"],
+    pro_renewal: ["تجديد Pro الشاملة", "Pro Renewal"],
+    pro_6m: ["Pro الشاملة (6 شهور)", "Pro Bundle (6M)"],
+    pro_1y: ["Pro الشاملة (سنوي)", "Pro Bundle (1Y)"],
+    lifetime: ["مدى الحياة VIP", "Lifetime VIP"],
+    b2b_starter: ["قنوات B2B Starter", "B2B Starter"],
+    b2b_pro: ["قنوات B2B Pro VIP", "B2B Pro VIP"],
+    b2b_enterprise: ["قنوات B2B Enterprise", "B2B Enterprise"],
+  };
+  const pair = labels[clean];
+  return pair ? (isAr ? pair[0] : pair[1]) : planId;
+}
+
 export default function AffiliateClient() {
   const { language } = useLanguage();
   const isAr = language === "ar";
-  const { isSaudi } = useMarket();
-  const brandName = isSaudi ? "TASI BOTS" : "EGX BOTS";
-  const marketAr = isSaudi ? "السوق السعودي (تاسي)" : "البورصة المصرية";
-  const marketEn = isSaudi ? "Saudi Stock Market (TASI)" : "Egyptian Exchange (EGX)";
+  const { market, isSaudi, isUae, isQatar, isGccChatOnly } = useMarket();
+  const isGulfMarket = isSaudi || isGccChatOnly;
+  const brandName = isSaudi ? "TASI BOTS" : isUae ? "UAE BOTS" : isQatar ? "QSE BOTS" : "EGX BOTS";
+  const marketAr = isSaudi
+    ? "السوق السعودي (تاسي)"
+    : isUae
+    ? "سوق الإمارات (دبي وأبوظبي)"
+    : isQatar
+    ? "بورصة قطر (QSE)"
+    : "البورصة المصرية (EGX)";
+  const marketEn = isSaudi
+    ? "Saudi Stock Market (TASI)"
+    : isUae
+    ? "UAE Markets (DFM & ADX)"
+    : isQatar
+    ? "Qatar Stock Exchange (QSE)"
+    : "Egyptian Exchange (EGX)";
+  const defaultPayoutMethod = isSaudi ? "stc_pay" : isGccChatOnly ? "bank_transfer" : "vodafone_cash";
   const { user, loading: authLoading } = useAuth();
   const {
     affiliate,
@@ -74,10 +109,10 @@ export default function AffiliateClient() {
       setCodeInput((prev) => (prev ? prev : affiliate.code || ""));
       setPhoneInput((prev) => (prev ? prev : affiliate.phone || ""));
       setPaymentMethodInput((prev) =>
-        affiliate.payment_method ? affiliate.payment_method : prev || (isSaudi ? "stc_pay" : "vodafone_cash")
+        affiliate.payment_method ? affiliate.payment_method : prev || defaultPayoutMethod
       );
     }
-  }, [affiliate, isSaudi]);
+  }, [affiliate, defaultPayoutMethod]);
 
   const loading = authLoading || (affiliateLoading && !affiliate);
 
@@ -90,9 +125,10 @@ export default function AffiliateClient() {
     affiliate?.phone && isValidAffiliatePhone(normalizeAffiliatePhone(affiliate.phone))
   );
 
+  const marketQuerySuffix = market !== "egx" ? `&market=${encodeURIComponent(market)}` : "";
   const referralUrl = affiliate
-    ? `https://egxbots.com/pricing?ref=${encodeURIComponent(affiliate.code)}${isSaudi ? "&market=tasi" : ""}`
-    : `https://egxbots.com/pricing${isSaudi ? "?market=tasi" : ""}`;
+    ? `https://egxbots.com/pricing?ref=${encodeURIComponent(affiliate.code)}${marketQuerySuffix}`
+    : `https://egxbots.com/pricing${market !== "egx" ? `?market=${encodeURIComponent(market)}` : ""}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(referralUrl);
@@ -143,7 +179,7 @@ export default function AffiliateClient() {
       const res = await saveAffiliateSettings({
         code: codeInput.trim().toUpperCase(),
         phone: normalizedPhoneInput,
-        payment_method: paymentMethodInput || (isSaudi ? "stc_pay" : "vodafone_cash"),
+        payment_method: paymentMethodInput || defaultPayoutMethod,
       });
       if (!res.success) {
         throw new Error(res.error || (isAr ? "تعذر حفظ البيانات" : "Could not save settings"));
@@ -432,7 +468,7 @@ export default function AffiliateClient() {
                     type="tel"
                     value={phoneInput}
                     onChange={(e) => setPhoneInput(e.target.value)}
-                    placeholder={isSaudi ? "+9665XXXXXXXX" : "01012345678 / +9665XXXXXXXX"}
+                    placeholder={isSaudi ? "+9665XXXXXXXX" : isUae ? "+9715XXXXXXXX" : isQatar ? "+974XXXXXXXX" : "01012345678 / +9665XXXXXXXX"}
                     className="w-full border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-3.5 py-2.5 font-mono text-sm font-black text-zinc-950 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
                     dir="ltr"
                   />
@@ -490,7 +526,7 @@ export default function AffiliateClient() {
                           <td className="p-2.5 font-mono text-zinc-500">
                             {new Date(r.created_at).toLocaleDateString(isAr ? "ar-EG" : "en-US")}
                           </td>
-                          <td className="p-2.5 font-black uppercase">{r.plan_id}</td>
+                          <td className="p-2.5 font-black">{formatReferralPlanLabel(r.plan_id, isAr)}</td>
                           <td className="p-2.5">{Number(r.amount_egp || 0).toLocaleString()} ج.م</td>
                           <td className="p-2.5 font-black text-emerald-600 dark:text-emerald-400">
                             +{Number(r.commission_amount_egp || 0).toLocaleString()} ج.م
@@ -545,10 +581,10 @@ export default function AffiliateClient() {
               <div className="text-sky-400 font-black text-sm">{isAr ? "3. استلم 25% كاش أو إنستاباي / STC" : "3. Receive 25% Cash Payout"}</div>
               <p className="text-zinc-400 leading-relaxed">
                 {isAr
-                  ? isSaudi
-                    ? "تُضاف عمولتك 25% على كل اشتراك مكتمل وتُحول لك عبر STC Pay أو تحويل بنكي أو فودافون كاش."
-                    : "تُضاف عمولتك (تصل إلى 225 ج.م على باقة 6 شهور و 405 ج.م على الباقة السنوية و 506 ج.م على مدى الحياة) وتُحول لك على محفظتك أو إنستاباي."
-                  : "Earn 25% commission per confirmed subscription, transferred via Vodafone Cash, InstaPay, STC Pay, or bank transfer."}
+                  ? isGulfMarket
+                    ? "تُضاف عمولتك 25% على كل اشتراك مكتمل (أفراد أو باقات قنوات B2B) وتُحول لك عبر STC Pay أو تحويل بنكي أو فودافون كاش."
+                    : "تُضاف عمولتك 25% على كل اشتراك مكتمل (169 ج.م على باقة 6 شهور، 304 ج.م على السنوية، 506 ج.م على مدى الحياة، وحتى 563 ج.م على باقات B2B) وتُحول لك على محفظتك أو إنستاباي."
+                  : "Earn 25% commission per confirmed subscription (individual plans or B2B channel licenses), transferred via Vodafone Cash, InstaPay, STC Pay, or bank transfer."}
               </p>
             </div>
           </div>
@@ -587,8 +623,8 @@ export default function AffiliateClient() {
               </h3>
               <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
                 {isAr
-                  ? "ضع علامتك التجارية أو خدماتك أمام آلاف المتداولين والمستثمرين النشطين يومياً في البورصة المصرية وأسواق المال والعقارات."
-                  : "Promote your brand directly to thousands of high-intent active Egyptian investors, traders, and property buyers."}
+                  ? `ضع علامتك التجارية أو خدماتك أمام آلاف المتداولين والمستثمرين النشطين يومياً في ${marketAr} والأسواق المالية العربية.`
+                  : `Promote your brand directly to thousands of high-intent active investors and traders across ${marketEn} and Arab markets.`}
               </p>
             </div>
 

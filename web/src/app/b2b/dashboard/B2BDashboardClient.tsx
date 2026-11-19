@@ -80,8 +80,8 @@ const TIER_DETAILS = {
 export default function B2BDashboardClient() {
   const { language } = useLanguage();
   const isAr = language === "ar";
-  const { isSaudi } = useMarket();
-  const brandName = isSaudi ? "TASI BOTS" : "EGX BOTS";
+  const { market, isSaudi, isUae, isQatar, currencyLabel, currencyCode } = useMarket();
+  const brandName = isSaudi ? "TASI BOTS" : isUae ? "UAE BOTS" : isQatar ? "QSE BOTS" : "EGX BOTS";
   const { user, loading: authLoading } = useAuth();
 
   const [license, setLicense] = useState<License | null>(null);
@@ -406,8 +406,8 @@ export default function B2BDashboardClient() {
                 </span>
                 <h3 className="text-lg font-black text-zinc-900 dark:text-white">
                   {isAr
-                    ? `اختر باقة لقناتك من ${toDisplayAmount(1000, isSaudi).toLocaleString()} ${isSaudi ? "ر.س" : "ج.م"}/شهر`
-                    : `Choose a Plan Starting from ${toDisplayAmount(1000, isSaudi).toLocaleString()} ${isSaudi ? "SAR/mo" : "EGP/mo"}`}
+                    ? `اختر باقة لقناتك من ${toDisplayAmount(1000, market).toLocaleString()} ${currencyLabel}/شهر`
+                    : `Choose a Plan Starting from ${toDisplayAmount(1000, market).toLocaleString()} ${currencyCode}/mo`}
                 </h3>
                 <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
                   {isAr

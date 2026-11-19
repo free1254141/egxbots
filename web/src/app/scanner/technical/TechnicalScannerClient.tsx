@@ -23,7 +23,7 @@ const DEFAULT_PILLS = ["price", "rsi", "marketcap", "sector", "divergence", "sha
 
 export default function TechnicalScannerPage() {
     const { t, language } = useLanguage();
-    const { currencyCode, currencyLabel, isSaudi } = useMarket();
+    const { market, currencyCode, currencyLabel, isSaudi, isGccChatOnly } = useMarket();
     const { saveSymbol, removeSymbolBySymbol, isSaved } = useWatchlist();
     
     const {
@@ -72,6 +72,20 @@ export default function TechnicalScannerPage() {
         loading,
         error,
     } = useTechnicalScanner();
+
+    const resolveChartExchange = (stockExchange?: string | null) =>
+        stockExchange ||
+        (market === "uae"
+            ? "DFM"
+            : market === "qatar"
+                ? "QSE"
+                : isSaudi || country?.toLowerCase() === "saudi arabia"
+                    ? "TADAWUL"
+                    : country?.toLowerCase() === "egypt"
+                        ? "EGX"
+                        : country?.toLowerCase() === "crypto"
+                            ? "CRYPTO"
+                            : "US");
 
     const [mounted, setMounted] = useState(false);
 
@@ -208,7 +222,7 @@ export default function TechnicalScannerPage() {
             res = res.filter(r => r.symbol.toLowerCase().includes(low) || r.name.toLowerCase().includes(low));
         }
         if (shariaOnly) {
-            res = res.filter(r => isShariaCompliant(r.symbol));
+            res = res.filter(r => isShariaCompliant(r.symbol, market));
         }
 
         if (sortBy) {
@@ -236,7 +250,7 @@ export default function TechnicalScannerPage() {
         }
 
         return res;
-    }, [searchTerm, results, sortBy, sortOrder, shariaOnly]);
+    }, [searchTerm, results, sortBy, sortOrder, shariaOnly, market]);
 
     // Reset page on search or new results
     useEffect(() => {
@@ -562,7 +576,9 @@ export default function TechnicalScannerPage() {
                     },
                     renderPopover: () => (
                         <div className="space-y-3">
-                            <h4 className="text-xs font-bold text-[#787b86] uppercase">{isSaudi ? "TASI Sectors" : "EGX Sectors"}</h4>
+                            <h4 className="text-xs font-bold text-[#787b86] uppercase">
+                                {market === "uae" ? "UAE Sectors" : market === "qatar" ? "Qatar Sectors" : isSaudi ? "TASI Sectors" : "EGX Sectors"}
+                            </h4>
                             <select
                                 value={sector}
                                 onChange={(e) => setTechScanner({ sector: e.target.value })}
@@ -1178,12 +1194,20 @@ export default function TechnicalScannerPage() {
                             </h4>
                             <p className="text-[10px] text-[#787b86] leading-relaxed">
                                 {language === "ar"
-                                    ? isSaudi
-                                        ? "عرض أسهم السوق السعودي (تاسي) المتوافقة شرعياً فقط (يستثني البنوك التقليدية والتأمين والكحول والتبغ ولحم الخنزير)."
-                                        : "عرض أسهم البورصة المصرية المتوافقة شرعياً فقط (يستثني البنوك والتأمين والكحول والتبغ ولحم الخنزير)."
-                                    : isSaudi
-                                        ? "Show only Saudi Tadawul (TASI) stocks screened for Sharia compliance (excludes conventional banks, insurance, alcohol, tobacco & pork)."
-                                        : "Show only EGX stocks screened for Sharia compliance (excludes banks, insurance, alcohol, tobacco & pork)."}
+                                    ? market === "uae"
+                                        ? "عرض أسهم سوقي دبي وأبوظبي (DFM & ADX) المتوافقة شرعياً فقط (يستثني البنوك التقليدية والتأمين والكحول والتبغ)."
+                                        : market === "qatar"
+                                            ? "عرض أسهم بورصة قطر (QSE) المتوافقة شرعياً فقط (يستثني البنوك التقليدية والتأمين والكحول والتبغ)."
+                                            : isSaudi
+                                                ? "عرض أسهم السوق السعودي (تاسي) المتوافقة شرعياً فقط (يستثني البنوك التقليدية والتأمين والكحول والتبغ ولحم الخنزير)."
+                                                : "عرض أسهم البورصة المصرية المتوافقة شرعياً فقط (يستثني البنوك والتأمين والكحول والتبغ ولحم الخنزير)."
+                                    : market === "uae"
+                                        ? "Show only UAE (DFM & ADX) stocks screened for Sharia compliance (excludes conventional banks, insurance, alcohol & tobacco)."
+                                        : market === "qatar"
+                                            ? "Show only Qatar (QSE) stocks screened for Sharia compliance (excludes conventional banks, insurance, alcohol & tobacco)."
+                                            : isSaudi
+                                                ? "Show only Saudi Tadawul (TASI) stocks screened for Sharia compliance (excludes conventional banks, insurance, alcohol, tobacco & pork)."
+                                                : "Show only EGX stocks screened for Sharia compliance (excludes banks, insurance, alcohol, tobacco & pork)."}
                             </p>
                             <label className="flex items-center gap-2.5 text-xs text-[#d1d4dc] cursor-pointer select-none">
                                 <input
@@ -1371,7 +1395,7 @@ export default function TechnicalScannerPage() {
             { id: "roc", label: "Rate of Change (ROC)", desc: "12-period speed momentum indicator", cat: "technical" },
             { id: "marketmaker", label: "Market Maker Flow", desc: "Avoid distribution or require accumulation with CMF 20", cat: "moneyflow" },
             { id: "ai", label: "Random Forest AI Filter", desc: "Machine Learning trade prediction filter", cat: "ai" },
-            { id: "sharia", label: "Sharia-Compliant Stocks", desc: isSaudi ? "Show only Saudi Tadawul stocks screened for Islamic Sharia compliance" : "Show only EGX stocks screened for Islamic Sharia compliance", cat: "security" },
+            { id: "sharia", label: "Sharia-Compliant Stocks", desc: market === "uae" ? "Show only UAE (DFM & ADX) stocks screened for Islamic Sharia compliance" : market === "qatar" ? "Show only Qatar (QSE) stocks screened for Islamic Sharia compliance" : isSaudi ? "Show only Saudi Tadawul stocks screened for Islamic Sharia compliance" : "Show only EGX stocks screened for Islamic Sharia compliance", cat: "security" },
             { id: "divergence", label: "Technical Divergence", desc: "Scan for RSI, MACD, and Stochastic divergences", cat: "technical" }
         ];
 
@@ -1465,7 +1489,7 @@ export default function TechnicalScannerPage() {
                         {/* Country indicator (Pinned) */}
                         <div className="flex items-center gap-1.5 h-8 px-3 rounded bg-[#1c2030] border border-[#2a2e39] text-[11px] font-bold text-white shrink-0 uppercase tracking-wider">
                             <Globe className="w-3.5 h-3.5 text-[#2962ff]" />
-                            <span>{isSaudi ? "Saudi Arabia (TASI)" : "Egypt (EGX)"}</span>
+                            <span>{market === "uae" ? "UAE (DFM & ADX)" : market === "qatar" ? "Qatar (QSE)" : isSaudi ? "Saudi Arabia (TASI)" : "Egypt (EGX)"}</span>
                         </div>
 
                     {/* Dynamic Filter Pills */}
@@ -1655,7 +1679,7 @@ export default function TechnicalScannerPage() {
                                                 {/* Pop Out Button */}
                                                 <button
                                                     onClick={() => {
-                                                        const exchange = (isSaudi || country?.toLowerCase() === "saudi arabia") ? "TADAWUL" : country?.toLowerCase() === "egypt" ? "EGX" : (country?.toLowerCase() === "crypto" ? "CRYPTO" : "US");
+                                                        const exchange = resolveChartExchange((currentStock as (TechResult & { exchange?: string }) | null)?.exchange);
                                                         const popoutUrl = `/chart/popout?symbol=${encodeURIComponent(activeSymbol)}&exchange=${encodeURIComponent(exchange)}`;
                                                         window.open(popoutUrl, "_blank", "width=1200,height=750,menubar=no,status=no,toolbar=no");
                                                     }}
@@ -1691,7 +1715,7 @@ export default function TechnicalScannerPage() {
                                             <TradingViewChart 
                                                 symbol={activeSymbol} 
                                                 theme="dark" 
-                                                exchange={(isSaudi || country?.toLowerCase() === "saudi arabia") ? "TADAWUL" : country?.toLowerCase() === "egypt" ? "EGX" : (country?.toLowerCase() === "crypto" ? "CRYPTO" : "US")} 
+                                                exchange={resolveChartExchange((currentStock as (TechResult & { exchange?: string }) | null)?.exchange)}
                                             />
                                         </div>
 
@@ -1955,7 +1979,7 @@ export default function TechnicalScannerPage() {
                                                     <div className="flex flex-col min-w-0">
                                                         <div className="flex items-center gap-1">
                                                             <span className="font-bold text-white text-xs group-hover:text-[#2962ff] transition-colors uppercase tracking-tight">{r.symbol}</span>
-                                                            {isShariaCompliant(r.symbol) && (
+                                                            {isShariaCompliant(r.symbol, market) && (
                                                                 <span className="inline-flex items-center px-1 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[8px] font-black uppercase tracking-wider rounded-sm" title={language === "ar" ? "سهم متوافق شرعياً" : "Sharia-compliant stock"}>
                                                                     {language === "ar" ? "حلال" : "Halal"}
                                                                 </span>

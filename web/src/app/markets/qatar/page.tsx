@@ -27,6 +27,12 @@ export const metadata: Metadata = {
     url: "https://egxbots.com/markets/qatar",
     images: [{ url: "https://egxbots.com/opengraph-image.png", width: 1200, height: 630, alt: "بورصة قطر QSE" }],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "دليل أسهم بورصة قطر (QSE) | EGX BOTS",
+    description: "قائمة أسهم بورصة قطر بالريال القطري مع الأسعار اليومية والمؤشرات الفنية ومستويات الدعم والمقاومة.",
+    images: ["https://egxbots.com/opengraph-image.png"],
+  },
 };
 
 export default async function QatarMarketPage() {

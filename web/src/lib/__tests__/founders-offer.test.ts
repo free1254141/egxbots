@@ -34,7 +34,7 @@ it("applies 50% founders offer to pro, pro_6m, and pro_1y while keeping lifetime
     discount: { active: true, ends_at: "2026-11-14T01:00:00Z", original_amount_egp: 1000 },
   });
   expect(result.plans[2]).toMatchObject({
-    amount_egp: 1000,
+    amount_egp: 900,
     discount: { active: true, ends_at: "2026-11-14T01:00:00Z", original_amount_egp: 1850 },
   });
   expect(result.plans[3]).toEqual(config.plans[3]);
@@ -60,7 +60,7 @@ it("reverts to regular 200 / 1000 / 1850 EGP when time is expired in the past", 
   expect(result.founders.is_open).toBe(false);
 });
 
-it("preserves 100 EGP (and 500/1000 on 6m/1y) for grandfathered-100 users even after offer expires", () => {
+it("preserves 100 EGP (and 500/900 on 6m/1y) for grandfathered-100 users even after offer expires", () => {
   const expiredOffer = { ...offer, is_open: false, ends_at: "2026-11-01T00:00:00Z" };
   const grandfatheredConfig = {
     ...config,
@@ -82,24 +82,38 @@ it("preserves 100 EGP (and 500/1000 on 6m/1y) for grandfathered-100 users even a
     discount: { active: true, ends_at: null, original_amount_egp: 1000 },
   });
   expect(result.plans[2]).toMatchObject({
-    amount_egp: 1000,
+    amount_egp: 900,
     founders_lock_rate: 100,
     discount: { active: true, ends_at: null, original_amount_egp: 1850 },
   });
   expect(result.founders.is_grandfathered_100).toBe(true);
 });
 
-it("preserves 50 EGP for grandfathered-50 users even after offer expires", () => {
+it("preserves 50 EGP (and 250/450 on 6m/1y) for grandfathered-50 users even after offer expires", () => {
   const expiredOffer = { ...offer, is_open: false, ends_at: "2026-11-01T00:00:00Z" };
   const grandfatheredConfig = {
     ...config,
-    plans: [{ id: "pro", amount_egp: 200, is_grandfathered_renewal: true }, { id: "pro_6m", amount_egp: 1000 }],
+    plans: [
+      { id: "pro", amount_egp: 200, is_grandfathered_renewal: true },
+      { id: "pro_6m", amount_egp: 1000 },
+      { id: "pro_1y", amount_egp: 1850 },
+    ],
   };
   const result = applyFoundersOffer(grandfatheredConfig, expiredOffer);
   expect(result.plans[0]).toMatchObject({
     amount_egp: 50,
     is_grandfathered_renewal: true,
     discount: { active: true, ends_at: null, original_amount_egp: 200 },
+  });
+  expect(result.plans[1]).toMatchObject({
+    amount_egp: 250,
+    founders_lock_rate: 50,
+    discount: { active: true, ends_at: null, original_amount_egp: 1000 },
+  });
+  expect(result.plans[2]).toMatchObject({
+    amount_egp: 450,
+    founders_lock_rate: 50,
+    discount: { active: true, ends_at: null, original_amount_egp: 1850 },
   });
   expect(result.founders.is_grandfathered).toBe(true);
 });

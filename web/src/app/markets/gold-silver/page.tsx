@@ -26,6 +26,12 @@ export const metadata: Metadata = {
     url: "https://egxbots.com/markets/gold-silver",
     images: [{ url: "https://egxbots.com/opengraph-image.png", width: 1200, height: 630, alt: "تحليل الذهب والفضة XAUUSD XAGUSD" }],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "سعر الذهب والفضة اليوم (XAUUSD & XAGUSD) | EGX BOTS",
+    description: "تحليل فني يومي لأونصة الذهب والفضة العالمية بالدولار مع مؤشر RSI ومستويات الدعم والمقاومة.",
+    images: ["https://egxbots.com/opengraph-image.png"],
+  },
 };
 
 export default async function GoldSilverMarketPage() {

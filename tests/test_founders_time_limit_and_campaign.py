@@ -37,14 +37,14 @@ def test_plan_amount_egp_with_founders_offer_open_vs_expired():
         "pro_price_egp": 150.0,
     }
 
-    # Open offer: returns 100.0 for pro, 500.0 for pro_6m, 1000.0 for pro_1y, 2250.0 for lifetime, and 100.0 for split tiers
+    # Open offer: returns 100.0 for pro, 500.0 for pro_6m, 900.0 for pro_1y, 2250.0 for lifetime, and 100.0 for split tiers
     with patch("api.payment_common.billing_settings", return_value=settings), \
          patch("api.payment_common.founders_offer_is_open", return_value=True), \
          patch("api.payment_common.pro_discount", return_value={"active": False}), \
          patch.dict("os.environ", {"PRO_PRICE_EGP": "150", "PRO_6M_PRICE_EGP": "750", "PRO_1Y_PRICE_EGP": "1350", "CHAT_ONLY_PRICE_EGP": "100", "VIP_ONLY_PRICE_EGP": "100"}, clear=False):
         assert plan_amount_egp("pro", user_id=None) == 100.0
         assert plan_amount_egp("pro_6m", user_id=None) == 500.0
-        assert plan_amount_egp("pro_1y", user_id=None) == 1000.0
+        assert plan_amount_egp("pro_1y", user_id=None) == 900.0
         assert plan_amount_egp("chat_only", user_id=None) == 100.0
         assert plan_amount_egp("vip_only", user_id=None) == 100.0
         assert plan_amount_egp("lifetime", user_id=None) == 2250.0
@@ -69,23 +69,23 @@ def test_plan_amount_egp_grandfathering_precedence():
         "founders_regular_price_egp": 150.0,
     }
 
-    # User grandfathered at 50 EGP gets 50 (monthly) and 500/1000 on 6m/1y Full Bundle even when offer is expired
+    # User grandfathered at 50 EGP gets 50 (monthly) and 250/450 on 6m/1y Full Bundle even when offer is expired
     with patch("api.payment_common.billing_settings", return_value=settings), \
          patch("api.payment_common.is_user_eligible_for_50_egp_renewal", return_value=True), \
          patch("api.payment_common.is_user_eligible_for_100_egp_renewal", return_value=False), \
          patch("api.payment_common.founders_offer_is_open", return_value=False):
         assert plan_amount_egp("pro", user_id="u_50") == 50.0
-        assert plan_amount_egp("pro_6m", user_id="u_50") == 500.0
-        assert plan_amount_egp("pro_1y", user_id="u_50") == 1000.0
+        assert plan_amount_egp("pro_6m", user_id="u_50") == 250.0
+        assert plan_amount_egp("pro_1y", user_id="u_50") == 450.0
 
-    # User grandfathered at 100 EGP (from monthly, 6m, or 1y) gets 100/500/1000 even when offer is expired
+    # User grandfathered at 100 EGP (from monthly, 6m, or 1y) gets 100/500/900 even when offer is expired
     with patch("api.payment_common.billing_settings", return_value=settings), \
          patch("api.payment_common.is_user_eligible_for_50_egp_renewal", return_value=False), \
          patch("api.payment_common.is_user_eligible_for_100_egp_renewal", return_value=True), \
          patch("api.payment_common.founders_offer_is_open", return_value=False):
         assert plan_amount_egp("pro", user_id="u_100") == 100.0
         assert plan_amount_egp("pro_6m", user_id="u_100") == 500.0
-        assert plan_amount_egp("pro_1y", user_id="u_100") == 1000.0
+        assert plan_amount_egp("pro_1y", user_id="u_100") == 900.0
 
 
 def test_final_48h_window_guard():

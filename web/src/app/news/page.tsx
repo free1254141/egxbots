@@ -214,7 +214,15 @@ export default function NewsPage() {
             <BrandedPageHeader
                 eyebrow={isAr ? "أخبار وذكاء السوق" : "AI NEWS & INTELLIGENCE"}
                 title={isAr ? "نبض الأخبار ومشاعر الذكاء الاصطناعي" : "AI News & Sentiment Pulse"}
-                description={isSaudi
+                description={market === "uae"
+                    ? (isAr
+                        ? "تغطية ذكية لأخبار أسهم الإمارات (سوق دبي DFM وسوق أبوظبي ADX) وتحليل المشاعر."
+                        : "AI-assisted coverage of UAE (DFM & ADX) stock news and sentiment.")
+                    : market === "qatar"
+                    ? (isAr
+                        ? "تغطية ذكية لأخبار أسهم بورصة قطر (QSE) وتحليل المشاعر."
+                        : "AI-assisted coverage of Qatar Stock Exchange (QSE) news and sentiment.")
+                    : isSaudi
                     ? (isAr
                         ? "تغطية ذكية لأخبار السوق السعودي (تداول تاسي) وتحليل المشاعر لتوضيح اتجاهات السوق ومخاطر الأخبار."
                         : "AI-assisted coverage of Saudi TASI news and sentiment to surface market trends and event risks.")
@@ -274,7 +282,9 @@ export default function NewsPage() {
                     <Search className="absolute left-3.5 w-4 h-4 text-black/70 dark:text-white/70" />
                     <input
                         type="text"
-                        placeholder={isAr ? "ابحث برمز السهم (مثال: COMI)..." : "Search by stock symbol (e.g. COMI)..."}
+                        placeholder={isAr
+                            ? `ابحث برمز السهم (مثال: ${market === "uae" ? "EMAAR" : market === "qatar" ? "QNBK" : isSaudi ? "2222" : "COMI"})...`
+                            : `Search by stock symbol (e.g. ${market === "uae" ? "EMAAR" : market === "qatar" ? "QNBK" : isSaudi ? "2222" : "COMI"})...`}
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="h-11 w-full rounded-none pl-10 pr-4 text-xs font-black outline-none border-4 border-black bg-white dark:bg-zinc-900 text-black dark:text-white dark:border-white focus:bg-[#FFE600] focus:text-black transition-none shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]"

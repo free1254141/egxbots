@@ -3083,44 +3083,48 @@ async def post_affiliate_me(request: Request):
     return JSONResponse({"ok": True, "affiliate": _first_row(u_res)}, headers=_PRIVATE_NO_STORE)
 
 
+_B2B_TRIAL_LOCK = threading.Lock()
+
+
 def _create_b2b_trial_for_user(sb: Any, user_id: str, email: str, requested_tier: Any = None) -> Tuple[int, Dict[str, Any]]:
     is_admin = is_allowed_admin_email(email)
     s_tier = str(requested_tier or "b2b_pro").strip().lower()
     tier = s_tier if s_tier in ("b2b_starter", "b2b_pro", "b2b_enterprise") else "b2b_pro"
 
-    if not is_admin:
-        ex = sb.table("b2b_group_licenses").select("id,order_id,created_at").eq("owner_user_id", user_id).ilike("order_id", "B2B-TRIAL-%").limit(1).execute()
-        if getattr(ex, "data", None):
-            return 400, {
-                "ok": False,
-                "error": "trial_already_claimed",
-                "already_used": True,
-                "message": "لقد استنفدت بالفعل فترة التجربة المجانية (3 أيام) المخصصة لحسابك. يمكنك الاشتراك المباشر لترخيص البوت في مجموعتك.",
-            }
+    with _B2B_TRIAL_LOCK:
+        if not is_admin:
+            ex = sb.table("b2b_group_licenses").select("id,order_id,created_at").eq("owner_user_id", user_id).limit(1).execute()
+            if getattr(ex, "data", None):
+                return 400, {
+                    "ok": False,
+                    "error": "trial_already_claimed",
+                    "already_used": True,
+                    "message": "لقد استنفدت بالفعل فترة التجربة المجانية (3 أيام) المخصصة لحسابك. يمكنك الاشتراك المباشر لترخيص البوت في مجموعتك.",
+                }
 
-    order_id = f"B2B-TRIAL-{uuid.uuid4().hex[:6].upper()}"
-    now_dt = datetime.now(timezone.utc)
-    expires_at = (now_dt + timedelta(days=3)).isoformat()
-    ins = (
-        sb.table("b2b_group_licenses")
-        .insert(
-            {
-                "owner_user_id": user_id,
-                "order_id": order_id,
-                "tier": tier,
-                "daily_limit": 30,
-                "daily_used": 0,
-                "custom_signature": "⚡ تحليلات خاصة بقناتنا بالتعاون مع EGX BOTS",
-                "allow_recommendations": False,
-                "status": "active",
-                "starts_at": now_dt.isoformat(),
-                "expires_at": expires_at,
-                "group_title": "مجموعة تجريبية (قيد التفعيل بـ تليجرام)",
-            }
+        order_id = f"B2B-TRIAL-{uuid.uuid4().hex[:6].upper()}"
+        now_dt = datetime.now(timezone.utc)
+        expires_at = (now_dt + timedelta(days=3)).isoformat()
+        ins = (
+            sb.table("b2b_group_licenses")
+            .insert(
+                {
+                    "owner_user_id": user_id,
+                    "order_id": order_id,
+                    "tier": tier,
+                    "daily_limit": 30,
+                    "daily_used": 0,
+                    "custom_signature": "⚡ تحليلات خاصة بقناتنا بالتعاون مع EGX BOTS",
+                    "allow_recommendations": False,
+                    "status": "active",
+                    "starts_at": now_dt.isoformat(),
+                    "expires_at": expires_at,
+                    "group_title": "مجموعة تجريبية (قيد التفعيل بـ تليجرام)",
+                }
+            )
+            .execute()
         )
-        .execute()
-    )
-    lic = _first_row(ins)
+        lic = _first_row(ins)
     if not lic:
         return 500, {"ok": False, "error": "Failed to create trial license"}
     code = str(lic["id"])[:8]
@@ -3737,18 +3741,19 @@ def _apply_founders_offer(config: Dict[str, Any], offer: Optional[Dict[str, Any]
             )
         elif pid == "pro_6m":
             b6 = int(p["amount_egp"]) if p.get("amount_egp") is not None else 750
-            orig6 = int((p.get("discount") or {}).get("original_amount_egp") or (b6 if b6 > 500 else 750))
+            p6_amt = eff_price * 5
+            orig6 = int((p.get("discount") or {}).get("original_amount_egp") or (b6 if b6 > p6_amt else 750))
             new_plans.append(
                 {
                     **p,
-                    "amount_egp": 500 if has_special else b6,
-                    "founders_lock_rate": 100 if has_special else None,
+                    "amount_egp": p6_amt if has_special else b6,
+                    "founders_lock_rate": eff_price if has_special else None,
                     "discount": (
                         {
                             "active": True,
                             "kind": "founders",
-                            "label_ar": f"عرض المؤسسين (500 بدل {orig6:,} ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
-                            "label_en": f"Founders Offer (500 instead of {orig6:,} EGP + locks 100 EGP/mo for life) 🔥",
+                            "label_ar": f"عرض المؤسسين ({p6_amt:,} بدل {orig6:,} ج.م + تثبيت {eff_price:,} ج.م/شهر مدى الحياة) 🔥",
+                            "label_en": f"Founders Offer ({p6_amt:,} instead of {orig6:,} EGP + locks {eff_price:,} EGP/mo for life) 🔥",
                             "original_amount_egp": orig6,
                             "ends_at": ends_at if is_open else None,
                         }
@@ -3759,18 +3764,19 @@ def _apply_founders_offer(config: Dict[str, Any], offer: Optional[Dict[str, Any]
             )
         elif pid == "pro_1y":
             b1y = int(p["amount_egp"]) if p.get("amount_egp") is not None else 1350
-            orig1y = int((p.get("discount") or {}).get("original_amount_egp") or (b1y if b1y > 1000 else 1350))
+            p1y_amt = eff_price * 9
+            orig1y = int((p.get("discount") or {}).get("original_amount_egp") or (b1y if b1y > p1y_amt else 1350))
             new_plans.append(
                 {
                     **p,
-                    "amount_egp": 1000 if has_special else b1y,
-                    "founders_lock_rate": 100 if has_special else None,
+                    "amount_egp": p1y_amt if has_special else b1y,
+                    "founders_lock_rate": eff_price if has_special else None,
                     "discount": (
                         {
                             "active": True,
                             "kind": "founders",
-                            "label_ar": f"عرض المؤسسين (1,000 بدل {orig1y:,} ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
-                            "label_en": f"Founders Offer (1,000 instead of {orig1y:,} EGP + locks 100 EGP/mo for life) 🔥",
+                            "label_ar": f"عرض المؤسسين ({p1y_amt:,} بدل {orig1y:,} ج.م + تثبيت {eff_price:,} ج.م/شهر مدى الحياة) 🔥",
+                            "label_en": f"Founders Offer ({p1y_amt:,} instead of {orig1y:,} EGP + locks {eff_price:,} EGP/mo for life) 🔥",
                             "original_amount_egp": orig1y,
                             "ends_at": ends_at if is_open else None,
                         }
@@ -3957,88 +3963,16 @@ def get_easykash_status(request: Request, order_id: str = Query(default="")):
     if found and isinstance(cached, dict):
         return JSONResponse(cached, headers=_PRIVATE_NO_STORE)
 
-    sb = get_primary_supabase()
-    if sb is None:
-        return JSONResponse({"detail": "Payment status is unavailable"}, status_code=503, headers=_PRIVATE_NO_STORE)
+    from api.easykash_payments import order_status as ek_order_status
 
     try:
-        order_row = _select_one(
-            sb.table("local_payment_orders")
-            .select("id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
-            .eq("id", order_id)
-            .eq("user_id", uid)
-        )
-        if not order_row:
-            return JSONResponse({"detail": "Payment order not found"}, status_code=404, headers=_PRIVATE_NO_STORE)
-        order = dict(order_row)
-
-        if order.get("status") in ("pending", "submitted"):
-            ek_key = (os.getenv("EASYKASH_API_KEY") or "").strip()
-            if ek_key:
-                try:
-                    inq = requests.post("https://back.easykash.net/api/cash-api/inquire", headers={"authorization": ek_key, "Content-Type": "application/json"}, json={"customerReference": order_id}, timeout=6)
-                    if inq.ok:
-                        inq_data = inq.json()
-                        ek_status = str(inq_data.get("status") or "").upper()
-                        ek_ref = str(inq_data.get("easykashRef") or "")
-                        method = str(inq_data.get("PaymentMethod") or "")
-                        now_iso = datetime.now(timezone.utc).isoformat()
-                        if ek_status == "PAID":
-                            from api.easykash_payments import order_status as ek_reconcile
-                            try:
-                                ek_reconcile(order_id, uid)
-                            except Exception:
-                                pass
-                            ref_row = _select_one(sb.table("local_payment_orders").select("id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status").eq("id", order_id))
-                            if ref_row:
-                                order.update(ref_row)
-                        elif ek_status in ("FAILED", "FAIL", "REJECTED"):
-                            note = f"EasyKash: {ek_status} ({method}) | ref: {ek_ref}".strip()
-                            sb.table("local_payment_orders").update({"status": "failed", "payment_review_status": "rejected", "customer_note": note, "updated_at": now_iso}).eq("id", order_id).execute()
-                            order["status"] = "failed"
-                            order["customer_note"] = note
-                        elif ek_status in ("EXPIRED", "CANCELLED", "CANCELED"):
-                            note = f"EasyKash: {ek_status} ({method}) | ref: {ek_ref}".strip()
-                            sb.table("local_payment_orders").update({"status": "expired", "customer_note": note, "updated_at": now_iso}).eq("id", order_id).execute()
-                            order["status"] = "expired"
-                            order["customer_note"] = note
-                except Exception:
-                    pass
-
-        end_str: Optional[str] = None
-        invite_link = order.get("telegram_invite_link") or ""
-        b2b_url = ""
-        is_b2b = str(order.get("plan_id") or "").strip().lower().startswith("b2b_")
-
-        if order.get("status") == "approved":
-            if is_b2b:
-                lic_row = _select_one(sb.table("b2b_group_licenses").select("expires_at").eq("owner_user_id", uid).eq("status", "active").order("expires_at", desc=True)) or {}
-                end_str = lic_row.get("expires_at")
-                b2b_url = "/b2b/dashboard"
-            else:
-                order_plan = str(order.get("plan_id") or "pro").strip().lower()
-                include_vip = order_plan != "chat_only"
-                plan_display_name = (
-                    "الشات الذكي (AI Chat)"
-                    if order_plan == "chat_only"
-                    else ("رادار تليجرام VIP" if order_plan == "vip_only" else "Pro")
-                )
-                sub_row = _select_one(sb.table("subscriptions").select("current_period_end").eq("user_id", uid).in_("plan_id", ["pro", "pro_renewal", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"]).eq("status", "active").order("current_period_end", desc=True)) or {}
-                end_str = sub_row.get("current_period_end")
-                if include_vip and not invite_link:
-                    inv_row = _select_one(sb.table("pro_telegram_invites").select("invite_link").eq("user_id", uid)) or {}
-                    invite_link = inv_row.get("invite_link") or ""
-                if not include_vip:
-                    invite_link = ""
-                cust_note = str(order.get("customer_note") or "")
-                if "tg_welcomed" not in cust_note:
-                    from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
-                    if send_pro_welcome_to_user_telegram(uid, invite_link=invite_link, plan_name=plan_display_name, subscription_end=end_str or "", include_vip_invite=include_vip):
-                        sb.table("local_payment_orders").update({"customer_note": f"{cust_note} | tg_welcomed".strip()}).eq("id", order_id).execute()
-
-        result = {**order, "subscription": {"current_period_end": end_str} if end_str else None, "telegram_pro_url": invite_link, "b2b_dashboard_url": b2b_url}
+        result = ek_order_status(order_id, uid)
         _ORDER_STATUS_CACHE.set(ck, result, ttl=8.0)
         return JSONResponse(result, headers=_PRIVATE_NO_STORE)
+    except ValueError as exc:
+        msg = str(exc)
+        status_code = 400 if "Invalid" in msg else 404
+        return JSONResponse({"detail": msg}, status_code=status_code, headers=_PRIVATE_NO_STORE)
     except Exception:
         return JSONResponse({"detail": "Payment status is unavailable"}, status_code=503, headers=_PRIVATE_NO_STORE)
 
@@ -4061,44 +3995,16 @@ def post_payment_failed_recovery(request: Request):
 
 @router.get("/api/payment/direct-wallet/config")
 def get_direct_wallet_config():
-    from api.routers.direct_wallet import config as dw_config
-    return JSONResponse(dw_config(), headers=_PUBLIC_CACHE_1H)
+    return JSONResponse({"enabled": False, "provider": "easykash", "supported_wallets": []}, headers=_PUBLIC_CACHE_1H)
 
 
 @router.post("/api/payment/direct-wallet/confirm")
 async def confirm_direct_wallet(request: Request):
-    from api.direct_wallet_payments import confirm_direct_wallet_payment, is_direct_wallet_enabled
-    if not is_direct_wallet_enabled():
-        return JSONResponse({"detail": "الدفع معطل حالياً"}, status_code=403, headers=_PRIVATE_NO_STORE)
-    viewer = resolve_verified_viewer(request)
-    if not viewer.get("authenticated") or not viewer.get("user_id"):
-        return JSONResponse({"detail": "يرجى تسجيل الدخول أولاً للمتابعة"}, status_code=401, headers=_PRIVATE_NO_STORE)
-    uid = viewer["user_id"]
-    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
-    if not isinstance(body, dict):
-        body = {}
-    sender_mobile = re.sub(r"[\s-]", "", str(body.get("sender_mobile") or body.get("mobile") or ""))
-    if not re.match(r"^01[0125]\d{8}$", sender_mobile):
-        return JSONResponse({"detail": "أدخل رقم موبايل مصري صحيح (11 رقم) محول منه"}, status_code=400, headers=_PRIVATE_NO_STORE)
-    tx_id = re.sub(r"[\s\r\n\t]", "", str(body.get("transaction_id") or body.get("ref") or "")).strip()
-    if len(tx_id) < 6:
-        return JSONResponse({"detail": "أدخل رقم العملية أو المرجع من رسالة التحويل (6 خانات على الأقل)"}, status_code=400, headers=_PRIVATE_NO_STORE)
-    promo_code = body.get("promo_code").strip().upper()[:32] if isinstance(body.get("promo_code"), str) else ""
-    plan_id = body.get("plan_id") if isinstance(body.get("plan_id"), str) else "pro"
-
-    sb = get_primary_supabase()
-    if sb is not None:
-        try:
-            sb.table("profiles").update({"whatsapp_number": sender_mobile, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", uid).execute()
-        except Exception:
-            pass
-    try:
-        res = confirm_direct_wallet_payment(user_id=uid, plan_id=plan_id, sender_mobile=sender_mobile, transaction_id=tx_id, promo_code=promo_code)
-        return JSONResponse(res, headers=_PRIVATE_NO_STORE)
-    except ValueError as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=400, headers=_PRIVATE_NO_STORE)
-    except Exception:
-        return JSONResponse({"detail": "تعذر تأكيد عملية التحويل، يرجى مراجعة البيانات"}, status_code=500, headers=_PRIVATE_NO_STORE)
+    return JSONResponse(
+        {"detail": "التحويل المباشر غير متاح؛ يتم الدفع والتفعيل الفوري عبر بوابة EasyKash المعتمدة فقط"},
+        status_code=410,
+        headers=_PRIVATE_NO_STORE,
+    )
 
 
 # ===========================================================================

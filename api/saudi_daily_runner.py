@@ -603,6 +603,38 @@ def run_saudi_daily_job(
             _record_step(steps_log, "gcc_metals_sync", "failed", details=str(exc))
             errors.append(f"gcc_metals_sync: {exc}")
 
+    if not _step_done("gcc_news_sync"):
+        try:
+            from api.gcc_news_sync import sync_gcc_market_news
+            gcc_news_res = sync_gcc_market_news(market="all", max_symbols=50, days_back=15)
+            _record_step(
+                steps_log,
+                "gcc_news_sync",
+                "success" if gcc_news_res.get("ok") else "failed",
+                count=int(gcc_news_res.get("synced_rows") or 0),
+                details=f"matched={gcc_news_res.get('matched_symbols')}",
+            )
+        except Exception as exc:
+            _record_step(steps_log, "gcc_news_sync", "failed", details=str(exc))
+            errors.append(f"gcc_news_sync: {exc}")
+
+    if not _step_done("gcc_disclosures_sync"):
+        try:
+            from api.gcc_disclosures_sync import run_gcc_disclosures_sync
+            gcc_disc_res = run_gcc_disclosures_sync(market="all", days_back=30)
+            gcc_disc_results = gcc_disc_res.get("results") or {}
+            inserted_total = sum(int((v or {}).get("inserted") or 0) for v in gcc_disc_results.values())
+            _record_step(
+                steps_log,
+                "gcc_disclosures_sync",
+                "success" if gcc_disc_res.get("ok") else "failed",
+                count=inserted_total,
+                details=",".join(f"{k}:{(v or {}).get('inserted', 0)}" for k, v in gcc_disc_results.items()),
+            )
+        except Exception as exc:
+            _record_step(steps_log, "gcc_disclosures_sync", "failed", details=str(exc))
+            errors.append(f"gcc_disclosures_sync: {exc}")
+
     # 6. Cache Revalidation
     if not _step_done("cache_revalidation"):
         try:

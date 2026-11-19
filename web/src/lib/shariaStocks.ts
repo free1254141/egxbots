@@ -1,6 +1,6 @@
 import { isSaudiSymbol } from "@/lib/saudi-stocks";
 
-export type ShariaMarket = "egx" | "tasi";
+export type ShariaMarket = "egx" | "tasi" | "uae" | "qatar";
 
 export const SHARIA_COMPLIANT_EGX_SYMBOLS: readonly string[] = [
   "ISPH",
@@ -97,16 +97,53 @@ export const SHARIA_COMPLIANT_TASI_SYMBOLS: readonly string[] = [
 
 const SHARIA_TASI_SET = new Set(SHARIA_COMPLIANT_TASI_SYMBOLS.map((s) => s.toUpperCase()));
 
+/**
+ * الأسهم الإماراتية المتوافقة مع الضوابط الشرعية في سوق دبي المالي (DFM) وسوق أبوظبي (ADX)
+ */
+export const SHARIA_COMPLIANT_UAE_SYMBOLS: readonly string[] = [
+  "ADIB", "DIB", "SIB", "AJMANBANK", "GFH", "SALAMA", "SUKOON", "AMLAK",
+  "EMAAR", "EMAARDEV", "ALDAR", "ADNOCGAS", "ADNOCDIST", "ADNOCDRILL",
+  "ADNOCLS", "ADPORTS", "DEWA", "SALIK", "PARKIN", "TALABAT", "AIRARABIA",
+  "ARMX", "DU", "EAND", "TAQA", "EMPOWER", "TABREED", "TECOM", "DEYAAR",
+  "UPP", "RAKPROP", "MODON", "ESHRAQ", "ESG", "BOROUGE", "FERTIGLBE",
+  "RAKCER", "DANA", "NMDC", "NMDCENR", "ASM", "DSI", "DTC", "BURJEEL",
+  "PUREHEALTH", "AMANAT", "AGTHIA", "LULU", "SPINNEYS", "TAALEEM", "DRIVE",
+  "PALMS", "ERC", "PHOENIX", "PRESIGHT", "SPACE42", "YAHSAT", "IHC",
+  "ALPHADHABI", "MULTIPLY", "DIC", "ALANSARI", "AMCREIT",
+];
+
+const SHARIA_UAE_SET = new Set(SHARIA_COMPLIANT_UAE_SYMBOLS.map((s) => s.toUpperCase()));
+
+/**
+ * الأسهم القطرية المتوافقة مع الضوابط الشرعية في بورصة قطر (QSE)
+ */
+export const SHARIA_COMPLIANT_QATAR_SYMBOLS: readonly string[] = [
+  "QIBK", "MARK", "QIIK", "DUBK", "QFBQ", "AKHI", "BEEMA", "NLCS", "IHGS",
+  "DBIS", "IQCD", "QGTS", "ORDS", "VFQS", "QEWS", "QFLS", "BRES", "ERES",
+  "UDCD", "MRDS", "MPHC", "QAMC", "QNCD", "QNNS", "GWCS", "GISS", "QIGD",
+  "QIMD", "BLDN", "MERS", "WDAM", "ZHCD", "FALH", "MCGS", "QGMD", "MCCS",
+  "MEZA", "MKDM", "AHCS", "SIIS", "QOIS",
+];
+
+const SHARIA_QATAR_SET = new Set(SHARIA_COMPLIANT_QATAR_SYMBOLS.map((s) => s.toUpperCase()));
+
 function resolveShariaMarket(
   symbol: string,
   market?: ShariaMarket
 ): ShariaMarket {
-  if (market === "tasi" || market === "egx") return market;
-  return isSaudiSymbol(symbol) ? "tasi" : "egx";
+  if (market === "tasi" || market === "egx" || market === "uae" || market === "qatar") return market;
+  const upper = symbol.trim().toUpperCase().split(".")[0];
+  if (isSaudiSymbol(symbol)) return "tasi";
+  if (SHARIA_UAE_SET.has(upper) && !SHARIA_SET.has(upper)) return "uae";
+  if (SHARIA_QATAR_SET.has(upper)) return "qatar";
+  return "egx";
 }
 
 export function getShariaSymbolsForMarket(market: ShariaMarket): readonly string[] {
-  return market === "tasi" ? SHARIA_COMPLIANT_TASI_SYMBOLS : SHARIA_COMPLIANT_EGX_SYMBOLS;
+  if (market === "tasi") return SHARIA_COMPLIANT_TASI_SYMBOLS;
+  if (market === "uae") return SHARIA_COMPLIANT_UAE_SYMBOLS;
+  if (market === "qatar") return SHARIA_COMPLIANT_QATAR_SYMBOLS;
+  return SHARIA_COMPLIANT_EGX_SYMBOLS;
 }
 
 export function isShariaCompliant(
@@ -116,11 +153,17 @@ export function isShariaCompliant(
   if (!symbol) return false;
   const base = symbol.trim().toUpperCase().split(".")[0];
   const resolved = resolveShariaMarket(symbol, market);
-  return resolved === "tasi" ? SHARIA_TASI_SET.has(base) : SHARIA_SET.has(base);
+  if (resolved === "tasi") return SHARIA_TASI_SET.has(base);
+  if (resolved === "uae") return SHARIA_UAE_SET.has(base);
+  if (resolved === "qatar") return SHARIA_QATAR_SET.has(base);
+  return SHARIA_SET.has(base);
 }
 
 export function getShariaCompliantCount(market?: ShariaMarket): number {
-  return market === "tasi" ? SHARIA_TASI_SET.size : SHARIA_SET.size;
+  if (market === "tasi") return SHARIA_TASI_SET.size;
+  if (market === "uae") return SHARIA_UAE_SET.size;
+  if (market === "qatar") return SHARIA_QATAR_SET.size;
+  return SHARIA_SET.size;
 }
 
 export interface ShariaStockMeta {
@@ -538,6 +581,128 @@ export const SAUDI_STOCK_PURIFICATION_RATES: Record<string, ShariaStockMeta> = {
   },
 };
 
+export const UAE_STOCK_PURIFICATION_RATES: Record<string, ShariaStockMeta> = {
+  DIB: {
+    symbol: "DIB",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "أول بنك إسلامي في العالم بإشراف هيئة الرقابة الشرعية — لا يتطلب تطهيراً (0.0%)",
+    sourceLabelAr: "لجنة الفتوى والرقابة الشرعية لبنك دبي الإسلامي",
+  },
+  ADIB: {
+    symbol: "ADIB",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "مصرف إسلامي متكامل بإشراف هيئة رقابة شرعية مستقلة — لا يتطلب تطهيراً (0.0%)",
+    sourceLabelAr: "هيئة الرقابة الشرعية لمصرف أبوظبي الإسلامي",
+  },
+  SIB: {
+    symbol: "SIB",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "مصرف إسلامي متوافق بالكامل مع الشريعة الإسلامية — نسبة تطهير 0.0%",
+    sourceLabelAr: "هيئة الرقابة الشرعية لمصرف الشارقة الإسلامي",
+  },
+  AJMANBANK: {
+    symbol: "AJMANBANK",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "مصرف إسلامي مرخص خاضع للرقابة الشرعية — نسبة تطهير 0.0%",
+    sourceLabelAr: "هيئة الرقابة الشرعية لمصرف عجمان",
+  },
+  GFH: {
+    symbol: "GFH",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "مؤسسة مالية إسلامية بإشراف هيئة رقابة شرعية — نسبة تطهير 0.0%",
+    sourceLabelAr: "هيئة الرقابة الشرعية لمجموعة جي إف إتش",
+  },
+  SALAMA: {
+    symbol: "SALAMA",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "شركة تأمين تكافلي إسلامي خاضعة للرقابة الشرعية — نسبة تطهير 0.0%",
+    sourceLabelAr: "هيئة الرقابة الشرعية للتأمين التكافلي",
+  },
+  EMAAR: { symbol: "EMAAR", purificationRatePct: 1.4, notesAr: "عوائد ودائع وتمويلات عرضية ضمن معايير الأيوفي (حوالي 1.4%)", sourceLabelAr: "معايير سوق دبي المالي الشرعية - AAOIFI" },
+  EMAARDEV: { symbol: "EMAARDEV", purificationRatePct: 1.3, notesAr: "عوائد ودائع حجوزات عقارية عرضية (حوالي 1.3%)", sourceLabelAr: "معايير سوق دبي المالي الشرعية - AAOIFI" },
+  ALDAR: { symbol: "ALDAR", purificationRatePct: 1.2, notesAr: "عوائد ودائع بنكية عرضية من السيولة العقارية (حوالي 1.2%)", sourceLabelAr: "معايير سوق أبوظبي الشرعية - AAOIFI" },
+  ADNOCGAS: { symbol: "ADNOCGAS", purificationRatePct: 0.6, notesAr: "عوائد فوائد ودائع نقدية منخفضة جداً (حوالي 0.6%)", sourceLabelAr: "معايير سوق أبوظبي الشرعية - AAOIFI" },
+  ADNOCDIST: { symbol: "ADNOCDIST", purificationRatePct: 0.5, notesAr: "عوائد ودائع تشغيلية طفيفة (حوالي 0.5%)", sourceLabelAr: "معايير سوق أبوظبي الشرعية - AAOIFI" },
+  ADNOCDRILL: { symbol: "ADNOCDRILL", purificationRatePct: 0.5, notesAr: "عوائد ودائع نقدية عرضية منخفضة (حوالي 0.5%)", sourceLabelAr: "معايير سوق أبوظبي الشرعية - AAOIFI" },
+  DEWA: { symbol: "DEWA", purificationRatePct: 0.8, notesAr: "عوائد ودائع ومرابحات بنكية عرضية (حوالي 0.8%)", sourceLabelAr: "معايير سوق دبي المالي الشرعية - AAOIFI" },
+  SALIK: { symbol: "SALIK", purificationRatePct: 0.4, notesAr: "عوائد ودائع قصيرة الأجل طفيفة (حوالي 0.4%)", sourceLabelAr: "معايير سوق دبي المالي الشرعية - AAOIFI" },
+  PARKIN: { symbol: "PARKIN", purificationRatePct: 0.3, notesAr: "عوائد ودائع تشغيلية محدودة (حوالي 0.3%)", sourceLabelAr: "معايير سوق دبي المالي الشرعية - AAOIFI" },
+  EAND: { symbol: "EAND", purificationRatePct: 1.1, notesAr: "عوائد ودائع واستثمارات نقدية عرضية (حوالي 1.1%)", sourceLabelAr: "معايير سوق أبوظبي الشرعية - AAOIFI" },
+  DU: { symbol: "DU", purificationRatePct: 0.9, notesAr: "عوائد ودائع بنكية عرضية (حوالي 0.9%)", sourceLabelAr: "معايير سوق دبي المالي الشرعية - AAOIFI" },
+  AIRARABIA: { symbol: "AIRARABIA", purificationRatePct: 0.7, notesAr: "عوائد ودائع بنكية عرضية (حوالي 0.7%)", sourceLabelAr: "معايير سوق دبي المالي الشرعية - AAOIFI" },
+  TAQA: { symbol: "TAQA", purificationRatePct: 1.0, notesAr: "عوائد تمويلية عرضية في قطاع الطاقة والمرافق (حوالي 1.0%)", sourceLabelAr: "معايير سوق أبوظبي الشرعية - AAOIFI" },
+  IHC: { symbol: "IHC", purificationRatePct: 0.9, notesAr: "عوائد ودائع واستثمارات نقدية عرضية (حوالي 0.9%)", sourceLabelAr: "معايير سوق أبوظبي الشرعية - AAOIFI" },
+  BOROUGE: { symbol: "BOROUGE", purificationRatePct: 0.6, notesAr: "عوائد ودائع بنكية منخفضة (حوالي 0.6%)", sourceLabelAr: "معايير سوق أبوظبي الشرعية - AAOIFI" },
+};
+
+export const QATAR_STOCK_PURIFICATION_RATES: Record<string, ShariaStockMeta> = {
+  QIBK: {
+    symbol: "QIBK",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "مصرف إسلامي رائد خاضع لهيئة الرقابة الشرعية — لا يتطلب تطهيراً (0.0%)",
+    sourceLabelAr: "هيئة الرقابة الشرعية لمصرف قطر الإسلامي",
+  },
+  MARK: {
+    symbol: "MARK",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "مصرف إسلامي متكامل خاضع لهيئة الرقابة الشرعية — لا يتطلب تطهيراً (0.0%)",
+    sourceLabelAr: "هيئة الرقابة الشرعية لمصرف الريان",
+  },
+  QIIK: {
+    symbol: "QIIK",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "بنك إسلامي خاضع لإشراف هيئة الرقابة الشرعية — لا يتطلب تطهيراً (0.0%)",
+    sourceLabelAr: "هيئة الرقابة الشرعية للدولي الإسلامي",
+  },
+  DUBK: {
+    symbol: "DUBK",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "بنك إسلامي متوافق بالكامل مع أحكام الشريعة الإسلامية — نسبة تطهير 0.0%",
+    sourceLabelAr: "هيئة الرقابة الشرعية لبنك دخان",
+  },
+  QFBQ: {
+    symbol: "QFBQ",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "بنك استثماري إسلامي خاضع للرقابة الشرعية — نسبة تطهير 0.0%",
+    sourceLabelAr: "هيئة الرقابة الشرعية لبنك لشا",
+  },
+  AKHI: {
+    symbol: "AKHI",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "شركة تأمين تكافلي إسلامي خاضعة للرقابة الشرعية — نسبة تطهير 0.0%",
+    sourceLabelAr: "هيئة الرقابة الشرعية للخليج التكافلي",
+  },
+  BEEMA: {
+    symbol: "BEEMA",
+    purificationRatePct: 0.0,
+    isPureHalal: true,
+    notesAr: "شركة تأمين تكافلي إسلامي خاضعة للرقابة الشرعية — نسبة تطهير 0.0%",
+    sourceLabelAr: "هيئة الرقابة الشرعية لبيمة للتأمين",
+  },
+  IQCD: { symbol: "IQCD", purificationRatePct: 0.8, notesAr: "عوائد ودائع بنكية عرضية من الفوائض النقدية (حوالي 0.8%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  QGTS: { symbol: "QGTS", purificationRatePct: 1.1, notesAr: "عوائد ودائع بنكية عرضية في قطاع النقل البحري (حوالي 1.1%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  ORDS: { symbol: "ORDS", purificationRatePct: 1.3, notesAr: "عوائد ودائع وتمويلات عرضية في قطاع الاتصالات (حوالي 1.3%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  VFQS: { symbol: "VFQS", purificationRatePct: 0.9, notesAr: "عوائد فوائد ودائع نقدية عرضية (حوالي 0.9%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  QEWS: { symbol: "QEWS", purificationRatePct: 0.9, notesAr: "عوائد ودائع بنكية عرضية في قطاع المرافق (حوالي 0.9%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  QFLS: { symbol: "QFLS", purificationRatePct: 0.5, notesAr: "عوائد ودائع بنكية طفيفة (حوالي 0.5%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  BRES: { symbol: "BRES", purificationRatePct: 1.5, notesAr: "عوائد ودائع وتمويلات عقارية عرضية (حوالي 1.5%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  MPHC: { symbol: "MPHC", purificationRatePct: 0.4, notesAr: "عوائد ودائع بنكية منخفضة جداً (حوالي 0.4%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  QNNS: { symbol: "QNNS", purificationRatePct: 0.7, notesAr: "عوائد ودائع نقدية عرضية (حوالي 0.7%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+  QAMC: { symbol: "QAMC", purificationRatePct: 0.6, notesAr: "عوائد ودائع بنكية عرضية منخفضة (حوالي 0.6%)", sourceLabelAr: "ضوابط بورصة قطر الشرعية - QSE" },
+};
+
 export function getStockPurificationMeta(
   symbol: string | null | undefined,
   market?: ShariaMarket
@@ -547,6 +712,12 @@ export function getStockPurificationMeta(
   const resolved = resolveShariaMarket(symbol, market);
   if (resolved === "tasi") {
     return SAUDI_STOCK_PURIFICATION_RATES[base] ?? null;
+  }
+  if (resolved === "uae") {
+    return UAE_STOCK_PURIFICATION_RATES[base] ?? null;
+  }
+  if (resolved === "qatar") {
+    return QATAR_STOCK_PURIFICATION_RATES[base] ?? null;
   }
   return STOCK_PURIFICATION_RATES[base] ?? null;
 }

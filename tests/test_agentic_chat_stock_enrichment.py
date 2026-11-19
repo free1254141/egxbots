@@ -575,3 +575,165 @@ def test_qa2_accumulation_recs_no_bleed_and_suffixed_round1_routing():
 
         # Explicit non-EGX market on dual-listed symbol resolves to that exchange cleanly
         assert _resolve_symbol_and_market("ADIB", explicit_market="ADX") == ("ADIB", "ADX")
+
+
+def test_chat_review_optimizations_standalone_telegram_and_automation_metrics():
+    import asyncio
+    import json as _json
+    import httpx
+    from types import SimpleNamespace
+    from api.agentic_chat import pipeline
+    from api import native_telegram_vip_chat as ntvc
+    from api import scheduled_automations_worker as auto_w
+
+    # 1. Optimization 1: _is_unambiguous_standalone_input helper
+    assert pipeline._is_unambiguous_standalone_input("TYCN") is True
+    assert pipeline._is_unambiguous_standalone_input("crst") is True
+    assert pipeline._is_unambiguous_standalone_input("QNBK.QA", market="QSE") is True
+    assert pipeline._is_unambiguous_standalone_input("2222", market="TADAWUL") is True
+    assert pipeline._is_unambiguous_standalone_input("4500", market="EGX") is False
+    assert pipeline._is_unambiguous_standalone_input("📈 أفضل أسهم السوق اليوم") is True
+    assert pipeline._is_unambiguous_standalone_input("هات كل التوصيات المفتوحة حالياً") is True
+    # Must stay False for multi-word stock prompts so explicit-followup semantics remain intact
+    assert pipeline._is_unambiguous_standalone_input("حلل سهم PHDC") is False
+    assert pipeline._is_unambiguous_standalone_input("حلل سهم AMES") is False
+    assert pipeline._is_unambiguous_standalone_input("ليه السهم نزل؟") is False
+
+    # Verify bare ticker in multi-turn session overrides spurious is_contextual_followup=True and caches cleanly
+    async def _verify_bare_ticker_multiturn():
+        from api.agentic_chat.analysis_cache import clear_analysis_cache
+        clear_analysis_cache()
+        call_num = 0
+        synth_msgs_seen = []
+
+        async def _fake_post(self, url, *args, **kwargs):
+            nonlocal call_num
+            call_num += 1
+            payload = kwargs.get("json", {})
+            if call_num == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "usage": {"prompt_tokens": 1000, "completion_tokens": 50, "total_tokens": 1050},
+                        "choices": [{
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [{
+                                    "id": "tc_tycn_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "get_stock",
+                                        "arguments": '{"symbols": ["TYCN"], "is_contextual_followup": true}',
+                                    },
+                                }],
+                            }
+                        }],
+                    },
+                )
+            synth_msgs_seen.append(payload.get("messages", []))
+            return httpx.Response(
+                200,
+                json={
+                    "usage": {"prompt_tokens": 1200, "completion_tokens": 120, "total_tokens": 1320},
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "### 📊 تحليل سهم تايكون (TYCN) — EGX\n**السعر الأخير:** 13.88 ج.م " + ("بيانات فنية موثقة " * 12),
+                        }
+                    }],
+                },
+            )
+
+        async def _fake_dispatch(t_name, t_args, **_kw):
+            return {"status": "success", "stocks": [{"symbol": "TYCN", "close": 13.88, "currency": "ج.م"}]}
+
+        fake_hist = [{"role": "user", "content": "سؤال قديم"}, {"role": "assistant", "content": "رد قديم"}]
+        mock_pipe_sb = MagicMock()
+        mock_pipe_sb.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+        done_ev = None
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "test_key"}), \
+             patch.object(httpx.AsyncClient, "post", new=_fake_post), \
+             patch("api.agentic_chat.pipeline.dispatch_tool", side_effect=_fake_dispatch), \
+             patch("api.agentic_chat.pipeline._init_supabase"), \
+             patch.object(pipeline, "supabase", mock_pipe_sb), \
+             patch("api.agentic_chat.pipeline.set_vip_analysis_cache") as mock_set:
+            async for chunk in pipeline.run_agentic_chat_stream(
+                message="TYCN",
+                history=fake_hist,
+                images=[],
+                session_id="opt1_sess",
+                user_id="11111111-1111-1111-1111-111111111111",
+            ):
+                line = chunk.strip()
+                if line.startswith("data:") and line[5:].strip() != "[DONE]":
+                    ev = _json.loads(line[5:].strip())
+                    if ev.get("type") == "done":
+                        done_ev = ev
+            assert done_ev is not None
+            assert done_ev["cache_key"] == "vip_stock_TYCN"
+            assert mock_set.called
+            assert synth_msgs_seen and not any("سؤال قديم" in str(m.get("content", "")) for m in synth_msgs_seen[0])
+
+    asyncio.run(_verify_bare_ticker_multiturn())
+
+    # 2. Optimization 2: Telegram passes market=TADAWUL to Early Cache and clears old history for canonical cache keys
+    ntvc._USER_RESOLVE_CACHE.clear()
+    captured_cache_mkts = []
+    captured_stream_calls = []
+
+    def _fake_tg_supa(endpoint, method="GET", payload=None, **_kwargs):
+        if endpoint.startswith("telegram_vip_chat_state"):
+            return [{"daily_count": 0, "quota_date": ntvc.get_cairo_date_str(), "chat_history": [{"role": "user", "content": "سؤال قديم"}]}]
+        return []
+
+    def _fake_get_cache(ck, **kwargs):
+        captured_cache_mkts.append((ck, kwargs.get("market")))
+        return None
+
+    async def _fake_stream(**kwargs):
+        captured_stream_calls.append(kwargs)
+        yield 'data: {"type": "done", "reply": "تحليل أرامكو 2222 بالريال", "tables": [], "cached": false}\n\n'
+        yield "data: [DONE]\n\n"
+
+    with patch.object(ntvc, "_supabase_request", side_effect=_fake_tg_supa), \
+         patch("api.agentic_chat.analysis_cache.get_vip_analysis_cache", side_effect=_fake_get_cache), \
+         patch("api.agentic_chat.pipeline.run_agentic_chat_stream", side_effect=_fake_stream), \
+         patch("api.stock_ai._init_supabase"), \
+         patch("api.stock_ai.supabase", new=MagicMock()):
+        res_tg = ntvc.handle_native_vip_chat({
+            "action": "chat",
+            "telegram_user_id": 998877,
+            "telegram_username": "sa_tg_tester",
+            "message": "حلل سهم 2222",
+            "chat_source": "telegram_private",
+        })
+        assert res_tg["ok"] is True
+        assert ("vip_stock_2222", "TADAWUL") in captured_cache_mkts
+        assert captured_stream_calls and captured_stream_calls[0]["history"] == []
+        assert captured_stream_calls[0]["market"] == "TADAWUL"
+
+    # 3. Optimization 3: scheduled_automations_worker tags chat_source='scheduled_automation', latency_ms, and usage
+    posted = []
+
+    def _capture_auto_supa(endpoint, method="GET", payload=None, **_kwargs):
+        posted.append((endpoint, method, payload))
+        return []
+
+    sample_usage = {"cost_usd": 0.0012, "prompt_tokens": 4500, "completion_tokens": 500, "prefix_cache_hit_pct": 80.0}
+    with patch.object(auto_w, "_supabase_request", side_effect=_capture_auto_supa):
+        auto_w._log_automation_to_chat_history(
+            "auto-uuid-1",
+            "user-uuid-1",
+            "تقرير يومي",
+            "ملخص السوق",
+            "نص التقرير",
+            "2026-11-19T12:00:00Z",
+            latency_ms=4321,
+            usage=sample_usage,
+        )
+    asst_posts = [p for ep, _, p in posted if ep == "ai_chat_messages" and isinstance(p, dict) and p.get("role") == "assistant"]
+    assert len(asst_posts) == 1
+    assert asst_posts[0]["latency_ms"] == 4321
+    assert asst_posts[0]["metadata"]["chat_source"] == "scheduled_automation"
+    assert asst_posts[0]["metadata"]["usage"] == sample_usage

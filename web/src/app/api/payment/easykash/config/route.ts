@@ -20,7 +20,6 @@ const PAYMENT_CONFIG_HEADERS = {
 export async function GET(req: NextRequest) {
   try {
     let authHeader = req.headers.get("Authorization") || "";
-    let userId: string | null = null;
 
     if (!authHeader) {
       try {
@@ -28,14 +27,11 @@ export async function GET(req: NextRequest) {
         const { data: { session } } = await auth.auth.getSession();
         if (session?.access_token) {
           authHeader = `Bearer ${session.access_token}`;
-          userId = session.user.id;
         }
       } catch {}
     }
 
-    const backendUrl = userId
-      ? `${BACKEND_URL}/payment/easykash/config?user_id=${encodeURIComponent(userId)}`
-      : `${BACKEND_URL}/payment/easykash/config`;
+    const backendUrl = `${BACKEND_URL}/payment/easykash/config`;
 
     const headers: Record<string, string> = {};
     if (authHeader) headers["Authorization"] = authHeader;

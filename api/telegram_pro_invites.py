@@ -340,7 +340,7 @@ def _expired_pro_subscriptions() -> Dict[str, datetime]:
         return {}
     rows = (
         supabase.table("subscriptions")
-        .select("user_id,status,current_period_end")
+        .select("user_id,plan_id,status,current_period_end")
         .in_("plan_id", ACTIVE_PRO_PLAN_IDS)
         .execute()
         .data
@@ -353,11 +353,58 @@ def _expired_pro_subscriptions() -> Dict[str, datetime]:
         uid = str(row.get("user_id") or "")
         if not uid:
             continue
+        plan_id = str(row.get("plan_id") or "").strip().lower()
         end = _parse_dt(row.get("current_period_end")) or datetime.fromtimestamp(0, timezone.utc)
         if uid not in latest or end > latest[uid]:
             latest[uid] = end
-        if str(row.get("status") or "").lower() in {"active", "trialing"} and end > now:
+        if str(row.get("status") or "").lower() in {"active", "trialing"} and (
+            plan_id in {"lifetime", "pro_lifetime"} or end > now
+        ):
             entitled.add(uid)
+
+    # Active 3-day Free Trial users live in subscription_trials (and get a VIP invite in pro_telegram_invites).
+    # Never classify active trial users as expired!
+    try:
+        trial_rows = (
+            supabase.table("subscription_trials")
+            .select("user_id,expires_at")
+            .gt("expires_at", now.isoformat())
+            .execute()
+            .data
+            or []
+        )
+        for tr in trial_rows:
+            uid = str(tr.get("user_id") or "")
+            if not uid or "expires_at" not in tr:
+                continue
+            tr_end = _parse_dt(tr.get("expires_at"))
+            if tr_end and tr_end > now:
+                entitled.add(uid)
+    except Exception:
+        pass
+
+    # Also catch users who previously received a VIP invite (e.g. had Pro) and later
+    # downgraded/switched to chat_only so they no longer appear in ACTIVE_PRO_PLAN_IDS.
+    try:
+        invite_rows = (
+            supabase.table("pro_telegram_invites")
+            .select("user_id,invite_expires_at")
+            .execute()
+            .data
+            or []
+        )
+        for inv in invite_rows:
+            uid = str(inv.get("user_id") or "")
+            if not uid or uid in entitled or uid in latest:
+                continue
+            # Ignore mock rows from tests that don't represent pro_telegram_invites
+            if "invite_expires_at" not in inv and "vip_telegram_user_id" not in inv:
+                continue
+            inv_end = _parse_dt(inv.get("invite_expires_at")) or now
+            latest[uid] = inv_end
+    except Exception:
+        pass
+
     return {uid: end for uid, end in latest.items() if uid not in entitled}
 
 
@@ -389,10 +436,13 @@ def sync_expired_subscriptions_status() -> int:
 
 
 def revoke_expired_pro_members() -> int:
-    """Remove users whose Pro entitlement expired from the VIP Telegram chat."""
+    """Remove users whose Pro/VIP entitlement expired from both EGX & Saudi VIP Telegram chats."""
     sync_expired_subscriptions_status()
-    chat_id = pro_chat_id()
-    if not chat_id:
+    target_chats: list[str] = []
+    for cid in (pro_chat_id(), saudi_pro_chat_id()):
+        if cid and cid not in target_chats:
+            target_chats.append(cid)
+    if not target_chats:
         return 0
     expired = _expired_pro_subscriptions()
     if not expired:
@@ -426,8 +476,9 @@ def revoke_expired_pro_members() -> int:
     )
     for row in invites:
         vip_id = row.get("vip_telegram_user_id")
-        if vip_id is not None:
-            telegram_targets[str(row["user_id"])].add(int(vip_id))
+        uid_key = str(row.get("user_id") or "")
+        if vip_id is not None and uid_key in telegram_targets:
+            telegram_targets[uid_key].add(int(vip_id))
 
     already_revoked: Dict[tuple[str, int], datetime] = {}
     try:
@@ -452,27 +503,34 @@ def revoke_expired_pro_members() -> int:
         for member_id in member_ids:
             if already_revoked.get((uid, member_id), datetime.fromtimestamp(0, timezone.utc)) >= expired[uid]:
                 continue
-            try:
-                member = telegram_api("getChatMember", {"chat_id": chat_id, "user_id": member_id})
-                status = str((member.get("result") or {}).get("status") or "")
-                if status not in {"left", "kicked"}:
-                    telegram_api(
-                        "banChatMember",
-                        {"chat_id": chat_id, "user_id": member_id, "until_date": until},
-                    )
-                    telegram_api(
-                        "unbanChatMember",
-                        {"chat_id": chat_id, "user_id": member_id, "only_if_banned": True},
-                    )
-                    removed += 1
-                supabase.table("pro_telegram_revocations").upsert({
-                    "user_id": uid,
-                    "telegram_user_id": member_id,
-                    "subscription_end": expired[uid].isoformat(),
-                    "revoked_at": datetime.now(timezone.utc).isoformat(),
-                }, on_conflict="user_id,telegram_user_id").execute()
-            except Exception as exc:
-                print(f"[TELEGRAM_PRO] failed to revoke VIP access for {member_id}: {exc}")
+            all_succeeded = True
+            for chat_id in target_chats:
+                try:
+                    member = telegram_api("getChatMember", {"chat_id": chat_id, "user_id": member_id})
+                    status = str((member.get("result") or {}).get("status") or "")
+                    if status not in {"left", "kicked"}:
+                        telegram_api(
+                            "banChatMember",
+                            {"chat_id": chat_id, "user_id": member_id, "until_date": until},
+                        )
+                        telegram_api(
+                            "unbanChatMember",
+                            {"chat_id": chat_id, "user_id": member_id, "only_if_banned": True},
+                        )
+                        removed += 1
+                except Exception as exc:
+                    all_succeeded = False
+                    print(f"[TELEGRAM_PRO] failed to revoke VIP access for {member_id} in {chat_id}: {exc}")
+            if all_succeeded:
+                try:
+                    supabase.table("pro_telegram_revocations").upsert({
+                        "user_id": uid,
+                        "telegram_user_id": member_id,
+                        "subscription_end": expired[uid].isoformat(),
+                        "revoked_at": datetime.now(timezone.utc).isoformat(),
+                    }, on_conflict="user_id,telegram_user_id").execute()
+                except Exception as exc:
+                    print(f"[TELEGRAM_PRO] failed to record revocation for {member_id}: {exc}")
     return removed
 
 

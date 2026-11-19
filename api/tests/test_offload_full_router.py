@@ -436,7 +436,6 @@ def test_public_reports_archive_sitemap_and_invalidation():
         ("GET", "/api/support/messages?session_id=u1", None),
         ("POST", "/api/payment/easykash/create", {"mobile": "01012345678"}),
         ("GET", "/api/payment/easykash/status?order_id=1", None),
-        ("POST", "/api/payment/direct-wallet/confirm", {"sender_mobile": "01012345678", "transaction_id": "TX123456"}),
         ("POST", "/api/payment/failed-recovery", None),
     ],
 )
@@ -653,7 +652,19 @@ def test_backtests_rejects_admin_spoof_and_payments_founders():
             plans = {p["id"]: p for p in cfg.json()["plans"]}
             assert plans["pro"]["amount_egp"] == 100
             assert plans["pro_6m"]["amount_egp"] == 500
-            assert plans["pro_1y"]["amount_egp"] == 1000
+            assert plans["pro_1y"]["amount_egp"] == 900
+
+        # Direct wallet auto-activation is permanently retired (EasyKash-only)
+        dw_cfg = client.get("/api/payment/direct-wallet/config")
+        assert dw_cfg.status_code == 200
+        assert dw_cfg.json()["enabled"] is False
+        assert "recipient_wallet" not in dw_cfg.json()
+
+        dw_confirm = client.post(
+            "/api/payment/direct-wallet/confirm",
+            json={"plan_id": "lifetime", "sender_mobile": "01012345678", "transaction_id": "FAKE123456"},
+        )
+        assert dw_confirm.status_code == 410
 
         # Non-admin chat share forbidden
         sh = client.post("/api/chat/share", json={"question": "q", "answer": "a"})
@@ -785,6 +796,12 @@ def test_support_message_affiliate_b2b_and_chat_share_origin():
         b2b_un = client.post("/api/b2b/license", json={"action": "unlink", "license_id": lic_id})
         assert b2b_un.status_code == 200
         assert b2b_un.json()["license"]["telegram_chat_id"] is None
+
+        # Even after a trial is upgraded to a paid order_id, user cannot re-claim a free B2B trial
+        db.tables["b2b_group_licenses"][0]["order_id"] = "99999999-9999-4999-8999-999999999999"
+        b2b_tr2 = client.post("/api/b2b/trial", json={"tier": "b2b_pro"})
+        assert b2b_tr2.status_code == 400
+        assert b2b_tr2.json()["error"] == "trial_already_claimed"
 
     # Admin chat share resolves public host behind reverse proxy
     admin_v = {"authenticated": True, "pro": True, "user_id": "admin-1", "email": "admin@egxbots.com"}

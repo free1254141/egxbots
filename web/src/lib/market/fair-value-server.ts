@@ -20,9 +20,17 @@ async function fetchAndComputeFairValueReport(
   if (hf && Array.isArray(hf.stocks) && hf.stocks.length > 0) {
     return hf;
   }
-  const isTasi = market === "tasi";
-  const client = isTasi
-    ? getMarketSupabaseClient("tasi")
+  const isGcc = market === "tasi" || market === "uae" || market === "qatar";
+  const exchanges =
+    market === "tasi"
+      ? ["TADAWUL", "TASI"]
+      : market === "uae"
+      ? ["DFM", "ADX"]
+      : market === "qatar"
+      ? ["QSE"]
+      : ["EGX"];
+  const client = isGcc
+    ? getMarketSupabaseClient(market)
     : getPublicMarketClient();
 
   const fundQuery = client
@@ -36,14 +44,9 @@ async function fetchAndComputeFairValueReport(
 
   // Order by date descending so the latest session row for each symbol comes first
   const [fundRes, indRes] = await Promise.all([
-    (isTasi
-      ? fundQuery.in("exchange", ["TADAWUL", "TASI"])
-      : fundQuery.eq("exchange", "EGX")
-    ).limit(400),
-    (isTasi
-      ? indQuery.in("exchange", ["TADAWUL", "TASI"])
-      : indQuery.eq("exchange", "EGX")
-    )
+    fundQuery.in("exchange", exchanges).limit(400),
+    indQuery
+      .in("exchange", exchanges)
       .order("date", { ascending: false })
       .limit(400),
   ]);
@@ -78,6 +81,24 @@ const getCachedTasiFairValueReport = unstable_cache(
   }
 );
 
+const getCachedUaeFairValueReport = unstable_cache(
+  () => fetchAndComputeFairValueReport("uae"),
+  ["fair-value-uae-daily-v1"],
+  {
+    revalidate: 604800,
+    tags: [DAILY_CACHE_TAGS.market],
+  }
+);
+
+const getCachedQatarFairValueReport = unstable_cache(
+  () => fetchAndComputeFairValueReport("qatar"),
+  ["fair-value-qatar-daily-v1"],
+  {
+    revalidate: 604800,
+    tags: [DAILY_CACHE_TAGS.market],
+  }
+);
+
 /**
  * Cached daily on Vercel Data Cache + Runtime Cache.
  * Automatically revalidated when the 2nd daily bot run (phase="close") finishes
@@ -86,7 +107,8 @@ const getCachedTasiFairValueReport = unstable_cache(
 export async function getCachedFairValueReport(
   market: MarketMode = "egx"
 ): Promise<FairValueReport> {
-  return market === "tasi"
-    ? getCachedTasiFairValueReport()
-    : getCachedEgxFairValueReport();
+  if (market === "tasi") return getCachedTasiFairValueReport();
+  if (market === "uae") return getCachedUaeFairValueReport();
+  if (market === "qatar") return getCachedQatarFairValueReport();
+  return getCachedEgxFairValueReport();
 }

@@ -14,13 +14,13 @@ export interface B2BTierSpec {
   is_featured: boolean;
 }
 
-import { SAUDI_SAR_EXCHANGE_MAP, toDisplayAmount } from "@/lib/saudi-pricing";
+import { type CheckoutMarket, SAUDI_SAR_EXCHANGE_MAP, toDisplayAmount } from "@/lib/saudi-pricing";
 
 export const B2B_SAR_EXCHANGE_MAP = SAUDI_SAR_EXCHANGE_MAP;
 
-/** Convert an internal EGP price to the active market display currency (SAR for TASI, EGP for EGX). */
-export function toB2BDisplayAmount(amountEgp: number, isSaudi: boolean): number {
-  return toDisplayAmount(amountEgp, isSaudi);
+/** Convert an internal EGP price to the active market display currency (SAR/AED/QAR for Gulf, EGP for EGX). */
+export function toB2BDisplayAmount(amountEgp: number, marketOrIsSaudi: boolean | CheckoutMarket): number {
+  return toDisplayAmount(amountEgp, marketOrIsSaudi);
 }
 
 export const B2B_TIERS: B2BTierSpec[] = [

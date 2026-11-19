@@ -38,8 +38,8 @@ SUPPORT_ADMIN_CHAT_ID = 5149631436  # Chat ID for owner chatting with SharksZone
 
 
 def is_direct_wallet_enabled() -> bool:
-    """Direct wallet transfers are active whenever billing/payments is enabled."""
-    return is_payments_enabled()
+    """Direct wallet auto-activation is permanently disabled (EasyKash-only gateway policy)."""
+    return False
 
 
 def send_direct_wallet_support_alert(

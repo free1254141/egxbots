@@ -44,8 +44,8 @@ export interface FairValueStockItem {
 }
 
 export interface FairValueReport {
-  market?: "egx" | "tasi";
-  currencyCode?: "EGP" | "SAR";
+  market?: "egx" | "tasi" | "uae" | "qatar";
+  currencyCode?: "EGP" | "SAR" | "AED" | "QAR";
   updatedAt: string;
   latestSessionDate: string | null;
   summary: {
@@ -144,15 +144,17 @@ export function computeSingleStockFairValue(params: {
   latestTech?: Record<string, any> | null;
   sectorMedianPe?: number;
   sectorMedianPb?: number;
-  market?: "egx" | "tasi";
+  market?: "egx" | "tasi" | "uae" | "qatar";
 }): FairValueStockItem {
   const sym = String(params.symbol || "").trim().toUpperCase();
   const close = Number(params.close || 0);
   const isSaudi = params.market === "tasi" || isSaudiSymbol(sym);
-  const currencyAr = isSaudi ? "ر.س" : "ج.م";
-  const currencyShort = isSaudi ? "ر" : "ج";
-  const marketTitleLabel = isSaudi ? "السعودي" : "المصري";
-  const marketGrahamLabel = isSaudi ? "للسوق السعودي" : "للبورصة المصرية";
+  const isUae = params.market === "uae";
+  const isQatar = params.market === "qatar";
+  const currencyAr = isUae ? "د.إ" : isQatar ? "ر.ق" : isSaudi ? "ر.س" : "ج.م";
+  const currencyShort = isUae ? "د.إ" : isQatar ? "ر.ق" : isSaudi ? "ر" : "ج";
+  const marketTitleLabel = isUae ? "الإماراتي" : isQatar ? "القطري" : isSaudi ? "السعودي" : "المصري";
+  const marketGrahamLabel = isUae ? "لسوق الإمارات" : isQatar ? "لبورصة قطر" : isSaudi ? "للسوق السعودي" : "للبورصة المصرية";
   const fundRow = params.fundRow || {};
   const data =
     params.fundData && typeof params.fundData === "object"
@@ -384,7 +386,7 @@ export function computeSingleStockFairValue(params: {
         : null,
     ema200: ema200Val !== null ? Number(ema200Val.toFixed(2)) : null,
     vwap20: vwap20Val !== null ? Number(vwap20Val.toFixed(2)) : null,
-    isSharia: isShariaCompliant(sym, isSaudi ? "tasi" : "egx"),
+    isSharia: isShariaCompliant(sym, params.market || (isSaudi ? "tasi" : "egx")),
     date: rowDate,
   };
 }
@@ -392,7 +394,7 @@ export function computeSingleStockFairValue(params: {
 export function computeFairValueReport(
   fundamentalsRows: Array<Record<string, any>>,
   indicatorRows: Array<Record<string, any>>,
-  market: "egx" | "tasi" = "egx"
+  market: "egx" | "tasi" | "uae" | "qatar" = "egx"
 ): FairValueReport {
   const fundMap = new Map<string, Record<string, any>>();
   for (const row of fundamentalsRows || []) {
@@ -516,7 +518,7 @@ export function computeFairValueReport(
 
   return {
     market,
-    currencyCode: market === "tasi" ? "SAR" : "EGP",
+    currencyCode: market === "tasi" ? "SAR" : market === "uae" ? "AED" : market === "qatar" ? "QAR" : "EGP",
     updatedAt: new Date().toISOString(),
     latestSessionDate,
     summary: {

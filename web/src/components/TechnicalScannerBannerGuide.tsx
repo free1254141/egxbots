@@ -24,10 +24,12 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function TechnicalScannerBannerGuide() {
   const { language } = useLanguage();
+  const { market, isSaudi } = useMarket();
   const { user } = useAuth();
   const isAr = language === "ar";
   const [isOpen, setIsOpen] = useState(false);
@@ -95,7 +97,15 @@ export default function TechnicalScannerBannerGuide() {
                 </div>
                 <p className="text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200 leading-relaxed max-w-5xl">
                   {isAr
-                    ? "نظام كمي يرصد تدفق السيولة الضخمة وغير المعتادة على أسهم البورصة المصرية مقارنة بمتوسطاتها التاريخية، مع فحص نطاقات التماسك لاقتناص بداية تفريغ الطاقة السعرية وانطلاق الموجة."
+                    ? `نظام كمي يرصد تدفق السيولة الضخمة وغير المعتادة على ${
+                        market === "uae"
+                          ? "أسهم الإمارات (دبي وأبوظبي)"
+                          : market === "qatar"
+                          ? "أسهم بورصة قطر"
+                          : isSaudi
+                          ? "أسهم السوق السعودي (تاسي)"
+                          : "أسهم البورصة المصرية"
+                      } مقارنة بمتوسطاتها التاريخية، مع فحص نطاقات التماسك لاقتناص بداية تفريغ الطاقة السعرية وانطلاق الموجة.`
                     : "Quantitative screener detecting abnormal institutional volume surges compared to historical baselines, identifying consolidation breakouts at the onset of major momentum waves."}
                 </p>
               </div>

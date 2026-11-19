@@ -382,7 +382,7 @@ export default async function StockDetailPage({ params }: PageProps) {
         key={symbol}
         symbol={symbol}
         exchange={exchange}
-        market={marketMode}
+        market={marketMode === "tasi" ? "tasi" : "egx"}
         fundamentals={fundRow}
         latestPrice={latestPrice}
         latestTech={latestTech}

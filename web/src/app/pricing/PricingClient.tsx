@@ -152,6 +152,7 @@ export default function PricingClient() {
   const [telegramSaudiProUrl, setTelegramSaudiProUrl] = useState("");
   const [b2bDashboardUrl, setB2bDashboardUrl] = useState("");
   const [isPro, setIsPro] = useState(false);
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState("pro");
   const [selectedMonths, setSelectedMonths] = useState<number>(1);
   const proCardRef = useRef<HTMLDivElement>(null);
@@ -238,13 +239,10 @@ export default function PricingClient() {
     }
   }, []);
 
-  // Force retail category & clear vip_only/b2b when UAE/Qatar (chat-only markets without Telegram)
+  // Clear vip_only when UAE/Qatar (chat-only markets without local VIP Telegram); B2B stays available for all markets
   useEffect(() => {
-    if (isGccChatOnly) {
-      setPricingCategory("retail");
-      if (selectedPlan === "vip_only" || selectedPlan.startsWith("b2b_")) {
-        setSelectedPlan("chat_only");
-      }
+    if (isGccChatOnly && selectedPlan === "vip_only") {
+      setSelectedPlan("chat_only");
     }
   }, [isGccChatOnly, selectedPlan]);
 
@@ -529,6 +527,7 @@ export default function PricingClient() {
     if (!user?.id) {
       setTrialEligible(true);
       setIsPro(false);
+      setActivePlanId(null);
       setSubscriptionEnd(null);
       return;
     }
@@ -543,7 +542,9 @@ export default function PricingClient() {
         const data = await fetchUserQuotaCached(user.id, { force });
         if (!active || !data || data.ok === false || !data.plan) return;
         const proActive = data?.plan?.is_pro === true;
+        const paidPlanId = proActive && !data?.plan?.is_trial ? String(data?.plan?.id || "").trim().toLowerCase() : null;
         setIsPro(proActive);
+        setActivePlanId(paidPlanId || null);
         setSubscriptionEnd(data?.plan?.current_period_end || null);
         if (data?.plan?.trial_eligible) {
           setTrialEligible(true);
@@ -888,11 +889,11 @@ export default function PricingClient() {
         }
       } else if (plan.id === "pro_6m") {
         const hasFounder6m = foundersIsOpen || isGrandfathered || isGrandfathered100;
-        amount = hasFounder6m ? 500 : 750;
+        amount = isGrandfathered ? 250 : hasFounder6m ? 500 : 750;
         originalAmount = hasFounder6m ? 750 : null;
       } else if (plan.id === "pro_1y") {
         const hasFounder1y = foundersIsOpen || isGrandfathered || isGrandfathered100;
-        amount = hasFounder1y ? 1000 : 1350;
+        amount = isGrandfathered ? 450 : hasFounder1y ? 900 : 1350;
         originalAmount = hasFounder1y ? 1350 : null;
       }
     }
@@ -951,7 +952,24 @@ export default function PricingClient() {
         { text: isAr ? "ترخيص وربط جروب تليجرام واحد" : "License 1 Telegram VIP Group", icon: <Check className="w-3.5 h-3.5" /> },
         { text: isAr ? "كوتة 50 استفسار يومياً (~1,100 استفسار شهرياً)" : "50 queries daily (~1,100/mo)", icon: <Zap className="w-3.5 h-3.5 text-emerald-500" /> },
         { text: isAr ? "توقيع مخصص باسم قناتك ومجتمعك أسفل كل تحليل" : "Custom signature footer on every bot reply", icon: <Sparkles className="w-3.5 h-3.5 text-amber-500" /> },
-        { text: isAr ? (isSaudi ? "تحليل فني ومالي لجميع أسهم السوق السعودي (تداول TASI) بلحظة" : "تحليل فني ومالي لجميع أسهم البورصة المصرية بلحظة") : (isSaudi ? "Instant AI analysis for all Saudi TASI stocks" : "Instant AI analysis for all 280+ EGX stocks"), icon: <BarChart3 className="w-3.5 h-3.5" /> },
+        {
+          text: isAr
+            ? isSaudi
+              ? "تحليل فني ومالي لجميع أسهم السوق السعودي (تداول TASI) والذهب والفضة بلحظة"
+              : isUae
+              ? "تحليل فني ومالي لجميع أسهم الإمارات (دبي DFM وأبوظبي ADX) والذهب والفضة بلحظة"
+              : isQatar
+              ? "تحليل فني ومالي لجميع أسهم بورصة قطر (QSE) والذهب والفضة بلحظة"
+              : "تحليل فني ومالي لجميع أسهم البورصة المصرية (EGX) والذهب والفضة بلحظة"
+            : isSaudi
+            ? "Instant AI analysis for all Saudi TASI stocks, Gold & Silver"
+            : isUae
+            ? "Instant AI analysis for all UAE (DFM & ADX) stocks, Gold & Silver"
+            : isQatar
+            ? "Instant AI analysis for all Qatar (QSE) stocks, Gold & Silver"
+            : "Instant AI analysis for all 280+ EGX stocks, Gold & Silver",
+          icon: <BarChart3 className="w-3.5 h-3.5" />,
+        },
         { text: isAr ? "مانع التكرار والسبام الذكي (كولد داون 90 ثانية للعضو)" : "Anti-spam protection & 90s member cooldown", icon: <ShieldCheck className="w-3.5 h-3.5" /> },
         { text: isAr ? "لوحة تحكم لمتابعة الاستهلاك وتعديل التوقيع" : "Dashboard for usage tracking & signature editing", icon: <Check className="w-3.5 h-3.5" /> },
       ],
@@ -1032,6 +1050,10 @@ export default function PricingClient() {
   const proDurationPricing = computeDurationPlanPricing(proMonthlyBase, selectedMonths);
   const proRegularDurationPricing = computeDurationPlanPricing(regularProMonthly, selectedMonths);
   const isChatHeroForGcc = isGccChatOnly && !(isGrandfathered || isGrandfathered100 || foundersIsOpen);
+  const isLifetimeActive = activePlanId === "lifetime" || activePlanId === "pro_lifetime";
+  const isFullProActive = activePlanId === "pro" || activePlanId === "pro_renewal" || activePlanId === "pro_6m" || activePlanId === "pro_1y";
+  const isChatOnlyActive = activePlanId === "chat_only";
+  const isVipOnlyActive = activePlanId === "vip_only";
 
   const normalizedSelectedPlanId =
     selectedPlan === "pro_6m" || selectedPlan === "pro_1y" ? "pro" : selectedPlan;
@@ -2154,8 +2176,7 @@ export default function PricingClient() {
           </div>
         )}
 
-        {/* ── PRICING CATEGORY SWITCHER: RETAIL VS B2B (hidden for UAE/Qatar where Telegram B2B is off) ── */}
-        {!isGccChatOnly && (
+        {/* ── PRICING CATEGORY SWITCHER: RETAIL VS B2B (available across all markets: EGX, Saudi, UAE, Qatar) ── */}
         <div className="flex justify-center mb-6">
           <div className="inline-flex p-1.5 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm gap-2 max-w-full flex-wrap justify-center">
             <button
@@ -2187,7 +2208,6 @@ export default function PricingClient() {
             </button>
           </div>
         </div>
-        )}
 
         {pricingCategory === "retail" ? (
           <>
@@ -2530,22 +2550,29 @@ export default function PricingClient() {
                 <div className="pt-4 space-y-2">
                   <button
                     type="button"
-                    onClick={() => openPaymentStep("chat_only")}
+                    disabled={isLifetimeActive || isFullProActive}
+                    onClick={() => openPaymentStep(isVipOnlyActive ? "pro" : "chat_only")}
                     className={
-                      isChatHeroForGcc
+                      isLifetimeActive || isFullProActive
+                        ? "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400 cursor-not-allowed"
+                        : isChatHeroForGcc
                         ? "w-full flex items-center justify-center gap-2 rounded-xl py-4 px-4 text-xs sm:text-sm font-black uppercase tracking-wider shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-black"
                         : "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border-2 border-sky-500/40 bg-sky-500/10 hover:bg-sky-500 hover:text-black text-sky-700 dark:text-sky-300 transition-all cursor-pointer"
                     }
                   >
                     <Bot className="w-4 h-4" />
                     <span>
-                      {isChatHeroForGcc
+                      {isLifetimeActive || isFullProActive
+                        ? (isAr ? "مشمولة بالفعل في باقتك الحالية ✓" : "Already included in your active plan ✓")
+                        : isVipOnlyActive
+                        ? (isAr ? "ترقية للشاملة Pro (شات + VIP معاً دون فقدان أيامك)" : "Upgrade to Full Bundle Pro (keeps remaining days)")
+                        : isChatHeroForGcc
                         ? (isAr
-                            ? `اشترك في ${brandName} AI Pro — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
-                            : `Get ${brandName} AI Pro — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
+                            ? `${isChatOnlyActive ? "تجديد" : "اشترك في"} ${brandName} AI Pro — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
+                            : `${isChatOnlyActive ? "Renew" : "Get"} ${brandName} AI Pro — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
                         : (isAr
-                            ? `اشترك في الشات — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
-                            : `Get AI Chat — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)}
+                            ? `${isChatOnlyActive ? "تجديد باقة الشات" : "اشترك في الشات"} — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
+                            : `${isChatOnlyActive ? "Renew AI Chat" : "Get AI Chat"} — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)}
                     </span>
                   </button>
                   <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold text-zinc-500">
@@ -2748,15 +2775,22 @@ export default function PricingClient() {
                 <div className="pt-4 space-y-2">
                   <button
                     type="button"
+                    disabled={isLifetimeActive}
                     onClick={() => openPaymentStep("pro")}
                     className={
-                      isChatHeroForGcc
+                      isLifetimeActive
+                        ? "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400 cursor-not-allowed"
+                        : isChatHeroForGcc
                         ? "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border-2 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500 hover:text-black text-emerald-700 dark:text-emerald-300 transition-all cursor-pointer"
                         : "w-full flex items-center justify-center gap-2 rounded-xl py-4 px-4 text-xs sm:text-sm font-black uppercase tracking-wider shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-black"
                     }
                   >
                     <LockKeyhole className="w-3.5 h-3.5" />
-                    {isPro
+                    {isLifetimeActive
+                      ? (isAr ? "عضويتك الدائمة مفعّلة للأبد 👑" : "Lifetime VIP active forever 👑")
+                      : (isChatOnlyActive || isVipOnlyActive)
+                      ? (isAr ? `ترقية للشاملة (مع حفظ أيامك) — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Upgrade to Full Bundle (keeps days) — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
+                      : isFullProActive
                       ? (isAr ? `تجديد الباقة الشاملة — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Renew Bundle — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
                       : (isAr ? `اشترك في الباقة الشاملة — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Get Full Bundle — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)}
                   </button>
@@ -2862,14 +2896,23 @@ export default function PricingClient() {
                 <div className="pt-4 space-y-2">
                   <button
                     type="button"
-                    onClick={() => openPaymentStep("vip_only")}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border-2 border-teal-500/40 bg-teal-500/10 hover:bg-teal-500 hover:text-black text-teal-700 dark:text-teal-300 transition-all cursor-pointer"
+                    disabled={isLifetimeActive || isFullProActive}
+                    onClick={() => openPaymentStep(isChatOnlyActive ? "pro" : "vip_only")}
+                    className={
+                      isLifetimeActive || isFullProActive
+                        ? "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400 cursor-not-allowed"
+                        : "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border-2 border-teal-500/40 bg-teal-500/10 hover:bg-teal-500 hover:text-black text-teal-700 dark:text-teal-300 transition-all cursor-pointer"
+                    }
                   >
                     <Send className="w-4 h-4" />
                     <span>
-                      {isAr
-                        ? `اشترك في تليجرام VIP — ${durationText} (${vipPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
-                        : `Get VIP Radar — ${durationText} (${vipPricing.finalDisplay.toLocaleString()} ${currencyLabel})`}
+                      {isLifetimeActive || isFullProActive
+                        ? (isAr ? "مشمولة بالفعل في باقتك الحالية ✓" : "Already included in your active plan ✓")
+                        : isChatOnlyActive
+                        ? (isAr ? "ترقية للشاملة Pro (شات + VIP معاً دون فقدان أيامك)" : "Upgrade to Full Bundle Pro (keeps remaining days)")
+                        : (isAr
+                            ? `${isVipOnlyActive ? "تجديد تليجرام VIP" : "اشترك في تليجرام VIP"} — ${durationText} (${vipPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
+                            : `${isVipOnlyActive ? "Renew VIP Radar" : "Get VIP Radar"} — ${durationText} (${vipPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)}
                     </span>
                   </button>
                   <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold text-zinc-500">
@@ -2941,17 +2984,19 @@ export default function PricingClient() {
               <div className="w-full lg:w-auto shrink-0 space-y-2 lg:min-w-[240px]">
                 <button
                   type="button"
-                  disabled={!lifetimeIsOpen}
+                  disabled={!lifetimeIsOpen || isLifetimeActive}
                   onClick={() => openPaymentStep("lifetime")}
                   className={`w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-5 text-xs sm:text-sm font-black uppercase tracking-wider shadow-md transition-all ${
-                    lifetimeIsOpen
+                    lifetimeIsOpen && !isLifetimeActive
                       ? "bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-black cursor-pointer"
                       : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
                   }`}
                 >
                   <Crown className="w-4 h-4 fill-current" />
                   <span>
-                    {lifetimeIsOpen
+                    {isLifetimeActive
+                      ? (isAr ? "عضويتك الدائمة مفعّلة للأبد 👑" : "Lifetime VIP Active Forever 👑")
+                      : lifetimeIsOpen
                       ? isPro
                         ? (isAr ? `ترقية لمدى الحياة (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Upgrade Lifetime (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
                         : (isAr ? `احجز مدى الحياة (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel}) 👑` : `Get Lifetime (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel}) 👑`)
@@ -3071,6 +3116,12 @@ export default function PricingClient() {
             {/* 3 B2B Cards Grid */}
             <div className="grid lg:grid-cols-3 gap-6 items-stretch">
               {b2bPlans.map((plan) => {
+                const b2bCardPricing = computeCheckoutPricing(
+                  plan.amount_egp,
+                  appliedPromo?.discount_percent || 0,
+                  market,
+                );
+                const b2bHasPromo = b2bCardPricing.discountDisplay > 0;
                 return (
                   <div
                     key={plan.id}
@@ -3110,12 +3161,27 @@ export default function PricingClient() {
 
                       {/* Price Section */}
                       <div className="border-b-2 border-zinc-200 dark:border-zinc-800 pb-5">
-                        <div className="flex items-baseline gap-2">
+                        <div className="flex flex-wrap items-baseline gap-2">
                           <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
-                            {displayAmount(plan.amount_egp).toLocaleString()}
+                            {b2bCardPricing.finalDisplay.toLocaleString()}
                           </span>
                           <span className="text-sm font-bold text-zinc-500">{isAr ? `${currencyLabel} / شهرياً` : `${currencyCode} / mo`}</span>
+                          {b2bHasPromo && (
+                            <span className="ms-1 text-lg font-black text-zinc-400 line-through decoration-red-500/80 decoration-2">
+                              {formatPrice(plan.amount_egp)}
+                            </span>
+                          )}
                         </div>
+                        {b2bHasPromo && appliedPromo && (
+                          <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
+                            <Sparkles className="w-3 h-3 shrink-0" />
+                            <span>
+                              {isAr
+                                ? `🎁 خصم كود (${appliedPromo.code}) -${appliedPromo.discount_percent}%`
+                                : `🎁 Promo (${appliedPromo.code}) -${appliedPromo.discount_percent}%`}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex flex-wrap items-center gap-2 mt-2">
                           <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                             <Zap className="w-3.5 h-3.5" />
@@ -3148,7 +3214,7 @@ export default function PricingClient() {
                         className={`w-full flex items-center justify-center gap-2 border-4 border-black dark:border-white py-4 px-4 text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer ${plan.btn_class}`}
                       >
                         <Rocket className="w-4 h-4 shrink-0" />
-                        <span>{isAr ? `اشترك في ${plan.name_ar} (${formatPrice(plan.amount_egp)})` : `Subscribe to ${plan.name_en} (${formatPrice(plan.amount_egp)})`}</span>
+                        <span>{isAr ? `اشترك في ${plan.name_ar} (${b2bCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Subscribe to ${plan.name_en} (${b2bCardPricing.finalDisplay.toLocaleString()} ${currencyCode})`}</span>
                       </button>
                       <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
@@ -3187,7 +3253,11 @@ export default function PricingClient() {
                     {isAr ? "اشترك في الباقة المناسبة" : "Select Your Tier"}
                   </h4>
                   <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-semibold">
-                    {isAr ? "اختر باقة تناسب حجم قناتك ومعدل الاستفسارات اليومي، وادفع بسهولة عبر EasyKash (فودافون كاش أو بطاقة بنكية)." : "Choose Starter, Pro VIP, or Enterprise based on your community size."}
+                    {isAr
+                      ? isGulfPricing
+                        ? "اختر باقة تناسب حجم قناتك ومعدل الاستفسارات اليومي، وادفع بسهولة عبر بوابة EasyKash بالبطاقة الدولية (Visa / Mastercard عبر 3D Secure)."
+                        : "اختر باقة تناسب حجم قناتك ومعدل الاستفسارات اليومي، وادفع بسهولة عبر EasyKash (بطاقة بنكية أو محفظة إلكترونية أو فوري)."
+                      : "Choose Starter, Pro VIP, or Enterprise based on your community size and pay securely via EasyKash."}
                   </p>
                 </div>
 

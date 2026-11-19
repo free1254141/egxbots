@@ -552,7 +552,7 @@ export default function Footer() {
               <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
                 {isAr ? "🇸🇦 أبرز أسهم السوق السعودي تاسي (TASI)" : "🇸🇦 Top Saudi TASI Stocks (AI & Technical Analysis)"}
               </h4>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5 mb-5">
                 {[
                   { sym: "2222", ar: "أرامكو السعودية 2222", en: "Saudi Aramco (2222)" },
                   { sym: "1120", ar: "مصرف الراجحي 1120", en: "Al Rajhi Bank (1120)" },
@@ -574,6 +574,27 @@ export default function Footer() {
                     className="px-2.5 py-1 text-[11px] font-bold bg-zinc-100 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-800 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
                   >
                     {isAr ? s.ar : s.en}
+                  </Link>
+                ))}
+              </div>
+
+              <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
+                {isAr ? "🌍 الأسواق الخليجية والمعادن (DFM, ADX, QSE, XAU)" : "🌍 Gulf Markets & Precious Metals"}
+              </h4>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { href: "/markets", ar: "🌐 بوابة الأسواق العربية والخليجية", en: "🌐 All Regional & Gulf Markets" },
+                  { href: "/markets/uae", ar: "🇦🇪 أسهم الإمارات (دبي DFM وأبوظبي ADX)", en: "🇦🇪 UAE Stocks (DFM & ADX)" },
+                  { href: "/markets/qatar", ar: "🇶🇦 أسهم بورصة قطر (QSE)", en: "🇶🇦 Qatar Exchange (QSE)" },
+                  { href: "/markets/gold-silver", ar: "🥇 الذهب والفضة (XAUUSD & XAGUSD)", en: "🥇 Gold & Silver (XAUUSD & XAGUSD)" },
+                ].map((mkt) => (
+                  <Link
+                    key={mkt.href}
+                    href={mkt.href}
+                    prefetch={false}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-sky-500/10 dark:bg-sky-950/40 text-sky-900 dark:text-sky-300 border border-sky-500/30 hover:border-sky-500 transition-colors"
+                  >
+                    {isAr ? mkt.ar : mkt.en}
                   </Link>
                 ))}
               </div>

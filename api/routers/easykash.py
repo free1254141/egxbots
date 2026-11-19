@@ -46,9 +46,9 @@ def _authenticated_user_id(authorization: str | None) -> str:
 
 
 @router.get("/config")
-def config(user_id: str | None = None, authorization: str | None = Header(default=None)):
-    uid = user_id
-    if not uid and authorization and authorization.startswith("Bearer "):
+def config(authorization: str | None = Header(default=None)):
+    uid = None
+    if authorization and authorization.startswith("Bearer "):
         try:
             uid = _authenticated_user_id(authorization)
         except Exception:

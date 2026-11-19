@@ -156,6 +156,10 @@ class TelegramProInviteTests(unittest.TestCase):
                 self.eq_col = col
                 self.eq_val = val
                 return self
+            def in_(self, col, val):
+                self.in_col = col
+                self.in_val = val
+                return self
             def lt(self, col, val):
                 self.lt_col = col
                 self.lt_val = val
@@ -197,6 +201,102 @@ class TelegramProInviteTests(unittest.TestCase):
              patch.object(invites, "telegram_api") as telegram_api:
             self.assertEqual(invites.revoke_expired_pro_members(), 0)
         telegram_api.assert_not_called()
+
+    def test_downgraded_chat_only_user_is_revoked_from_both_egx_and_saudi_vip_channels(self):
+        past = datetime.now(timezone.utc) - timedelta(days=2)
+
+        class Query:
+            def __init__(self, name): self.name = name
+            def select(self, *args): return self
+            def in_(self, *args): return self
+            def upsert(self, *args, **kwargs): return self
+            def execute(self):
+                rows = {
+                    # User switched to chat_only, so no active row in ACTIVE_PRO_PLAN_IDS
+                    "subscriptions": [],
+                    "pro_telegram_invites": [
+                        {"user_id": "downgraded_u", "invite_expires_at": past.isoformat(), "vip_telegram_user_id": 777},
+                    ],
+                    "profiles": [{"id": "downgraded_u", "telegram_chat_id": "777"}],
+                    "pro_telegram_revocations": [],
+                }
+                return type("Response", (), {"data": rows[self.name]})()
+
+        class FakeSupabase:
+            def table(self, name): return Query(name)
+
+        calls = []
+        def _fake_tg(method, payload):
+            calls.append((method, payload.get("chat_id"), payload.get("user_id")))
+            if method == "getChatMember":
+                return {"ok": True, "result": {"status": "member"}}
+            return {"ok": True}
+
+        with patch.object(invites, "sync_expired_subscriptions_status"), \
+             patch.object(invites, "_init_supabase"), \
+             patch.object(invites, "supabase", FakeSupabase()), \
+             patch.object(invites, "pro_chat_id", return_value="-100EGX"), \
+             patch.object(invites, "saudi_pro_chat_id", return_value="-100TASI"), \
+             patch.object(invites, "telegram_api", side_effect=_fake_tg):
+            expired_map = invites._expired_pro_subscriptions()
+            self.assertIn("downgraded_u", expired_map)
+            removed = invites.revoke_expired_pro_members()
+            self.assertEqual(removed, 2)
+            banned_chats = {cid for m, cid, uid in calls if m == "banChatMember" and uid == 777}
+            self.assertEqual(banned_chats, {"-100EGX", "-100TASI"})
+
+    def test_active_trial_user_not_revoked_and_partial_channel_failure_does_not_suppress_retry(self):
+        future = datetime.now(timezone.utc) + timedelta(days=2)
+        past = datetime.now(timezone.utc) - timedelta(days=1)
+        revocation_upserts = []
+
+        class Query:
+            def __init__(self, name): self.name = name
+            def select(self, *args): return self
+            def in_(self, *args): return self
+            def gt(self, *args): return self
+            def upsert(self, payload, **kwargs):
+                if self.name == "pro_telegram_revocations":
+                    revocation_upserts.append(payload)
+                return self
+            def execute(self):
+                rows = {
+                    "subscriptions": [],
+                    "subscription_trials": [
+                        {"user_id": "active_trial_u", "expires_at": future.isoformat()},
+                    ],
+                    "pro_telegram_invites": [
+                        {"user_id": "active_trial_u", "invite_expires_at": future.isoformat(), "vip_telegram_user_id": 888},
+                        {"user_id": "expired_u", "invite_expires_at": past.isoformat(), "vip_telegram_user_id": 999},
+                    ],
+                    "profiles": [{"id": "expired_u", "telegram_chat_id": "999"}],
+                    "pro_telegram_revocations": [],
+                }
+                return type("Response", (), {"data": rows[self.name]})()
+
+        class FakeSupabase:
+            def table(self, name): return Query(name)
+
+        def _partial_fail_tg(method, payload):
+            if payload.get("chat_id") == "-100TASI":
+                raise RuntimeError("transient telegram timeout")
+            if method == "getChatMember":
+                return {"ok": True, "result": {"status": "member"}}
+            return {"ok": True}
+
+        with patch.object(invites, "sync_expired_subscriptions_status"), \
+             patch.object(invites, "_init_supabase"), \
+             patch.object(invites, "supabase", FakeSupabase()), \
+             patch.object(invites, "pro_chat_id", return_value="-100EGX"), \
+             patch.object(invites, "saudi_pro_chat_id", return_value="-100TASI"), \
+             patch.object(invites, "telegram_api", side_effect=_partial_fail_tg):
+            expired_map = invites._expired_pro_subscriptions()
+            self.assertNotIn("active_trial_u", expired_map)
+            self.assertIn("expired_u", expired_map)
+            removed = invites.revoke_expired_pro_members()
+            self.assertEqual(removed, 1)
+            # Because -100TASI failed, revocation marker must NOT be written so next run retries it
+            self.assertEqual(revocation_upserts, [])
 
 
 if __name__ == "__main__":

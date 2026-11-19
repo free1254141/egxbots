@@ -29,6 +29,7 @@ from api.perf_utils import (
     SingleFlight,
     get_cairo_date_str,
     get_market_exchange,
+    get_market_exchanges,
     get_market_supabase,
     get_primary_supabase,
     resolve_request_market,
@@ -724,10 +725,13 @@ def _compute_single_fair_value(
 ) -> Dict[str, Any]:
     sym = symbol.strip().upper()
     is_saudi = market == "tasi" or is_saudi_symbol(sym)
-    currency_ar = "ر.س" if is_saudi else "ج.م"
-    currency_short = "ر" if is_saudi else "ج"
-    market_title = "السعودي" if is_saudi else "المصري"
-    market_graham = "للسوق السعودي" if is_saudi else "للبورصة المصرية"
+    is_uae = market == "uae"
+    is_qatar = market == "qatar"
+    resolved_market = "uae" if is_uae else ("qatar" if is_qatar else ("tasi" if is_saudi else "egx"))
+    currency_ar = "د.إ" if is_uae else ("ر.ق" if is_qatar else ("ر.س" if is_saudi else "ج.م"))
+    currency_short = "د.إ" if is_uae else ("ر.ق" if is_qatar else ("ر" if is_saudi else "ج"))
+    market_title = "الإماراتي" if is_uae else ("القطري" if is_qatar else ("السعودي" if is_saudi else "المصري"))
+    market_graham = "لسوق الإمارات" if is_uae else ("لبورصة قطر" if is_qatar else ("للسوق السعودي" if is_saudi else "للبورصة المصرية"))
     row = fund_row or {}
     data = row.get("data") if isinstance(row.get("data"), dict) else {}
     tech = ind or {}
@@ -890,19 +894,28 @@ def _compute_single_fair_value(
         "rsi14": round(rsi14, 1) if rsi14 is not None else None,
         "ema200": round(ema200_val, 2) if ema200_val is not None else None,
         "vwap20": round(vwap20_val, 2) if vwap20_val is not None else None,
-        "isSharia": is_sharia_compliant(sym, "tasi" if is_saudi else "egx"),
+        "isSharia": is_sharia_compliant(sym, resolved_market),
         "date": str(tech.get("date"))[:10] if tech.get("date") else None,
     }
 
 
+_MARKET_CURRENCY_MAP = {
+    "egx": "EGP",
+    "tasi": "SAR",
+    "uae": "AED",
+    "qatar": "QAR",
+}
+
+
 def _build_fair_value_report(market: str) -> Dict[str, Any]:
-    is_tasi = market == "tasi"
-    sb = get_market_supabase("tasi" if is_tasi else "egx")
-    exchanges = ["TADAWUL", "TASI"] if is_tasi else ["EGX"]
+    norm_market = market if market in _MARKET_CURRENCY_MAP else "egx"
+    currency_code = _MARKET_CURRENCY_MAP[norm_market]
+    sb = get_market_supabase(norm_market)
+    exchanges = ["TADAWUL", "TASI"] if norm_market == "tasi" else get_market_exchanges(norm_market)
     if sb is None:
         return {
-            "market": "tasi" if is_tasi else "egx",
-            "currencyCode": "SAR" if is_tasi else "EGP",
+            "market": norm_market,
+            "currencyCode": currency_code,
             "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "latestSessionDate": None,
             "summary": {"totalEvaluated": 0, "undervaluedCount": 0, "fairCount": 0, "overvaluedCount": 0, "fundamentalCoverageCount": 0},
@@ -929,17 +942,40 @@ def _build_fair_value_report(market: str) -> Dict[str, Any]:
             .execute()
         )
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    def _q_stocks():
+        return (
+            sb.table("stocks")
+            .select("symbol,name,name_ar,sector")
+            .in_("exchange", exchanges)
+            .eq("is_active", True)
+            .limit(400)
+            .execute()
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
         f_f = pool.submit(_q_funds)
         f_i = pool.submit(_q_ind)
+        f_s = pool.submit(_q_stocks)
         fund_rows = getattr(f_f.result(), "data", None) or []
         ind_rows = getattr(f_i.result(), "data", None) or []
+        stock_rows = getattr(f_s.result(), "data", None) or []
 
     fund_map: Dict[str, Dict[str, Any]] = {}
     for row in fund_rows:
         sym = str(row.get("symbol") or "").strip().upper()
         if sym:
             fund_map[sym] = row
+    for srow in stock_rows:
+        sym = str(srow.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        if sym not in fund_map:
+            fund_map[sym] = {
+                "symbol": sym,
+                "name": srow.get("name"),
+                "name_ar": srow.get("name_ar"),
+                "data": {"sector": srow.get("sector"), "name": srow.get("name")},
+            }
 
     sector_pes: Dict[str, List[float]] = {}
     sector_pbs: Dict[str, List[float]] = {}
@@ -999,14 +1035,14 @@ def _build_fair_value_report(market: str) -> Dict[str, Any]:
                 ind=ind,
                 sector_median_pe=s_pe,
                 sector_median_pb=s_pb,
-                market="tasi" if is_tasi else "egx",
+                market=norm_market,
             )
         )
 
     items.sort(key=lambda x: (-x["upsidePct"], 0 if x["modelType"] == "graham_fundamental" else 1))
     return {
-        "market": "tasi" if is_tasi else "egx",
-        "currencyCode": "SAR" if is_tasi else "EGP",
+        "market": norm_market,
+        "currencyCode": currency_code,
         "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "latestSessionDate": latest_session,
         "summary": {
@@ -1022,7 +1058,7 @@ def _build_fair_value_report(market: str) -> Dict[str, Any]:
 
 
 def _get_fair_value(market: str) -> Dict[str, Any]:
-    key = "tasi" if market == "tasi" else "egx"
+    key = market if market in _MARKET_CURRENCY_MAP else "egx"
     found, cached = _FAIR_VALUE_CACHE.get(key)
     if found:
         return cached
@@ -1148,14 +1184,14 @@ async def api_public_sitemap_posts():
 
 def _fetch_technical_dataset(market: str) -> Dict[str, List[Dict[str, Any]]]:
     sb = get_market_supabase(market)
-    exchange = get_market_exchange(market)
+    exchanges = get_market_exchanges(market)
     if sb is None:
         return {"stocks": [], "indicators": [], "fundamentals": [], "scanResults": []}
 
     def _q_stocks():
         for fields in ("symbol, name, name_ar, sector, industry", "symbol, name, name_ar, sector", "symbol, name, sector", "symbol"):
             try:
-                res = sb.table("stocks").select(fields).eq("exchange", exchange).eq("is_active", True).limit(1000).execute()
+                res = sb.table("stocks").select(fields).in_("exchange", exchanges).eq("is_active", True).limit(1000).execute()
                 return getattr(res, "data", None) or []
             except Exception:
                 continue
@@ -1170,7 +1206,7 @@ def _fetch_technical_dataset(market: str) -> Dict[str, List[Dict[str, Any]]]:
         )
         for f in fields_list:
             try:
-                res = sb.table("stock_technical_indicators").select(f).eq("exchange", exchange).order("date", desc=True).limit(1000).execute()
+                res = sb.table("stock_technical_indicators").select(f).in_("exchange", exchanges).order("date", desc=True).limit(1000).execute()
                 return getattr(res, "data", None) or []
             except Exception:
                 continue
@@ -1187,8 +1223,8 @@ def _fetch_technical_dataset(market: str) -> Dict[str, List[Dict[str, Any]]]:
         return {"stocks": stocks, "indicators": [], "fundamentals": [], "scanResults": []}
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        f_fu = pool.submit(lambda: getattr(sb.table("stock_fundamentals").select("symbol, name, fund_score, data").eq("exchange", exchange).in_("symbol", unique_syms).limit(len(unique_syms) + 20).execute(), "data", None) or [])
-        f_sc = pool.submit(lambda: getattr(sb.table("scan_results").select("symbol, precision").eq("exchange", exchange).in_("symbol", unique_syms).order("created_at", desc=True).limit(min(len(unique_syms) * 3, 2000)).execute(), "data", None) or [])
+        f_fu = pool.submit(lambda: getattr(sb.table("stock_fundamentals").select("symbol, name, fund_score, data").in_("exchange", exchanges).in_("symbol", unique_syms).limit(len(unique_syms) + 20).execute(), "data", None) or [])
+        f_sc = pool.submit(lambda: getattr(sb.table("scan_results").select("symbol, precision").in_("exchange", exchanges).in_("symbol", unique_syms).order("created_at", desc=True).limit(min(len(unique_syms) * 3, 2000)).execute(), "data", None) or [])
         fundamentals = f_fu.result()
         scan_results = f_sc.result()
 
@@ -1206,7 +1242,7 @@ async def api_scan_technical(request: Request):
 
     market = resolve_request_market(request, body.get("market") or body.get("country") or body.get("exchange"))
     exchange = get_market_exchange(market)
-    currency = "SAR" if market == "tasi" else "EGP"
+    currency = _MARKET_CURRENCY_MAP.get(market, "EGP")
     limit = max(1, min(int(_num(body.get("limit"), 50)), 500))
 
     found, dataset = _TECH_DATASET_CACHE.get(market)
@@ -1289,7 +1325,7 @@ async def api_scan_technical(request: Request):
         s_rec = stock_map.get(tech.get("symbol")) or {}
         name = (
             (s_rec.get("name_ar") or f_rec.get("name") or f_data.get("name") or s_rec.get("name") or tech.get("symbol"))
-            if market == "tasi"
+            if market != "egx"
             else (f_rec.get("name") or f_data.get("name") or s_rec.get("name") or tech.get("symbol"))
         )
         m_cap = _num(f_data.get("marketCap"))
@@ -1495,10 +1531,11 @@ def _get_symbol_sectors_for_news(market: str) -> Dict[str, Dict[str, str]]:
         sb = get_market_supabase(market)
         if sb is None:
             return {}
-        fund_rows = getattr(sb.table("stock_fundamentals").select("symbol,data").limit(1000).execute(), "data", None) or []
+        exchanges = get_market_exchanges(market)
+        fund_rows = getattr(sb.table("stock_fundamentals").select("symbol,data").in_("exchange", exchanges).limit(1000).execute(), "data", None) or []
         meta_rows = (
-            getattr(sb.table("stocks").select("symbol,sector").eq("exchange", "TADAWUL").limit(1000).execute(), "data", None) or []
-            if market == "tasi"
+            getattr(sb.table("stocks").select("symbol,sector").in_("exchange", exchanges).limit(1000).execute(), "data", None) or []
+            if market in ("tasi", "uae", "qatar")
             else []
         )
         mapping: Dict[str, Dict[str, str]] = {}
@@ -1533,8 +1570,9 @@ def _load_news_rows(market: str, exact: str, month: str, period: str) -> List[Di
         sb = get_market_supabase(market)
         if sb is None:
             return []
-        exchange = get_market_exchange(market)
-        tz_offset = timezone(timedelta(hours=3 if market == "tasi" else 2))
+        exchanges = get_market_exchanges(market)
+        tz_hours = 4 if market == "uae" else (3 if market in ("tasi", "qatar") else 2)
+        tz_offset = timezone(timedelta(hours=tz_hours))
         today = datetime.now(tz_offset).strftime("%Y-%m-%d")
         start = exact or (f"{month}-01" if month else today)
         end = exact or today
@@ -1559,7 +1597,7 @@ def _load_news_rows(market: str, exact: str, month: str, period: str) -> List[Di
                 res = (
                     sb.table("stock_news_sentiment")
                     .select("id,symbol,exchange,date,sentiment_score,news_count,headlines,sources")
-                    .eq("exchange", exchange)
+                    .in_("exchange", exchanges)
                     .gt("news_count", 0)
                     .gte("date", from_s)
                     .lt("date", until_s)
@@ -2223,47 +2261,63 @@ async def api_scan_sectors_timeline(request: Request):
 def _load_traps_snapshot(market: str) -> Dict[str, Any]:
     sb = get_market_supabase(market)
     exchange = get_market_exchange(market)
-    currency = "SAR" if market == "tasi" else "EGP"
+    exchanges = get_market_exchanges(market)
+    currency = _MARKET_CURRENCY_MAP.get(market, "EGP")
     if sb is None:
         return {"asOf": None, "exchange": exchange, "currency": currency, "bearTraps": [], "bullTraps": [], "totalBearTraps": 0, "totalBullTraps": 0}
-    c_keys = ["scanner_traps_TADAWUL", "scanner_traps_TASI", "daily_traps_snapshot_tasi"] if market == "tasi" else ["scanner_traps_EGX", "daily_traps_snapshot"]
-    try:
-        c_rows = getattr(sb.table("market_cache").select("payload,computed_at").in_("cache_key", c_keys).order("computed_at", desc=True).limit(1).execute(), "data", None) or []
-        if c_rows and isinstance(c_rows[0].get("payload"), dict):
-            pl = c_rows[0]["payload"]
-            bear = pl.get("bearTraps") or []
-            bull = pl.get("bullTraps") or []
-            if bear or bull:
-                return {
-                    "asOf": pl.get("asOf"),
-                    "exchange": exchange,
-                    "currency": currency,
-                    "bearTraps": bear[:8],
-                    "bullTraps": bull[:8],
-                    "totalBearTraps": pl.get("totalBearTraps", len(bear)),
-                    "totalBullTraps": pl.get("totalBullTraps", len(bull)),
-                }
-    except Exception:
-        pass
+    if market in ("egx", "tasi"):
+        c_keys = ["scanner_traps_TADAWUL", "scanner_traps_TASI", "daily_traps_snapshot_tasi"] if market == "tasi" else ["scanner_traps_EGX", "daily_traps_snapshot"]
+        try:
+            c_rows = getattr(sb.table("market_cache").select("payload,computed_at").in_("cache_key", c_keys).order("computed_at", desc=True).limit(1).execute(), "data", None) or []
+            if c_rows and isinstance(c_rows[0].get("payload"), dict):
+                pl = c_rows[0]["payload"]
+                bear = pl.get("bearTraps") or []
+                bull = pl.get("bullTraps") or []
+                if bear or bull:
+                    return {
+                        "asOf": pl.get("asOf"),
+                        "exchange": exchange,
+                        "currency": currency,
+                        "bearTraps": bear[:8],
+                        "bullTraps": bull[:8],
+                        "totalBearTraps": pl.get("totalBearTraps", len(bear)),
+                        "totalBullTraps": pl.get("totalBullTraps", len(bull)),
+                    }
+        except Exception:
+            pass
 
-    latest = getattr(sb.table("stock_technical_indicators").select("date").eq("exchange", exchange).order("date", desc=True).limit(1).execute(), "data", None) or []
+    latest = getattr(sb.table("stock_technical_indicators").select("date").in_("exchange", exchanges).order("date", desc=True).limit(1).execute(), "data", None) or []
     as_of = str(latest[0]["date"])[:10] if latest and latest[0].get("date") else None
     if not as_of:
         return {"asOf": None, "exchange": exchange, "currency": currency, "bearTraps": [], "bullTraps": [], "totalBearTraps": 0, "totalBullTraps": 0}
 
     def _q_ind():
-        for f in ("symbol,close,change_pct,rsi_14,r_vol,ema_20,sma_20,bb_upper,bb_lower,egx_ai_score", "symbol,close,change_pct,rsi_14,r_vol,ema_20,sma_20,bb_upper,bb_lower", "symbol,close,change_pct,rsi_14,ema_20"):
+        for f in ("symbol,exchange,close,change_pct,rsi_14,r_vol,ema_20,sma_20,bb_upper,bb_lower,egx_ai_score", "symbol,exchange,close,change_pct,rsi_14,r_vol,ema_20,sma_20,bb_upper,bb_lower", "symbol,close,change_pct,rsi_14,ema_20"):
             try:
-                return getattr(sb.table("stock_technical_indicators").select(f).eq("exchange", exchange).eq("date", as_of).limit(500).execute(), "data", None) or []
+                return getattr(sb.table("stock_technical_indicators").select(f).in_("exchange", exchanges).eq("date", as_of).limit(500).execute(), "data", None) or []
             except Exception:
                 continue
         return []
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    def _q_names():
+        if market == "egx":
+            return []
+        try:
+            return getattr(sb.table("stocks").select("symbol,name_ar,name").in_("exchange", exchanges).limit(500).execute(), "data", None) or []
+        except Exception:
+            return []
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
         f_i = pool.submit(_q_ind)
-        f_b = pool.submit(lambda: getattr(sb.table("stock_prices").select("symbol,open,high,low,close").eq("exchange", exchange).eq("date", as_of).limit(500).execute(), "data", None) or [])
+        f_b = pool.submit(lambda: getattr(sb.table("stock_prices").select("symbol,open,high,low,close").in_("exchange", exchanges).eq("date", as_of).limit(500).execute(), "data", None) or [])
+        f_n = pool.submit(_q_names)
         ind_rows = f_i.result()
         bars_map = {str(b["symbol"]).strip().upper(): b for b in f_b.result() if b.get("symbol")}
+        stock_names_map = {
+            str(s["symbol"]).strip().upper(): (s.get("name_ar") or s.get("name") or "")
+            for s in f_n.result()
+            if s.get("symbol")
+        }
 
     bears: List[Dict[str, Any]] = []
     bulls: List[Dict[str, Any]] = []
@@ -2290,8 +2344,11 @@ def _load_traps_snapshot(market: str) -> Dict[str, Any]:
         bb_hi = _finite(ind.get("bb_upper")) or sma20 * 1.05
         ai_raw = _finite(ind.get("egx_ai_score"))
         ai_sc = round(ai_raw * 100) if (ai_raw is not None and 0 <= ai_raw <= 1) else ai_raw
-        name_ar = SAUDI_STOCK_NAMES_AR.get(sym) if market == "tasi" else CANONICAL_EGX_STOCK_NAMES.get(sym, {}).get("name_ar")
-        name_ar = name_ar or sym
+        name_ar = (
+            stock_names_map.get(sym) or SAUDI_STOCK_NAMES_AR.get(sym)
+            if market != "egx"
+            else CANONICAL_EGX_STOCK_NAMES.get(sym, {}).get("name_ar")
+        ) or sym
 
         sup_ref = bb_lo if abs(low - bb_lo) < abs(low - sma20) else sma20
         if low <= sup_ref * 1.005 and close >= sup_ref * 0.992 and rec_r >= 0.62 and r_vol >= 0.8:
@@ -2340,17 +2397,18 @@ async def api_scan_traps(request: Request):
 def _load_unusual_activity(market: str) -> Dict[str, Any]:
     sb = get_market_supabase(market)
     exchange = get_market_exchange(market)
-    currency = "SAR" if market == "tasi" else "EGP"
+    exchanges = get_market_exchanges(market)
+    currency = _MARKET_CURRENCY_MAP.get(market, "EGP")
     if sb is None:
         return {"asOf": None, "exchange": exchange, "currency": currency, "coverage": 0, "totalMatches": 0, "threshold": 2, "rows": []}
-    latest = getattr(sb.table("stock_technical_indicators").select("date").eq("exchange", exchange).order("date", desc=True).limit(1).execute(), "data", None) or []
+    latest = getattr(sb.table("stock_technical_indicators").select("date").in_("exchange", exchanges).order("date", desc=True).limit(1).execute(), "data", None) or []
     as_of = str(latest[0]["date"])[:10] if latest and latest[0].get("date") else None
     if not as_of:
         return {"asOf": None, "exchange": exchange, "currency": currency, "coverage": 0, "totalMatches": 0, "threshold": 2, "rows": []}
     ind_rows = []
-    for f in ("symbol,close,change_pct,rsi_14,r_vol,vol_sma20,volume,egx_ai_score", "symbol,close,change_pct,rsi_14,r_vol,vol_sma20,volume", "symbol,close,change_pct,rsi_14,volume_sma_20,volume"):
+    for f in ("symbol,exchange,close,change_pct,rsi_14,r_vol,vol_sma20,volume,egx_ai_score", "symbol,exchange,close,change_pct,rsi_14,r_vol,vol_sma20,volume", "symbol,close,change_pct,rsi_14,volume_sma_20,volume"):
         try:
-            ind_rows = getattr(sb.table("stock_technical_indicators").select(f).eq("exchange", exchange).eq("date", as_of).limit(1000).execute(), "data", None) or []
+            ind_rows = getattr(sb.table("stock_technical_indicators").select(f).in_("exchange", exchanges).eq("date", as_of).limit(1000).execute(), "data", None) or []
             break
         except Exception:
             continue
@@ -2359,26 +2417,50 @@ def _load_unusual_activity(market: str) -> Dict[str, Any]:
         if row.get("symbol"):
             by_sym[str(row["symbol"])] = row
 
-    unusual = []
+    enriched: List[Dict[str, Any]] = []
     for row in by_sym.values():
         avg_v = _finite(row.get("vol_sma20") if row.get("vol_sma20") is not None else row.get("volume_sma_20")) or 0.0
         vol = _finite(row.get("volume")) or 0.0
         r_vol = _finite(row.get("r_vol"))
         if r_vol is None:
             r_vol = (vol / avg_v) if (avg_v > 0 and vol > 0) else 0.0
-        if r_vol >= 2.0 and avg_v > 0 and vol > 0:
-            unusual.append({**row, "_rvol": r_vol})
+        if avg_v > 0 and vol > 0:
+            enriched.append({**row, "_rvol": r_vol})
+
+    threshold: float = 2
+    unusual = [r for r in enriched if r["_rvol"] >= threshold]
+    if market in ("uae", "qatar") and len(unusual) < 3:
+        threshold = 1.25
+        unusual = [r for r in enriched if r["_rvol"] >= threshold]
+
     unusual.sort(key=lambda x: x["_rvol"], reverse=True)
     candidates = unusual[:15]
     cand_syms = [r["symbol"] for r in candidates]
     history: Dict[str, List[float]] = {}
+    stock_names_map: Dict[str, str] = {}
     if cand_syms:
         from_d = (datetime.strptime(as_of, "%Y-%m-%d") - timedelta(days=75)).strftime("%Y-%m-%d")
-        bars = getattr(sb.table("stock_prices").select("symbol,date,high").eq("exchange", exchange).in_("symbol", cand_syms).gte("date", from_d).lt("date", as_of).order("date", desc=True).limit(1000).execute(), "data", None) or []
-        for b in bars:
-            h = _finite(b.get("high"))
-            if h is not None and len(history.get(b["symbol"], [])) < 20:
-                history.setdefault(b["symbol"], []).append(h)
+        def _q_bars():
+            return getattr(sb.table("stock_prices").select("symbol,date,high").in_("exchange", exchanges).in_("symbol", cand_syms).gte("date", from_d).lt("date", as_of).order("date", desc=True).limit(1000).execute(), "data", None) or []
+        def _q_stock_names():
+            if market == "egx":
+                return []
+            try:
+                return getattr(sb.table("stocks").select("symbol,name_ar,name").in_("exchange", exchanges).in_("symbol", cand_syms).limit(len(cand_syms)).execute(), "data", None) or []
+            except Exception:
+                return []
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_bars = pool.submit(_q_bars)
+            f_names = pool.submit(_q_stock_names)
+            for b in f_bars.result():
+                h = _finite(b.get("high"))
+                if h is not None and len(history.get(b["symbol"], [])) < 20:
+                    history.setdefault(b["symbol"], []).append(h)
+            for s in f_names.result():
+                su = str(s.get("symbol") or "").strip().upper()
+                lbl = s.get("name_ar") or s.get("name") or ""
+                if su and lbl:
+                    stock_names_map[su] = str(lbl)
 
     rows_out = []
     for r in candidates:
@@ -2388,9 +2470,14 @@ def _load_unusual_activity(market: str) -> Dict[str, Any]:
         hi_list = history.get(sym) or []
         res_20 = max(hi_list) if hi_list else None
         score = _finite(r.get("egx_ai_score"))
-        name_ar = SAUDI_STOCK_NAMES_AR.get(sym_u) if market == "tasi" else CANONICAL_EGX_STOCK_NAMES.get(sym_u, {}).get("name_ar")
+        name_ar = (
+            stock_names_map.get(sym_u) or SAUDI_STOCK_NAMES_AR.get(sym_u)
+            if market != "egx"
+            else CANONICAL_EGX_STOCK_NAMES.get(sym_u, {}).get("name_ar")
+        )
         rows_out.append({
             "symbol": sym,
+            "exchange": str(r.get("exchange") or exchange),
             "nameAr": name_ar or sym,
             "relativeVolume": float(r["_rvol"]),
             "close": close,
@@ -2400,7 +2487,7 @@ def _load_unusual_activity(market: str) -> Dict[str, Any]:
             "resistance": res_20,
             "distanceToResistancePct": ((res_20 - close) / res_20) * 100.0 if (res_20 and close is not None) else None,
         })
-    return {"asOf": as_of, "exchange": exchange, "currency": currency, "coverage": len(by_sym), "totalMatches": len(unusual), "threshold": 2, "rows": rows_out}
+    return {"asOf": as_of, "exchange": exchange, "currency": currency, "coverage": len(by_sym), "totalMatches": len(unusual), "threshold": threshold, "rows": rows_out}
 
 
 @router.get("/api/scan/unusual-activity")

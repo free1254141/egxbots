@@ -25,14 +25,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ data: [], total: 0, stats: { total: 0, buys: 0, sells: 0, shareholding: 0 } });
   }
 
-  let query = supabase
-    .from("egx_disclosures")
-    .select(
-      "id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata",
-      { count: "exact" }
-    )
-    .order("disclosure_date", { ascending: false })
-    .order("created_at", { ascending: false });
+  const applyMarketExchangeFilter = (q: any) => {
+    if (market === "uae") return q.in("metadata->>exchange", ["DFM", "ADX"]);
+    if (market === "qatar") return q.eq("metadata->>exchange", "QSE");
+    if (market === "tasi") return q.eq("metadata->>exchange", "TADAWUL");
+    return q;
+  };
+
+  let query = applyMarketExchangeFilter(
+    supabase
+      .from("egx_disclosures")
+      .select(
+        "id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata",
+        { count: "exact" }
+      )
+      .order("disclosure_date", { ascending: false })
+      .order("created_at", { ascending: false })
+  );
 
   if (type !== "all") {
     query = query.eq("disclosure_type", type);
@@ -49,7 +58,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Sector filtering
-  if (sector !== "all" && market !== "tasi") {
+  if (sector !== "all" && market === "egx") {
     const secDef = EGX_SECTORS.find((s) => s.id === sector);
     if (secDef && secDef.symbols.length > 0) {
       query = query.in("symbol", secDef.symbols);
@@ -58,9 +67,9 @@ export async function GET(req: NextRequest) {
 
   // Timeframe filtering (based on latest trading session date in DB)
   if (timeframe !== "all") {
-    const { data: latestRows } = await supabase
-      .from("egx_disclosures")
-      .select("disclosure_date")
+    const { data: latestRows } = await applyMarketExchangeFilter(
+      supabase.from("egx_disclosures").select("disclosure_date")
+    )
       .order("disclosure_date", { ascending: false })
       .limit(150);
 

@@ -7,6 +7,34 @@ export const dynamic = "force-dynamic";
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store, max-age=0" };
+const VIP_ELIGIBLE_PLAN_IDS = new Set([
+  "pro",
+  "pro_renewal",
+  "pro_6m",
+  "pro_1y",
+  "lifetime",
+  "pro_lifetime",
+  "vip_only",
+]);
+
+function mergeCustomerNote(existing: unknown, addition: string): string {
+  const existingClean = String(existing || "").trim();
+  const addClean = String(addition || "").trim();
+  if (!existingClean) return addClean;
+  if (!addClean) return existingClean;
+  const parts = existingClean.split("|").map((p) => p.trim()).filter(Boolean);
+  for (const seg of addClean.split("|").map((s) => s.trim()).filter(Boolean)) {
+    if (!parts.includes(seg)) parts.push(seg);
+  }
+  return parts.join(" | ");
+}
+
+function isSubmittedLeaseExpired(updatedAt: unknown, ttlMs = 300_000): boolean {
+  if (!updatedAt) return true;
+  const ts = Date.parse(String(updatedAt));
+  if (!Number.isFinite(ts)) return true;
+  return Date.now() - ts > ttlMs;
+}
 
 // Short 8-second in-memory cache to debounce rapid consecutive status requests for the same order
 const orderStatusCache = new Map<string, { payload: any; expiresAt: number }>();
@@ -37,9 +65,10 @@ export async function GET(req: NextRequest) {
     const service = getSupabaseServiceClient();
     const { data: order, error } = await service
       .from("local_payment_orders")
-      .select("id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
+      .select("id,plan_id,amount_egp,duration_days,status,provider,updated_at,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
       .eq("id", orderId)
       .eq("user_id", user.id)
+      .eq("provider", "easykash")
       .maybeSingle();
 
     // If order is pending/submitted, reconcile in real time with EasyKash
@@ -75,26 +104,60 @@ export async function GET(req: NextRequest) {
               } catch {}
               const { data: refreshed } = await service
                 .from("local_payment_orders")
-                .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
+                .select("id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
                 .eq("id", orderId)
                 .maybeSingle();
               if (refreshed) Object.assign(order, refreshed);
             } else if (["FAILED", "FAIL", "REJECTED"].includes(ekStatus)) {
-              const note = `EasyKash: ${ekStatus} (${method}) | ref: ${easykashRef}`.trim();
-              await service
-                .from("local_payment_orders")
-                .update({ status: "failed", payment_review_status: "rejected", customer_note: note, updated_at: nowIso })
-                .eq("id", orderId);
-              order.status = "failed";
-              order.customer_note = note;
+              const canTransition =
+                order.status === "pending" ||
+                (order.status === "submitted" && isSubmittedLeaseExpired(order.updated_at));
+              if (canTransition) {
+                const note = mergeCustomerNote(
+                  order.customer_note,
+                  `EasyKash: ${ekStatus} (${method}) | ref: ${easykashRef}`.trim()
+                );
+                let updQ = service
+                  .from("local_payment_orders")
+                  .update({ status: "failed", payment_review_status: "rejected", customer_note: note, updated_at: nowIso })
+                  .eq("id", orderId);
+                if (order.status === "submitted") {
+                  updQ = updQ.eq("status", "submitted");
+                  if (order.updated_at) updQ = updQ.eq("updated_at", order.updated_at);
+                } else {
+                  updQ = updQ.eq("status", "pending");
+                }
+                const { data: updRows } = await updQ.select("id");
+                if (updRows && updRows.length > 0) {
+                  order.status = "failed";
+                  order.customer_note = note;
+                }
+              }
             } else if (["EXPIRED", "CANCELLED", "CANCELED"].includes(ekStatus)) {
-              const note = `EasyKash: ${ekStatus} (${method}) | ref: ${easykashRef}`.trim();
-              await service
-                .from("local_payment_orders")
-                .update({ status: "expired", customer_note: note, updated_at: nowIso })
-                .eq("id", orderId);
-              order.status = "expired";
-              order.customer_note = note;
+              const canTransition =
+                order.status === "pending" ||
+                (order.status === "submitted" && isSubmittedLeaseExpired(order.updated_at));
+              if (canTransition) {
+                const note = mergeCustomerNote(
+                  order.customer_note,
+                  `EasyKash: ${ekStatus} (${method}) | ref: ${easykashRef}`.trim()
+                );
+                let updQ = service
+                  .from("local_payment_orders")
+                  .update({ status: "expired", customer_note: note, updated_at: nowIso })
+                  .eq("id", orderId);
+                if (order.status === "submitted") {
+                  updQ = updQ.eq("status", "submitted");
+                  if (order.updated_at) updQ = updQ.eq("updated_at", order.updated_at);
+                } else {
+                  updQ = updQ.eq("status", "pending");
+                }
+                const { data: updRows } = await updQ.select("id");
+                if (updRows && updRows.length > 0) {
+                  order.status = "expired";
+                  order.customer_note = note;
+                }
+              }
             }
           }
         } catch (inqErr) {
@@ -145,7 +208,7 @@ export async function GET(req: NextRequest) {
         b2bDashboardUrl = "/b2b/dashboard";
       } else {
         const orderPlan = String(order.plan_id || "pro").trim().toLowerCase();
-        const includeVip = orderPlan !== "chat_only";
+        const includeVip = VIP_ELIGIBLE_PLAN_IDS.has(orderPlan);
         const planTitleAr =
           orderPlan === "chat_only"
             ? "الشات الذكي (AI Chat Pro)"
@@ -233,7 +296,7 @@ export async function GET(req: NextRequest) {
                 if (tgResp.ok) {
                   await service
                     .from("local_payment_orders")
-                    .update({ customer_note: `${customerNote} | tg_welcomed`.trim() })
+                    .update({ customer_note: mergeCustomerNote(customerNote, "tg_welcomed") })
                     .eq("id", orderId);
                 }
               } catch (err) {

@@ -58,6 +58,24 @@ _CACHE_TTL_SECONDS = 300.0  # 5 minutes background refresh, or immediate via syn
 _cached_egx_stocks: List[Dict[str, Any]] = []
 _last_stocks_refresh: float = 0.0
 _STOCKS_TTL_SECONDS = 3600.0  # 1 hour cache for symbol/Arabic name lookup
+_AUTO_METRICS_TLS = threading.local()
+
+
+def _record_automation_deepseek_usage(raw_usage: Optional[Dict[str, Any]]) -> None:
+    """Compute exact DeepSeek token/cost metrics into thread-local storage for chat history logging."""
+    if not isinstance(raw_usage, dict):
+        return
+    try:
+        from api.agentic_chat.pipeline import (
+            _accumulate_deepseek_usage,
+            _finalize_usage_cost,
+            _new_usage_accumulator,
+        )
+        acc = _new_usage_accumulator()
+        _accumulate_deepseek_usage(acc, raw_usage)
+        _AUTO_METRICS_TLS.last_usage = _finalize_usage_cost(acc, cached=False)
+    except Exception:
+        pass
 
 
 def _get_supabase_config() -> tuple[str, str]:
@@ -580,6 +598,7 @@ def _fetch_market_indicators_brief(
 
 def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") -> str:
     """Generates a professional stock market consultation using DeepSeek."""
+    _AUTO_METRICS_TLS.last_usage = None
     deepseek_key = os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or ""
     if not deepseek_key:
         return "أهلاً بك! تعذر الاتصال بمحرك الذكاء الاصطناعي حالياً لعدم توفر المفتاح. برجاء المراجعة مع الدعم الفني."
@@ -643,6 +662,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
                 res_data = r.json()
                 content = res_data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 if content:
+                    _record_automation_deepseek_usage(res_data.get("usage"))
                     return content
             logger.warning(f"[AUTOMATIONS_WORKER] DeepSeek returned HTTP {r.status_code}: {r.text[:200]}")
         except Exception as e:
@@ -659,6 +679,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
                 data = json.loads(resp.read().decode("utf-8"))
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 if content:
+                    _record_automation_deepseek_usage(data.get("usage"))
                     return content
         except Exception as e:
             logger.warning(f"[AUTOMATIONS_WORKER] DeepSeek urllib error: {e}")
@@ -712,7 +733,16 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
     return "\n".join(fallback_lines)
 
 
-def _log_automation_to_chat_history(auto_id: str, user_id: str, name: str, prompt: str, reply_text: str, now_iso: str) -> None:
+def _log_automation_to_chat_history(
+    auto_id: str,
+    user_id: str,
+    name: str,
+    prompt: str,
+    reply_text: str,
+    now_iso: str,
+    latency_ms: Optional[int] = None,
+    usage: Optional[Dict[str, Any]] = None,
+) -> None:
     """Persists the scheduled consultation into ai_chat_sessions and ai_chat_messages using valid UUID auto_id."""
     try:
         # 1. Upsert session in ai_chat_sessions so foreign key on ai_chat_messages(session_id) is satisfied
@@ -727,7 +757,7 @@ def _log_automation_to_chat_history(auto_id: str, user_id: str, name: str, promp
             },
             extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
         )
-        # 2. Insert user prompt and assistant response
+        # 2. Insert user prompt and assistant response with scheduled_automation source & usage metadata
         _supabase_request(
             "ai_chat_messages",
             method="POST",
@@ -740,16 +770,28 @@ def _log_automation_to_chat_history(auto_id: str, user_id: str, name: str, promp
             },
             extra_headers={"Prefer": "return=minimal"},
         )
+        asst_meta: Dict[str, Any] = {
+            "chat_source": "scheduled_automation",
+            "engine": "deepseek-v3",
+        }
+        if latency_ms is not None:
+            asst_meta["latency_ms"] = int(latency_ms)
+        if isinstance(usage, dict) and usage:
+            asst_meta["usage"] = usage
+        asst_payload: Dict[str, Any] = {
+            "session_id": auto_id,
+            "user_id": user_id,
+            "role": "assistant",
+            "content": reply_text,
+            "created_at": now_iso,
+            "metadata": asst_meta,
+        }
+        if latency_ms is not None:
+            asst_payload["latency_ms"] = int(latency_ms)
         _supabase_request(
             "ai_chat_messages",
             method="POST",
-            payload={
-                "session_id": auto_id,
-                "user_id": user_id,
-                "role": "assistant",
-                "content": reply_text,
-                "created_at": now_iso,
-            },
+            payload=asst_payload,
             extra_headers={"Prefer": "return=minimal"},
         )
     except Exception as e:
@@ -831,9 +873,12 @@ def execute_single_automation(automation: Dict[str, Any], is_test: bool = False)
         )
         return {"ok": False, "reason": "quota_exceeded"}
 
-    # 4. Generate AI consultation
+    # 4. Generate AI consultation (timed + track usage metrics)
     user_name = automation.get("name") or "المستثمر"
+    _t_gen_start = time.time()
     reply_text = _generate_ai_consultation(prompt, user_name, user_id=user_id)
+    auto_latency_ms = max(int((time.time() - _t_gen_start) * 1000), 1)
+    auto_usage = getattr(_AUTO_METRICS_TLS, "last_usage", None)
 
     # 5. Format Telegram Message
     telegram_message = (
@@ -869,7 +914,16 @@ def execute_single_automation(automation: Dict[str, Any], is_test: bool = False)
     )
 
     # 8. Log to chat history with valid UUID session
-    _log_automation_to_chat_history(auto_id, user_id, name, prompt, reply_text, now_iso)
+    _log_automation_to_chat_history(
+        auto_id,
+        user_id,
+        name,
+        prompt,
+        reply_text,
+        now_iso,
+        latency_ms=auto_latency_ms,
+        usage=auto_usage,
+    )
 
     return {"ok": sent, "status": status, "chat_id": chat_id, "error": err}
 

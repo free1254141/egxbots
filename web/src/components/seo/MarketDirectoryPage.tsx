@@ -51,7 +51,7 @@ export default function MarketDirectoryPage({
         "@type": "BreadcrumbList",
         itemListElement: [
           { "@type": "ListItem", position: 1, name: "الرئيسية", item: "https://egxbots.com" },
-          { "@type": "ListItem", position: 2, name: "الأسواق", item: "https://egxbots.com/stocks" },
+          { "@type": "ListItem", position: 2, name: "الأسواق", item: "https://egxbots.com/markets" },
           { "@type": "ListItem", position: 3, name: title, item: canonicalUrl },
         ],
       },

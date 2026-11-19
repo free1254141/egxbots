@@ -81,7 +81,7 @@ const MARKET_STORAGE_KEY = "egxbots_market";
 const MARKET_CHANGE_EVENT = "egxbots:market-change";
 const CACHE_TTL_MS = 15 * 60 * 1000;
 
-export type ActiveMarket = "egx" | "tasi";
+export type ActiveMarket = "egx" | "tasi" | "uae" | "qatar";
 
 function normalizeMarketValue(value: unknown): ActiveMarket | null {
   if (typeof value !== "string") return null;
@@ -94,6 +94,27 @@ function normalizeMarketValue(value: unknown): ActiveMarket | null {
     normalized === "sr"
   ) {
     return "tasi";
+  }
+  if (
+    normalized === "uae" ||
+    normalized === "ae" ||
+    normalized === "aed" ||
+    normalized === "dfm" ||
+    normalized === "adx" ||
+    normalized === "dubai" ||
+    normalized === "abudhabi" ||
+    normalized === "abu dhabi"
+  ) {
+    return "uae";
+  }
+  if (
+    normalized === "qatar" ||
+    normalized === "qa" ||
+    normalized === "qar" ||
+    normalized === "qse" ||
+    normalized === "doha"
+  ) {
+    return "qatar";
   }
   if (normalized === "egx" || normalized === "egypt") {
     return "egx";
@@ -111,7 +132,10 @@ function readStoredMarket(): ActiveMarket {
 }
 
 function countryForMarket(market: ActiveMarket): string {
-  return market === "tasi" ? "Saudi Arabia" : "Egypt";
+  if (market === "tasi") return "Saudi Arabia";
+  if (market === "uae") return "UAE";
+  if (market === "qatar") return "Qatar";
+  return "Egypt";
 }
 
 function getSessionKey(market: ActiveMarket): string {

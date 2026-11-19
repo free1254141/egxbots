@@ -159,6 +159,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   staticPages.push({ url: baseUrl + '/reports', changeFrequency: 'daily', priority: 0.8 });
 
   const saudiLandingPages: MetadataRoute.Sitemap = [
+    { url: `${baseUrl}/markets`, changeFrequency: 'daily', priority: 0.90 },
     { url: `${baseUrl}/stocks?market=tasi`, changeFrequency: 'daily', priority: 0.90 },
     { url: `${baseUrl}/scanner/ai?market=tasi`, changeFrequency: 'daily', priority: 0.90 },
     { url: `${baseUrl}/scanner/technical?market=tasi`, changeFrequency: 'daily', priority: 0.85 },

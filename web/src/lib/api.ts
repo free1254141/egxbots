@@ -37,6 +37,8 @@ export function recordFeatureUse(feature: string, metadata: Record<string, strin
 
 export interface UnusualActivityRow {
   symbol: string;
+  exchange?: string;
+  nameAr?: string;
   relativeVolume: number;
   close: number | null;
   changePct: number | null;
@@ -76,9 +78,12 @@ function resolveStoredSearchMarket(): "egx" | "tasi" | "uae" | "qatar" {
 
 export async function fetchUnusualActivity(
   signal?: AbortSignal,
-  market?: "egx" | "tasi",
+  market?: "egx" | "tasi" | "uae" | "qatar",
 ): Promise<UnusualActivitySnapshot> {
-  const resolvedMarket = market === "tasi" || market === "egx" ? market : resolveStoredBrowserMarket();
+  const resolvedMarket =
+    market === "tasi" || market === "egx" || market === "uae" || market === "qatar"
+      ? market
+      : resolveStoredSearchMarket();
   const response = await fetch(`/api/scan/unusual-activity?market=${resolvedMarket}`, { signal });
   if (!response.ok) throw new Error(`Unusual activity request failed: ${response.status}`);
   return response.json();
@@ -1310,6 +1315,8 @@ export type TechResult = {
 
   symbol: string;
 
+  exchange?: string;
+
   name: string;
 
   last_close: number;
@@ -2496,7 +2503,7 @@ async function fetchDailyPublicJsonCached<T>(
 }
 
 export async function fetchFairValueReportCached<T = any>(
-  market: "egx" | "tasi",
+  market: "egx" | "tasi" | "uae" | "qatar",
   signal?: AbortSignal,
   options?: { forceRefresh?: boolean },
 ): Promise<T> {

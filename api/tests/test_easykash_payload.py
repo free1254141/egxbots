@@ -505,9 +505,11 @@ class SplitPlanCheckoutAndEntitlementTests(unittest.TestCase):
             ("tasi", "pro_1y", False, False, 1721.0, "135 SAR"),
             # Founders 50 & 100 keep Full Bundle pricing even when offer is closed
             ("egx", "pro", True, False, 50.0, None),
-            ("egx", "pro_6m", True, False, 500.0, None),
-            ("egx", "pro_1y", True, False, 1000.0, None),
+            ("egx", "pro_6m", True, False, 250.0, None),
+            ("egx", "pro_1y", True, False, 450.0, None),
             ("egx", "pro", False, True, 100.0, None),
+            ("egx", "pro_6m", False, True, 500.0, None),
+            ("egx", "pro_1y", False, True, 900.0, None),
             ("tasi", "pro", True, False, 64.0, "5 SAR"),
             ("tasi", "pro", False, True, 128.0, "10 SAR"),
             ("tasi", "pro_6m", False, True, 638.0, "50 SAR"),
@@ -1110,6 +1112,8 @@ class SplitPlanCheckoutAndEntitlementTests(unittest.TestCase):
             ("qatar", "+97450123456", "chat_only", 1, 132.0, 10, "QAR"),
             ("qatar", "+97450123456", "pro", 1, 197.0, 15, "QAR"),
             ("qatar", "+97450123456", "pro", 3, 539.0, 41, "QAR"),
+            ("uae", "+971501234567", "b2b_starter", None, 1300.0, 100, "AED"),
+            ("qatar", "+97450123456", "b2b_pro", None, 1973.0, 150, "QAR"),
         ]
 
         for market, mobile, plan_id, months, expected_egp, expected_display, expected_ccy in gcc_cases:
@@ -1157,6 +1161,427 @@ class SplitPlanCheckoutAndEntitlementTests(unittest.TestCase):
             self.assertEqual(float(holder["row"]["amount_egp"]), expected_egp)
             self.assertEqual(float(captured_payload["amount"]), expected_egp)
             self.assertIn(f"Market: {market} (~{expected_display} {expected_ccy})", holder["row"]["customer_note"])
+
+    def test_active_subscription_transition_guards_prevent_downgrade_and_wipeout(self):
+        from datetime import datetime, timezone, timedelta
+        from api.easykash_payments import create_checkout
+
+        future_end = (datetime.now(timezone.utc) + timedelta(days=20)).isoformat()
+
+        def _make_sb(active_plan):
+            class _Q:
+                def __init__(self, tbl):
+                    self._tbl = tbl
+                    self._row = {}
+
+                def select(self, *_a, **_kw): return self
+                def eq(self, *_a, **_kw): return self
+                def order(self, *_a, **_kw): return self
+                def limit(self, *_a, **_kw): return self
+                def insert(self, payload):
+                    self._row = payload
+                    return self
+                def update(self, _payload): return self
+                def execute(self):
+                    if self._tbl == "subscriptions":
+                        return type("R", (), {"data": [{"plan_id": active_plan, "status": "active", "current_period_end": future_end}]})()
+                    if self._tbl == "local_payment_orders":
+                        return type("R", (), {"data": [self._row or {"id": "o1"}]})()
+                    return type("R", (), {"data": []})()
+
+            class _Sb:
+                def table(self, name): return _Q(name)
+
+            return _Sb()
+
+        blocked_pairs = [
+            ("lifetime", "pro"),
+            ("lifetime", "chat_only"),
+            ("pro", "chat_only"),
+            ("pro", "vip_only"),
+            ("chat_only", "vip_only"),
+            ("vip_only", "chat_only"),
+        ]
+        for current_plan, requested_plan in blocked_pairs:
+            with (
+                patch("api.easykash_payments.is_payments_enabled", return_value=True),
+                patch("api.easykash_payments.is_easykash_ready", return_value=True),
+                patch("api.easykash_payments._init_supabase"),
+                patch("api.easykash_payments.supabase", _make_sb(current_plan)),
+            ):
+                with self.assertRaises(ValueError, msg=f"Expected block for {current_plan} -> {requested_plan}"):
+                    create_checkout(
+                        user_id="u-guard",
+                        plan_id=requested_plan,
+                        email="g@example.com",
+                        name="Guard",
+                        mobile="01012345678",
+                    )
+
+        # Allowed upgrade (chat_only -> pro) and same-plan renewal (chat_only -> chat_only) must succeed
+        for current_plan, requested_plan in [("chat_only", "pro"), ("vip_only", "pro"), ("chat_only", "chat_only")]:
+            def _fake_post(_url, json=None, **_kw):
+                return type("Resp", (), {"status_code": 200, "json": staticmethod(lambda: {"redirectUrl": "https://easykash.net/DirectPayV1/ok123"})})()
+
+            with (
+                patch("api.easykash_payments.is_payments_enabled", return_value=True),
+                patch("api.easykash_payments.is_easykash_ready", return_value=True),
+                patch("api.easykash_payments._init_supabase"),
+                patch("api.easykash_payments.supabase", _make_sb(current_plan)),
+                patch("api.easykash_payments.is_user_eligible_for_50_egp_renewal", return_value=False),
+                patch("api.easykash_payments.is_user_eligible_for_100_egp_renewal", return_value=False),
+                patch("api.easykash_payments.founders_offer_is_open", return_value=False),
+                patch("api.payment_common.is_user_eligible_for_50_egp_renewal", return_value=False),
+                patch("api.payment_common.is_user_eligible_for_100_egp_renewal", return_value=False),
+                patch("api.payment_common.founders_offer_is_open", return_value=False),
+                patch("api.payment_common.billing_settings", return_value={}),
+                patch("api.easykash_payments._required_env", return_value="test-api-key"),
+                patch("api.easykash_payments.requests.post", side_effect=_fake_post),
+                patch.dict("os.environ", {"PRO_PRICE_EGP": "150", "CHAT_ONLY_PRICE_EGP": "100", "NOTIFY_TELEGRAM_ON_PAYMENT": "false"}, clear=False),
+            ):
+                res = create_checkout(
+                    user_id="u-guard",
+                    plan_id=requested_plan,
+                    email="g@example.com",
+                    name="Guard",
+                    mobile="01012345678",
+                )
+                self.assertEqual(res["status"], "pending")
+
+    def test_callback_and_sync_preserve_market_note_and_verify_inquire_amount(self):
+        from api.easykash_payments import process_callback, sync_easykash_order_status
+
+        order_uuid = "42345678-1234-4234-8234-123456789001"
+        saved_updates = []
+        order_row = {
+            "id": order_uuid,
+            "user_id": "u-uae-note",
+            "plan_id": "chat_only",
+            "amount_egp": 130.0,
+            "duration_days": 30,
+            "status": "pending",
+            "provider": "easykash",
+            "updated_at": "2026-11-19T00:00:00Z",
+            "customer_note": "Market: uae (~10 AED)",
+            "affiliate_id": None,
+            "affiliate_code": None,
+            "commission_amount_egp": 0,
+            "commission_status": None,
+            "discount_amount_egp": 0,
+        }
+
+        class _NoteQ:
+            def __init__(self, tbl):
+                self._tbl = tbl
+                self._upd = None
+
+            def select(self, *_a, **_kw): return self
+            def eq(self, *_a, **_kw): return self
+            def in_(self, *_a, **_kw): return self
+            def order(self, *_a, **_kw): return self
+            def limit(self, *_a, **_kw): return self
+            def maybe_single(self): return self
+            def update(self, data):
+                self._upd = data
+                saved_updates.append(dict(data))
+                return self
+            def execute(self):
+                if self._tbl == "local_payment_orders":
+                    return type("R", (), {"data": order_row if self._upd is None else [order_row]})()
+                if self._tbl == "subscriptions":
+                    return type("R", (), {"data": {"current_period_end": "2026-12-19T00:00:00Z"}})()
+                return type("R", (), {"data": None})()
+
+        class _NoteSb:
+            def table(self, name): return _NoteQ(name)
+
+        # 1. process_callback preserves "Market: uae (~10 AED)" alongside EasyKash reference
+        with (
+            patch("api.easykash_payments._init_supabase"),
+            patch("api.easykash_payments.supabase", _NoteSb()),
+            patch("api.easykash_payments._verify_callback", return_value=True),
+            patch("api.easykash_payments.activate_subscription"),
+            patch("api.telegram_pro_invites.send_pro_welcome_to_user_telegram", return_value=True),
+            patch.dict("os.environ", {"NOTIFY_TELEGRAM_ON_PAYMENT": "false"}, clear=False),
+        ):
+            res = process_callback({
+                "customerReference": order_uuid,
+                "status": "PAID",
+                "Amount": "130",
+                "ProductCode": "chat_only",
+                "PaymentMethod": "CARD",
+                "easykashRef": "EK-UAE-10",
+                "ProductType": "subscription",
+                "BuyerEmail": "uae@example.com",
+                "BuyerMobile": "+971501234567",
+                "BuyerName": "UAE User",
+                "Timestamp": "20261119",
+            })
+        self.assertTrue(res.get("ok"))
+        approved_updates = [u for u in saved_updates if u.get("status") == "approved"]
+        self.assertEqual(len(approved_updates), 1)
+        self.assertIn("Market: uae (~10 AED)", approved_updates[0]["customer_note"])
+        self.assertIn("EasyKash reference: EK-UAE-10", approved_updates[0]["customer_note"])
+
+        # 2. sync_easykash_order_status rejects mismatched Amount from inquire API
+        order_bad = dict(order_row)
+        activate_spy = []
+        with (
+            patch("api.easykash_payments.supabase", _NoteSb()),
+            patch("api.easykash_payments.activate_subscription", side_effect=lambda *a, **kw: activate_spy.append(1)),
+            patch("api.easykash_payments.requests.post", return_value=type("R", (), {"status_code": 200, "json": staticmethod(lambda: {"status": "PAID", "Amount": "50", "easykashRef": "EK-BAD", "PaymentMethod": "CARD"})})()),
+            patch.dict("os.environ", {"EASYKASH_API_KEY": "k"}, clear=False),
+        ):
+            synced = sync_easykash_order_status(order_bad)
+        self.assertEqual(synced["status"], "pending")
+        self.assertEqual(len(activate_spy), 0)
+
+    def test_payment_gateway_security_hardening_all_eight_audit_fixes(self):
+        from datetime import datetime, timezone
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from api.direct_wallet_payments import is_direct_wallet_enabled
+        from api.routers import direct_wallet as dw_router
+        from api.routers import easykash as ek_router
+        from api.easykash_payments import sync_easykash_order_status
+        from api.payment_common import (
+            activate_subscription,
+            is_user_eligible_for_50_egp_renewal,
+            is_user_eligible_for_100_egp_renewal,
+        )
+
+        # 1. Direct wallet kill-switch is permanently False & router returns 410 / no phone leak
+        with patch.dict("os.environ", {"PAYMENTS_ENABLED": "true"}, clear=False):
+            self.assertFalse(is_direct_wallet_enabled())
+        app = FastAPI()
+        app.include_router(dw_router.router)
+        app.include_router(ek_router.router)
+        client = TestClient(app)
+
+        dw_cfg = client.get("/payment/direct-wallet/config")
+        self.assertEqual(dw_cfg.status_code, 200)
+        self.assertFalse(dw_cfg.json()["enabled"])
+        self.assertNotIn("recipient_wallet", dw_cfg.json())
+
+        dw_post = client.post(
+            "/payment/direct-wallet/confirm",
+            json={"user_id": "u1", "plan_id": "lifetime", "sender_mobile": "01012345678", "transaction_id": "FAKE999"},
+        )
+        self.assertEqual(dw_post.status_code, 410)
+
+        # 2. /payment/easykash/config ignores unauthenticated ?user_id= probing
+        seen_uids = []
+        with patch("api.routers.easykash.payment_config", side_effect=lambda user_id=None: (seen_uids.append(user_id), {"enabled": True})[1]):
+            res_cfg = client.get("/payment/easykash/config?user_id=victim-uuid")
+            self.assertEqual(res_cfg.status_code, 200)
+        self.assertEqual(seen_uids, [None])
+
+        # 3. Promo-discounted orders cannot leak Founder 50 or Founder 100 eligibility
+        class _CouponOrdersSb:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def table(self, name):
+                outer = self
+
+                class _Q:
+                    def __init__(self):
+                        self._filters = []
+
+                    def select(self, *_a, **_kw): return self
+                    def eq(self, col, val): self._filters.append(("eq", col, val)); return self
+                    def in_(self, col, vals): self._filters.append(("in", col, list(vals))); return self
+                    def lte(self, col, val): self._filters.append(("lte", col, val)); return self
+                    def lt(self, *_a, **_kw): return self
+                    def order(self, *_a, **_kw): return self
+                    def limit(self, *_a, **_kw): return self
+
+                    def execute(self):
+                        if name == "founders_offer_members":
+                            return type("R", (), {"data": []})()
+                        if name == "subscriptions":
+                            return type("R", (), {"data": [{"status": "active", "current_period_end": "2099-01-01T00:00:00Z"}]})()
+                        if name == "local_payment_orders":
+                            matched = []
+                            for r in outer._rows:
+                                ok = True
+                                for kind, col, val in self._filters:
+                                    if kind == "eq" and r.get(col) != val:
+                                        ok = False
+                                    elif kind == "in" and r.get(col) not in val:
+                                        ok = False
+                                    elif kind == "lte" and not (r.get(col) is not None and r.get(col) <= val):
+                                        ok = False
+                                if ok:
+                                    matched.append(r)
+                            return type("R", (), {"data": matched})()
+                        return type("R", (), {"data": []})()
+
+                return _Q()
+
+        coupon_rows = [
+            {"id": "o1", "user_id": "u-split", "plan_id": "chat_only", "amount_egp": 50.0, "status": "approved", "discount_amount_egp": 50.0},
+            {"id": "o2", "user_id": "u-promo", "plan_id": "pro", "amount_egp": 90.0, "status": "approved", "discount_amount_egp": 60.0},
+        ]
+        with patch("api.payment_common.supabase", _CouponOrdersSb(coupon_rows)), patch("api.payment_common._init_supabase"):
+            self.assertFalse(is_user_eligible_for_50_egp_renewal("u-split"))
+            self.assertFalse(is_user_eligible_for_100_egp_renewal("u-promo"))
+
+        # 4. sync_easykash_order_status respects active 300s submitted lease AND never overwrites an approved order on stale FAILED
+        now_iso = datetime.now(timezone.utc).isoformat()
+        order_sub = {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "user_id": "u-sub",
+            "plan_id": "pro",
+            "amount_egp": 150.0,
+            "duration_days": 30,
+            "status": "submitted",
+            "updated_at": now_iso,
+            "customer_note": "Market: uae (~15 AED)",
+        }
+        activate_calls = []
+        with (
+            patch("api.easykash_payments.activate_subscription", side_effect=lambda *a, **kw: activate_calls.append(1)),
+            patch("api.easykash_payments.requests.post", return_value=type("R", (), {"status_code": 200, "json": staticmethod(lambda: {"status": "PAID", "Amount": "150", "easykashRef": "EK-SUB", "PaymentMethod": "CARD"})})()),
+            patch.dict("os.environ", {"EASYKASH_API_KEY": "k"}, clear=False),
+        ):
+            res_sub = sync_easykash_order_status(dict(order_sub))
+        self.assertEqual(res_sub["status"], "submitted")
+        self.assertEqual(len(activate_calls), 0)
+
+        # Stale FAILED inquiry returns empty update (because row is already approved in DB) -> must not flip local status
+        class _ApprovedRaceSb:
+            def table(self, _name):
+                class _Q:
+                    def update(self, *_a, **_kw): return self
+                    def eq(self, *_a, **_kw): return self
+                    def in_(self, *_a, **_kw): return self
+                    def execute(self): return type("R", (), {"data": []})()
+                return _Q()
+
+        order_race = {**order_sub, "status": "pending"}
+        with (
+            patch("api.easykash_payments.supabase", _ApprovedRaceSb()),
+            patch("api.easykash_payments.requests.post", return_value=type("R", (), {"status_code": 200, "json": staticmethod(lambda: {"status": "FAILED", "easykashRef": "EK-STALE", "PaymentMethod": "CARD"})})()),
+            patch.dict("os.environ", {"EASYKASH_API_KEY": "k"}, clear=False),
+        ):
+            res_race = sync_easykash_order_status(dict(order_race))
+        self.assertEqual(res_race["status"], "pending")
+
+        # 5. activate_subscription passes monthly catalog cents (not 1350 EGP annual total) for pro_1y
+        rpc_calls = []
+        class _RpcSb:
+            def rpc(self, fn, params):
+                rpc_calls.append((fn, params))
+                return type("E", (), {"execute": lambda self: type("R", (), {"data": None})()})()
+
+        with (
+            patch("api.payment_common.supabase", _RpcSb()),
+            patch("api.payment_common._init_supabase"),
+            patch("api.payment_common.pro_regular_amount_egp", return_value=150.0),
+            patch("api.payment_common.founders_offer_is_open", return_value=False),
+        ):
+            activate_subscription("u-1y", "pro_1y", payment_order_id="33333333-3333-4333-8333-333333333333", duration_days=365)
+        self.assertEqual(len(rpc_calls), 1)
+        self.assertEqual(rpc_calls[0][1]["p_plan_id"], "pro")
+        self.assertEqual(rpc_calls[0][1]["p_price_monthly_cents"], 15000)
+
+        # 6. POST /payment/direct-wallet/confirm with empty {} returns 410 (not 422)
+        dw_empty = client.post("/payment/direct-wallet/confirm", json={})
+        self.assertEqual(dw_empty.status_code, 410)
+
+        # 7. _has_non_coupon_order fails closed on non-numeric discount_amount_egp
+        from api.payment_common import _has_non_coupon_order
+        self.assertFalse(_has_non_coupon_order([{"id": "x", "discount_amount_egp": "not-a-number"}]))
+        self.assertTrue(_has_non_coupon_order([{"id": "x", "discount_amount_egp": 0}]))
+        self.assertTrue(_has_non_coupon_order([{"id": "x", "discount_amount_egp": None}]))
+
+        # 8. sync_easykash_order_status must NOT clobber an active (<300s) submitted lease on FAILED/EXPIRED (even naive timestamp)
+        naive_recent = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        submitted_active = {**order_sub, "updated_at": naive_recent}
+        update_calls = []
+
+        class _NoClobberSb:
+            def table(self, _name):
+                class _Q:
+                    def update(self, payload): update_calls.append(payload); return self
+                    def eq(self, *_a, **_kw): return self
+                    def execute(self): return type("R", (), {"data": [{"id": submitted_active["id"]}]})()
+                return _Q()
+
+        for ek_st in ("FAILED", "EXPIRED"):
+            with (
+                patch("api.easykash_payments.supabase", _NoClobberSb()),
+                patch("api.easykash_payments.requests.post", return_value=type("R", (), {"status_code": 200, "json": staticmethod(lambda s=ek_st: {"status": s, "easykashRef": "EK-R", "PaymentMethod": "CARD"})})()),
+                patch.dict("os.environ", {"EASYKASH_API_KEY": "k"}, clear=False),
+            ):
+                out = sync_easykash_order_status(dict(submitted_active))
+            self.assertEqual(out["status"], "submitted")
+        self.assertEqual(update_calls, [])
+
+        # 9. order_status uses .limit(1) (never .maybe_single()) and survives ensure_pro_invite failure
+        from api.easykash_payments import order_status as ek_order_status
+
+        class _NoMaybeSingleSb:
+            def table(self, name):
+                class _Q:
+                    def select(self, *_a, **_kw): return self
+                    def eq(self, *_a, **_kw): return self
+                    def in_(self, *_a, **_kw): return self
+                    def order(self, *_a, **_kw): return self
+                    def limit(self, *_a, **_kw): return self
+                    def maybe_single(self):
+                        raise AssertionError("maybe_single() is forbidden under postgrest==0.16.11")
+                    def execute(self):
+                        if name == "local_payment_orders":
+                            return type("R", (), {"data": [{
+                                "id": "44444444-4444-4444-8444-444444444444",
+                                "user_id": "u-ok",
+                                "plan_id": "pro",
+                                "amount_egp": 150.0,
+                                "duration_days": 30,
+                                "status": "approved",
+                                "provider": "easykash",
+                                "updated_at": now_iso,
+                                "telegram_invite_link": "https://t.me/+fallback",
+                                "telegram_invite_expires_at": None,
+                                "customer_note": "tg_welcomed",
+                                "affiliate_id": None,
+                                "affiliate_code": None,
+                                "commission_amount_egp": 0,
+                                "commission_status": "none",
+                            }]})()
+                        if name == "subscriptions":
+                            return type("R", (), {"data": [{"current_period_end": "2099-01-01T00:00:00Z"}]})()
+                        return type("R", (), {"data": []})()
+                return _Q()
+
+        with (
+            patch("api.easykash_payments.supabase", _NoMaybeSingleSb()),
+            patch("api.easykash_payments._init_supabase"),
+            patch("api.easykash_payments.ensure_pro_invite", side_effect=RuntimeError("telegram down")),
+        ):
+            st = ek_order_status("44444444-4444-4444-8444-444444444444", "u-ok")
+        self.assertEqual(st["status"], "approved")
+        self.assertEqual(st["telegram_pro_url"], "https://t.me/+fallback")
+
+        # 10. payment_config sets founders_lock_rate == 50 on pro_6m & pro_1y for grandfathered-50 users
+        from api.easykash_payments import payment_config as ek_payment_config
+        with (
+            patch("api.payment_common.is_user_eligible_for_50_egp_renewal", return_value=True),
+            patch("api.payment_common.is_user_eligible_for_100_egp_renewal", return_value=False),
+            patch("api.payment_common.founders_offer_is_open", return_value=False),
+            patch("api.payment_common.billing_settings", return_value={}),
+            patch("api.easykash_payments.billing_settings", return_value={}),
+            patch("api.easykash_payments.pro_discount", return_value={"active": False, "price_egp": None, "ends_at": None}),
+            patch("api.easykash_payments.supabase", None),
+        ):
+            cfg50 = ek_payment_config(user_id="founder-50-user")
+        p50 = {p["id"]: p for p in cfg50["plans"]}
+        self.assertEqual(p50["pro_6m"]["amount_egp"], 250)
+        self.assertEqual(p50["pro_6m"]["founders_lock_rate"], 50)
+        self.assertEqual(p50["pro_1y"]["amount_egp"], 450)
+        self.assertEqual(p50["pro_1y"]["founders_lock_rate"], 50)
 
 
 if __name__ == "__main__":

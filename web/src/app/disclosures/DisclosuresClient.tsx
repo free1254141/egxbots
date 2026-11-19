@@ -86,6 +86,7 @@ export default function DisclosuresClient({
 }: DisclosuresClientProps) {
   const { language } = useLanguage();
   const { market, isSaudi } = useMarket();
+  const isNonEgx = market !== "egx";
   const isAr = language === "ar";
   const { setIsOpen, sendMessage } = useChat();
 
@@ -163,7 +164,7 @@ export default function DisclosuresClient({
 
       try {
         const params = new URLSearchParams({
-          limit: String(isSaudi && offsetVal === 0 ? 50 : PAGE_BATCH_SIZE),
+          limit: String(isNonEgx && offsetVal === 0 ? 50 : PAGE_BATCH_SIZE),
           offset: String(offsetVal),
           type: selectedType,
           sentiment: selectedSentiment,
@@ -209,8 +210,8 @@ export default function DisclosuresClient({
     const marketChanged = prevMarketRef.current !== market;
     if (marketChanged) {
       prevMarketRef.current = market;
-      setDisclosures(isSaudi ? [] : initialDisclosures);
-      setTotalCount(isSaudi ? 0 : (initialStats.total || initialDisclosures.length));
+      setDisclosures(isNonEgx ? [] : initialDisclosures);
+      setTotalCount(isNonEgx ? 0 : (initialStats.total || initialDisclosures.length));
       setHasMore(false);
       setSelectedSector("all");
       setSelectedType("all");
@@ -220,7 +221,7 @@ export default function DisclosuresClient({
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
       if (
-        !isSaudi &&
+        !isNonEgx &&
         !debouncedSearch &&
         selectedType === "all" &&
         selectedSentiment === "all" &&
@@ -229,7 +230,7 @@ export default function DisclosuresClient({
       ) {
         return;
       }
-      if (isSaudi) {
+      if (isNonEgx) {
         setDisclosures([]);
         setTotalCount(0);
         setHasMore(false);
@@ -242,7 +243,7 @@ export default function DisclosuresClient({
         controller.abort();
       } catch {}
     };
-  }, [debouncedSearch, selectedType, selectedSentiment, selectedTimeframe, selectedSector, market, isSaudi, initialDisclosures, initialStats.total, fetchBatch]);
+  }, [debouncedSearch, selectedType, selectedSentiment, selectedTimeframe, selectedSector, market, isNonEgx, initialDisclosures, initialStats.total, fetchBatch]);
 
   // Progressive infinite scroll observer ("يحمل شوية بشوية")
   useEffect(() => {
@@ -274,7 +275,11 @@ export default function DisclosuresClient({
   const handleOpenGeneralFloatingChat = () => {
     setIsOpen(true);
     sendMessage(
-      isSaudi
+      market === "uae"
+        ? "لخص لي أهم إفصاحات وأخبار الشركات في أسواق الإمارات (دبي DFM وأبوظبي ADX) لآخر جلسة، مع بيان أبرز القرارات الجوهرية والتوزيعات والنتائج المالية المؤثرة."
+        : market === "qatar"
+        ? "لخص لي أهم إفصاحات وأخبار الشركات في بورصة قطر (QSE) لآخر جلسة، مع بيان أبرز القرارات الجوهرية والتوزيعات والنتائج المالية المؤثرة."
+        : isSaudi
         ? "لخص لي أهم إفصاحات وأخبار الشركات في السوق السعودي (تداول) لآخر جلسة، مع بيان أبرز القرارات الجوهرية والتوزيعات والنتائج المالية المؤثرة."
         : "لخص لي أهم إفصاحات وتعاملات الداخليين في البورصة المصرية لآخر جلسة، مع بيان أي أسهم تشهد تجميعاً صامتاً من مجالس الإدارة أو تتداول بأقل من تكلفة شرائهم."
     );
@@ -289,7 +294,14 @@ export default function DisclosuresClient({
 
   const formatEgp = (val: number) => {
     const abs = Math.abs(val);
-    const unit = isSaudi ? (isAr ? "ر.س" : "SAR") : (isAr ? "ج.م" : "EGP");
+    const unit =
+      market === "uae"
+        ? (isAr ? "د.إ" : "AED")
+        : market === "qatar"
+        ? (isAr ? "ر.ق" : "QAR")
+        : isSaudi
+        ? (isAr ? "ر.س" : "SAR")
+        : (isAr ? "ج.م" : "EGP");
     if (abs >= 1_000_000) {
       return `${(val / 1_000_000).toFixed(1)} ${isAr ? `مليون ${unit}` : `M ${unit}`}`;
     }
@@ -322,7 +334,7 @@ export default function DisclosuresClient({
   };
 
   const getSentimentBadge = (item: DisclosureItem) => {
-    const hasInsiderShares = !isSaudi && (item.shares_count ?? 0) > 0;
+    const hasInsiderShares = !isNonEgx && (item.shares_count ?? 0) > 0;
     if ((hasInsiderShares && item.action_type === "buy") || item.sentiment === "bullish") {
       return (
         <span className="px-3 py-1 text-xs font-black bg-[#00FF66] text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
@@ -351,7 +363,7 @@ export default function DisclosuresClient({
   // Analytical pool (all available disclosures in the dataset, merged and deduplicated)
   const basePool = useMemo(() => {
     const map = new Map<string, DisclosureItem>();
-    if (!isSaudi && initialPool) {
+    if (!isNonEgx && initialPool) {
       for (const item of initialPool) {
         map.set(item.id, item);
       }
@@ -360,7 +372,7 @@ export default function DisclosuresClient({
       map.set(item.id, item);
     }
     return Array.from(map.values());
-  }, [initialPool, disclosures, isSaudi]);
+  }, [initialPool, disclosures, isNonEgx]);
 
   // Filter pool by active timeframe and sector
   const filteredPool = useMemo(() => {
@@ -371,7 +383,7 @@ export default function DisclosuresClient({
     );
   }, [basePool, selectedTimeframe, selectedSector]);
 
-  const activePriceMap = useMemo(() => (isSaudi ? {} : (priceMap || {})), [isSaudi, priceMap]);
+  const activePriceMap = useMemo(() => (isNonEgx ? {} : (priceMap || {})), [isNonEgx, priceMap]);
 
   // Dynamically compute active analytics for the selected timeframe and sector (with daily netting & offset)
   const activeAnalytics = useMemo(() => {
@@ -421,12 +433,12 @@ export default function DisclosuresClient({
   // Filter disclosures based on smart filter, timeframe, and sector
   const displayedDisclosures = useMemo(() => {
     let list = disclosures;
-    if (selectedTimeframe !== "all" || (!isSaudi && selectedSector !== "all")) {
-      list = filterDisclosuresByTimeframeAndSector(list, selectedTimeframe, isSaudi ? "all" : selectedSector);
+    if (selectedTimeframe !== "all" || (!isNonEgx && selectedSector !== "all")) {
+      list = filterDisclosuresByTimeframeAndSector(list, selectedTimeframe, isNonEgx ? "all" : selectedSector);
     }
     if (smartFilter === "all") return list;
 
-    if (isSaudi) {
+    if (isNonEgx) {
       return list.filter((item) => {
         const text = `${item.title || ""} ${item.ai_summary || ""} ${item.disclosure_type || ""}`.toLowerCase();
         if (smartFilter === "dividends") {
@@ -460,7 +472,7 @@ export default function DisclosuresClient({
       }
       return true;
     });
-  }, [disclosures, selectedTimeframe, selectedSector, smartFilter, cumulativeAnalytics, isSaudi]);
+  }, [disclosures, selectedTimeframe, selectedSector, smartFilter, cumulativeAnalytics, isNonEgx]);
 
   // Group disclosures by stock into unified cards (one consolidated card per stock per timeframe!)
   const groupedDisclosures = useMemo(() => {
@@ -471,7 +483,15 @@ export default function DisclosuresClient({
     <div className="w-full pt-5 sm:pt-7 pb-16" dir={isAr ? "rtl" : "ltr"}>
       <BrandedPageHeader
         eyebrow={
-          isSaudi
+          market === "uae"
+            ? (isAr
+              ? "رادار إفصاحات الإمارات (دبي DFM وأبوظبي ADX) • بالذكاء الاصطناعي"
+              : "UAE (DFM & ADX) DISCLOSURES RADAR • AI POWERED")
+            : market === "qatar"
+            ? (isAr
+              ? "رادار إفصاحات بورصة قطر (QSE) • بالذكاء الاصطناعي"
+              : "QATAR STOCK EXCHANGE (QSE) DISCLOSURES RADAR • AI POWERED")
+            : isSaudi
             ? (isAr
               ? "رادار إفصاحات السوق السعودي (تداول) • بالذكاء الاصطناعي"
               : "SAUDI TADAWUL DISCLOSURES RADAR • AI POWERED")
@@ -480,7 +500,15 @@ export default function DisclosuresClient({
               : "EGX FILINGS & INSIDER RADAR • AI POWERED")
         }
         title={
-          isSaudi
+          market === "uae"
+            ? (isAr
+              ? "إفصاحات أسهم الإمارات وتطورات الشركات (دبي وأبوظبي)"
+              : "UAE DFM & ADX Company Disclosures & Corporate Filings")
+            : market === "qatar"
+            ? (isAr
+              ? "إفصاحات بورصة قطر وتطورات الشركات (QSE)"
+              : "Qatar Stock Exchange (QSE) Company Disclosures & Filings")
+            : isSaudi
             ? (isAr
               ? "إفصاحات السوق السعودي وتطورات الشركات (تداول)"
               : "Saudi Tadawul Company Disclosures & Corporate Filings")
@@ -489,7 +517,15 @@ export default function DisclosuresClient({
               : "Company Disclosures & Insider Filings")
         }
         description={
-          isSaudi
+          market === "uae"
+            ? (isAr
+              ? "رصد يومي لإفصاحات الشركات المدرجة في سوق دبي المالي (DFM) وسوق أبوظبي (ADX)، التوزيعات، النتائج المالية، وقرارات مجالس الإدارات."
+              : "Daily tracking of UAE (DFM & ADX) corporate disclosures, dividends, earnings announcements, and board resolutions.")
+            : market === "qatar"
+            ? (isAr
+              ? "رصد يومي لإفصاحات الشركات المدرجة في بورصة قطر (QSE)، التوزيعات، النتائج المالية، وقرارات مجالس الإدارات."
+              : "Daily tracking of Qatar Stock Exchange (QSE) corporate disclosures, dividends, earnings, and board resolutions.")
+            : isSaudi
             ? (isAr
               ? "رصد يومي مباشر لإفصاحات الشركات السعودية المدرجة في تداول، التوزيعات، النتائج المالية، وقرارات مجالس الإدارات مع التحليل الفوري للأثر المالي على الأسهم."
               : "Live tracking of Saudi Tadawul corporate disclosures, dividends, earnings announcements, and board resolutions with instant AI financial impact analysis.")
@@ -524,7 +560,15 @@ export default function DisclosuresClient({
         <div className="flex items-center gap-2.5">
           <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
           <span className="font-bold text-zinc-800 dark:text-zinc-200">
-            {isSaudi
+            {market === "uae"
+              ? (isAr
+                ? "بيانات مالية عامة معلنة رسمياً: إفصاحات وأخبار الشركات المدرجة في أسواق الإمارات (دبي DFM وأبوظبي ADX) مصنفة ومحللة بالذكاء الاصطناعي لأغراض المتابعة والبحث الاستثماري."
+                : "Official Public Market Data: UAE (DFM & ADX) corporate disclosures and announcements indexed for research purposes.")
+              : market === "qatar"
+              ? (isAr
+                ? "بيانات مالية عامة معلنة رسمياً: إفصاحات وأخبار الشركات المدرجة في بورصة قطر (QSE) مصنفة ومحللة بالذكاء الاصطناعي لأغراض المتابعة والبحث الاستثماري."
+                : "Official Public Market Data: Qatar Stock Exchange (QSE) corporate disclosures indexed for research purposes.")
+              : isSaudi
               ? (isAr
                 ? "بيانات مالية عامة معلنة رسمياً: إفصاحات وأخبار الشركات المدرجة في السوق السعودي (تداول) مصنفة ومحللة بالذكاء الاصطناعي لأغراض المتابعة والبحث الاستثماري."
                 : "Official Public Market Data: Saudi Tadawul (TASI) corporate disclosures and announcements indexed and analyzed for research purposes.")
@@ -549,7 +593,7 @@ export default function DisclosuresClient({
             <FileText className="w-4 h-4 text-black dark:text-white" />
           </div>
           <div className="text-2xl sm:text-3xl font-black text-black dark:text-white">
-            {isSaudi
+            {isNonEgx
               ? (selectedTimeframe === "all" && selectedSector === "all"
                 ? (totalCount || filteredPool.length)
                 : filteredPool.length)
@@ -562,7 +606,7 @@ export default function DisclosuresClient({
           </span>
         </div>
 
-        {isSaudi ? (
+        {isNonEgx ? (
           <>
             {/* Saudi KPI 2: Bullish / Positive Disclosures */}
             <div className="p-4 border-4 border-black dark:border-white bg-[#00FF66]/20 dark:bg-[#00FF66]/10 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
@@ -720,8 +764,8 @@ export default function DisclosuresClient({
           </div>
         </div>
 
-        {/* Row 2: Sector Selector (EGX only — Saudi uses Tadawul filing categories) */}
-        {!isSaudi && (
+        {/* Row 2: Sector Selector (EGX only — GCC uses exchange filing categories) */}
+        {!isNonEgx && (
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t-2 border-black/10 dark:border-white/10">
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -791,7 +835,7 @@ export default function DisclosuresClient({
       </div>
 
       {/* Main Subtabs Navigation (EGX Insider/Article 30 only) */}
-      {!isSaudi && (
+      {!isNonEgx && (
       <div className="flex border-4 border-black dark:border-white mb-8 bg-zinc-100 dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.4)]">
         <button
           type="button"
@@ -822,10 +866,10 @@ export default function DisclosuresClient({
       )}
 
       {/* TAB 1: Insider Trading Radar & Smart Money Flow */}
-      {(isSaudi || activeTab === "insider_radar") && (
+      {(isNonEgx || activeTab === "insider_radar") && (
         <>
-          {/* Saudi Tadawul Heatmap & Analytical Charts */}
-          {isSaudi && filteredPool.length > 0 && (
+          {/* GCC Disclosures Heatmap & Analytical Charts */}
+          {isNonEgx && filteredPool.length > 0 && (
             <>
               <div className="mb-6">
                 <SaudiDisclosuresHeatmap
@@ -846,7 +890,7 @@ export default function DisclosuresClient({
           )}
 
           {/* Smart Money Liquidity Heatmap (requires share counts - EGX only) */}
-          {!isSaudi && activeAnalytics && (
+          {!isNonEgx && activeAnalytics && (
             <div className="mb-6">
               <InsiderHeatmap
                 items={activeAnalytics.heatmapItems}
@@ -858,7 +902,7 @@ export default function DisclosuresClient({
           )}
 
           {/* Simple Analytical Charts (requires share counts - EGX only) */}
-          {!isSaudi && activeAnalytics && (
+          {!isNonEgx && activeAnalytics && (
             <InsiderCharts
               costDiscounts={cumulativeAnalytics.costDiscountTop}
               flowDistribution={activeAnalytics.flowDistribution}
@@ -884,7 +928,15 @@ export default function DisclosuresClient({
                 <input
                   type="text"
                   placeholder={
-                    isSaudi
+                    market === "uae"
+                      ? (isAr
+                        ? "ابحث برمز السهم (EMAAR, ALDAR, ADNOCGAS, FAB) أو اسم الشركة..."
+                        : "Search symbol (EMAAR, ALDAR, ADNOCGAS) or company...")
+                      : market === "qatar"
+                      ? (isAr
+                        ? "ابحث برمز السهم (QNBK, IQCD, QGTS, QIBK) أو اسم الشركة..."
+                        : "Search symbol (QNBK, IQCD, QGTS) or company...")
+                      : isSaudi
                       ? (isAr
                         ? "ابحث برمز السهم (2222, 1120, 2010) أو اسم الشركة أو الطرف..."
                         : "Search symbol (2222, 1120, 2010) or company...")
@@ -913,7 +965,7 @@ export default function DisclosuresClient({
                   <Filter className="w-3.5 h-3.5" />
                   {isAr ? "النوع:" : "Type:"}
                 </span>
-                {(isSaudi
+                {(isNonEgx
                   ? [
                       { id: "all", ar: "الكل", en: "All" },
                       { id: "earnings", ar: "نتائج مالية", en: "Earnings" },
@@ -989,7 +1041,7 @@ export default function DisclosuresClient({
                 {isAr ? "جميع الإفصاحات" : "All Disclosures"}
               </button>
 
-              {isSaudi ? (
+              {isNonEgx ? (
                 <>
                   <button
                     type="button"
@@ -1252,7 +1304,11 @@ export default function DisclosuresClient({
           <div className="flex items-center gap-2 font-black text-black dark:text-white text-sm">
             <Scale className="w-4 h-4 text-amber-500" />
             <span>
-              {isSaudi
+              {market === "uae"
+                ? (isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (DFM & ADX):" : "Regulatory & Legal Disclaimer (DFM & ADX):")
+                : market === "qatar"
+                ? (isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (QSE):" : "Regulatory & Legal Disclaimer (QSE):")
+                : isSaudi
                 ? (isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (Tadawul & CMA):" : "Regulatory & Legal Disclaimer (Tadawul):")
                 : (isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (EGX & FRA Compliance):" : "Regulatory & Legal Disclaimer:")}
             </span>
@@ -1267,10 +1323,10 @@ export default function DisclosuresClient({
           </button>
         </div>
         <p>
-          {isSaudi
+          {isNonEgx
             ? (isAr
-              ? "جميع الإفصاحات والإعلانات المعروضة للسوق السعودي مستقاة من المصادر الإخبارية والإفصاحات العامة المتاحة للشركات المدرجة في السوق المالية السعودية (تداول). التحليلات والمؤشرات المعروضة هي معالجات إحصائية ولغوية لأغراض التحليل والدراسة والمتابعة الاستثمارية، ولا تمثل توصية بالبيع أو الشراء، ولا تتحمل المنصة أي مسؤولية قانونية عن أي قرارات استثمارية تُتخذ بناءً على هذه البيانات."
-              : "All Saudi market disclosures displayed on this page are compiled from public announcements and financial news sources for companies listed on Saudi Exchange (Tadawul). AI summaries and sentiment metrics are strictly for educational and research purposes and do not constitute financial advice.")
+              ? `جميع الإفصاحات والإعلانات المعروضة لـ ${market === "uae" ? "سوقي الإمارات (دبي DFM وأبوظبي ADX)" : market === "qatar" ? "بورصة قطر (QSE)" : "السوق المالية السعودية (تداول)"} مستقاة من المصادر الإخبارية والإفصاحات العامة المتاحة للشركات المدرجة. التحليلات والمؤشرات المعروضة هي معالجات إحصائية ولغوية لأغراض التحليل والدراسة والمتابعة الاستثمارية، ولا تمثل توصية بالبيع أو الشراء، ولا تتحمل المنصة أي مسؤولية قانونية عن أي قرارات استثمارية تُتخذ بناءً على هذه البيانات.`
+              : `All ${market === "uae" ? "UAE (DFM & ADX)" : market === "qatar" ? "Qatar (QSE)" : "Saudi (Tadawul)"} market disclosures displayed on this page are compiled from public announcements and financial news sources. AI summaries and sentiment metrics are strictly for educational and research purposes and do not constitute financial advice.`)
             : (isAr
               ? "جميع الإفصاحات ونماذج المادة (30) وتعاملات الداخليين المعروضة في هذه الصفحة مستقاة حصرياً من البيانات الرسمية المعلنة والمتاحة للجمهور الصادرة عن البورصة المصرية (EGX) والهيئة العامة للرقابة المالية (FRA) إعمالاً لمبدأ الشفافية وحرية تداول المعلومات المالية. مؤشرات 'متوسط تكلفة الداخليين (Insider VWAP)'، و'صافي السيولة'، و'الخريطة الحرارية' هي معالجات إحصائية رياضية لأغراض التحليل والدراسة والمتابعة الاستثمارية، ولا تمثل توصية بالبيع أو الشراء أو تتبعاً خاصاً للحياة الشخصية للأفراد، ولا تتحمل المنصة أي مسؤولية قانونية عن أي قرارات استثمارية تُتخذ بناءً على هذه البيانات."
               : "All disclosures, Article 30 filings, and insider transactions displayed on this page are compiled exclusively from official public disclosures issued by the Egyptian Exchange (EGX) and the Financial Regulatory Authority (FRA). 'Insider VWAP', 'Net Flow', and 'Liquidity Heatmap' are purely statistical algorithms for educational and research purposes and do not constitute financial advice or personal tracking.")}
@@ -1291,7 +1347,7 @@ export default function DisclosuresClient({
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-black text-white border-b-4 border-black dark:border-white">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="px-2 py-0.5 text-xs font-black bg-[#FFE600] text-black">
-                  {previewItem.symbol || (isSaudi ? "TASI" : "EGX")}
+                  {previewItem.symbol || (market === "uae" ? "UAE" : market === "qatar" ? "QSE" : isSaudi ? "TASI" : "EGX")}
                 </span>
                 <span className="text-xs sm:text-sm font-black truncate">
                   {previewItem.company_name} — #{previewItem.id.slice(0, 8).toUpperCase()}

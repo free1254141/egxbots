@@ -636,6 +636,36 @@ def _is_saudi_related_query(
     return False
 
 
+_CANONICAL_BUTTON_INPUTS = frozenset({
+    "📈 أفضل أسهم السوق اليوم",
+    "أفضل أسهم السوق اليوم",
+    "أقوى أسهم التجميع والسيولة الذكية اليوم",
+    "هات كل التوصيات المفتوحة حالياً",
+    "ملخص السوق اليوم",
+    "أهم أخبار وإفصاحات السوق اليوم",
+    "أفضل الأسهم فنياً اليوم حسب المسح الفني والمؤشرات",
+})
+
+
+def _is_unambiguous_standalone_input(msg: Optional[str], market: str = "EGX") -> bool:
+    """
+    Return True ONLY when user input is unmistakably self-contained:
+    - a bare 1-token stock symbol (e.g. 'TYCN', 'crst', '2222', 'QNBK.QA') resolving to `vip_stock_*`, OR
+    - an exact canonical quick-action button string.
+    Multi-word prompts like 'حلل سهم PHDC' return False to preserve explicit contextual-followup semantics.
+    """
+    clean = " ".join(str(msg or "").strip().split())
+    if not clean:
+        return False
+    if clean in _CANONICAL_BUTTON_INPUTS:
+        return True
+    if re.fullmatch(r"[A-Za-z0-9]{2,12}(?:\.[A-Za-z]{2,8})?", clean):
+        cand_key = build_analysis_cache_key(clean, market=market)
+        if cand_key and cand_key.startswith("vip_stock_"):
+            return True
+    return False
+
+
 def parse_dsml_tool_calls(text: str) -> List[Dict[str, Any]]:
     """
     Parse DeepSeek internal DSML tool invocations if emitted in message content:
@@ -1201,13 +1231,36 @@ async def _run_agentic_chat_stream_impl(
                     is_cross_market = True
 
                 batch_followup_true, batch_explicit_standalone = inspect_tool_calls_followup_flags(tool_calls)
+                cache_tool_calls = tool_calls
+                if batch_followup_true and _is_unambiguous_standalone_input(message, market=effective_market):
+                    normalized_calls = []
+                    for tc in tool_calls:
+                        if isinstance(tc, dict) and isinstance(tc.get("function"), dict):
+                            tc_copy = dict(tc)
+                            fn_copy = dict(tc["function"])
+                            try:
+                                a = json.loads(fn_copy.get("arguments", "{}") or "{}")
+                            except Exception:
+                                a = {}
+                            if isinstance(a, dict) and a.get("is_contextual_followup") is True:
+                                a = {**a, "is_contextual_followup": False}
+                                fn_copy["arguments"] = json.dumps(a, ensure_ascii=False)
+                            tc_copy["function"] = fn_copy
+                            normalized_calls.append(tc_copy)
+                        else:
+                            normalized_calls.append(tc)
+                    if resolve_tool_calls_to_cache_key(normalized_calls) is not None:
+                        batch_followup_true = False
+                        batch_explicit_standalone = True
+                        cache_tool_calls = normalized_calls
+
                 if batch_followup_true:
                     has_followup_flag = True
                     candidate_cache_key = None
                     model_confirmed_standalone = False
 
                 if round_count >= 2 and candidate_cache_key:
-                    round2_key = resolve_tool_calls_to_cache_key(tool_calls)
+                    round2_key = resolve_tool_calls_to_cache_key(cache_tool_calls)
                     if not round2_key or round2_key != candidate_cache_key:
                         candidate_cache_key = None
                         model_confirmed_standalone = False
@@ -1226,7 +1279,7 @@ async def _run_agentic_chat_stream_impl(
                     and not vision_data
                     and (not images or len(images) == 0)
                 ):
-                    dynamic_key = resolve_tool_calls_to_cache_key(tool_calls)
+                    dynamic_key = resolve_tool_calls_to_cache_key(cache_tool_calls)
                     if not dynamic_key:
                         candidate_cache_key = None
                         model_confirmed_standalone = False

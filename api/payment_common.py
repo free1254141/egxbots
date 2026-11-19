@@ -162,11 +162,26 @@ def _has_active_or_grace_subscription(user_id: str) -> bool:
     return status in ("active", "trialing")
 
 
+def _has_non_coupon_order(rows: object) -> bool:
+    """Return True if at least one approved order row was not discounted via an affiliate/promo coupon."""
+    if not isinstance(rows, list):
+        return False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            if float(row.get("discount_amount_egp") or 0) <= 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def is_user_eligible_for_50_egp_renewal(user_id: str | None) -> bool:
     """Determine if a user qualifies for grandfathered 50 EGP monthly renewal.
 
     Rules:
-    1. User must have previously joined under the 50 EGP founders era (tracked in founders_offer_members or 50 EGP orders).
+    1. User must have previously joined under the 50 EGP founders era (tracked in founders_offer_members or non-coupon 50 EGP Pro orders).
     2. User is currently active, OR expired within the 3-day grace period (72 hours).
     3. If expired > 3 days ago without renewing, or new user, eligibility is forfeited (price becomes 100 EGP).
     """
@@ -183,7 +198,7 @@ def is_user_eligible_for_50_egp_renewal(user_id: str | None) -> bool:
         if not supabase:
             return False
 
-        # 1. Did the user join under the 50 EGP founders era (before Nov 1, 2026) or have an approved 50 EGP order?
+        # 1. Did the user join under the 50 EGP founders era (before Nov 1, 2026) or have an approved non-coupon 50 EGP Pro order?
         has_50_era = bool(
             supabase.table("founders_offer_members")
             .select("user_id")
@@ -194,13 +209,14 @@ def is_user_eligible_for_50_egp_renewal(user_id: str | None) -> bool:
             .data
         )
         if not has_50_era:
-            has_50_era = bool(
+            has_50_era = _has_non_coupon_order(
                 supabase.table("local_payment_orders")
-                .select("id")
+                .select("id,discount_amount_egp")
                 .eq("user_id", user_id)
+                .in_("plan_id", ["pro", "pro_renewal"])
                 .eq("amount_egp", 50.0)
                 .eq("status", "approved")
-                .limit(1)
+                .limit(5)
                 .execute()
                 .data
             )
@@ -219,9 +235,9 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
     """Determine if a user qualifies for grandfathered 100 EGP monthly renewal for life.
 
     Rules:
-    1. User joined under founders offer (tracked in founders_offer_members or approved 100 EGP orders).
+    1. User joined under founders offer (tracked in founders_offer_members or approved non-coupon 100 EGP Pro orders).
     2. User is currently active, OR expired within the 3-day grace period (72 hours).
-    3. If expired > 3 days ago without renewing, eligibility is forfeited (reverts to regular 200 EGP once offer ends).
+    3. If expired > 3 days ago without renewing, eligibility is forfeited (reverts to regular 150 EGP once offer ends).
     """
     if not user_id or user_id == "ba9c27e8-f62d-452f-8a29-dc77fd092207":
         return False
@@ -242,7 +258,7 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
                 memo[memo_key] = False
             return False
 
-        # Did the user join under founders offer (monthly <= 100, 6m <= 500, or 1y <= 1000)?
+        # Did the user join under founders offer (non-coupon monthly <= 100, 6m <= 500, or 1y <= 1000)?
         has_founders_access = bool(
             supabase.table("founders_offer_members")
             .select("user_id")
@@ -253,9 +269,39 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
         )
         if not has_founders_access:
             has_founders_access = bool(
-                supabase.table("local_payment_orders").select("id").eq("user_id", user_id).in_("plan_id", ["pro", "pro_renewal"]).lte("amount_egp", 100.0).eq("status", "approved").limit(1).execute().data
-                or supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("plan_id", "pro_6m").lte("amount_egp", 500.0).eq("status", "approved").limit(1).execute().data
-                or supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("plan_id", "pro_1y").lte("amount_egp", 1000.0).eq("status", "approved").limit(1).execute().data
+                _has_non_coupon_order(
+                    supabase.table("local_payment_orders")
+                    .select("id,discount_amount_egp")
+                    .eq("user_id", user_id)
+                    .in_("plan_id", ["pro", "pro_renewal"])
+                    .lte("amount_egp", 100.0)
+                    .eq("status", "approved")
+                    .limit(5)
+                    .execute()
+                    .data
+                )
+                or _has_non_coupon_order(
+                    supabase.table("local_payment_orders")
+                    .select("id,discount_amount_egp")
+                    .eq("user_id", user_id)
+                    .eq("plan_id", "pro_6m")
+                    .lte("amount_egp", 500.0)
+                    .eq("status", "approved")
+                    .limit(5)
+                    .execute()
+                    .data
+                )
+                or _has_non_coupon_order(
+                    supabase.table("local_payment_orders")
+                    .select("id,discount_amount_egp")
+                    .eq("user_id", user_id)
+                    .eq("plan_id", "pro_1y")
+                    .lte("amount_egp", 1000.0)
+                    .eq("status", "approved")
+                    .limit(5)
+                    .execute()
+                    .data
+                )
             )
         if has_founders_access:
             result = _has_active_or_grace_subscription(user_id)
@@ -390,16 +436,18 @@ def plan_amount_egp(plan_id: str, user_id: str | None = None, duration_months: i
     if plan == "pro_6m":
         settings = billing_settings()
         base_6m = float(settings["pro_6m_price_egp"]) if settings.get("pro_6m_price_egp") is not None else _env_price("PRO_6M_PRICE_EGP", 750)
-        is_founder_user = bool(user_id and (is_user_eligible_for_50_egp_renewal(user_id) or is_user_eligible_for_100_egp_renewal(user_id)))
-        if (settings.get("founders_offer_enabled") and founders_offer_is_open()) or is_founder_user:
-            return 500.0
+        is_founder_50 = bool(user_id and is_user_eligible_for_50_egp_renewal(user_id))
+        is_founder_100 = bool(user_id and not is_founder_50 and is_user_eligible_for_100_egp_renewal(user_id))
+        if is_founder_50 or is_founder_100 or (settings.get("founders_offer_enabled") and founders_offer_is_open()):
+            return plan_amount_egp("pro", user_id=user_id, duration_months=6)
         return base_6m
     if plan == "pro_1y":
         settings = billing_settings()
         base_1y = float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else _env_price("PRO_1Y_PRICE_EGP", 1350)
-        is_founder_user = bool(user_id and (is_user_eligible_for_50_egp_renewal(user_id) or is_user_eligible_for_100_egp_renewal(user_id)))
-        if (settings.get("founders_offer_enabled") and founders_offer_is_open()) or is_founder_user:
-            return 1000.0
+        is_founder_50 = bool(user_id and is_user_eligible_for_50_egp_renewal(user_id))
+        is_founder_100 = bool(user_id and not is_founder_50 and is_user_eligible_for_100_egp_renewal(user_id))
+        if is_founder_50 or is_founder_100 or (settings.get("founders_offer_enabled") and founders_offer_is_open()):
+            return plan_amount_egp("pro", user_id=user_id, duration_months=12)
         return base_1y
     if plan in ("lifetime", "pro_lifetime"):
         settings = billing_settings()
@@ -484,13 +532,18 @@ def activate_subscription(user_id: str, plan_id: str, provider: str = "easykash"
         return
 
     stored_plan = "pro" if requested_plan in {"pro", "pro_renewal", "pro_6m", "pro_1y"} else ("lifetime" if requested_plan in {"lifetime", "pro_lifetime"} else requested_plan)
+    catalog_monthly_egp = (
+        pro_regular_amount_egp()
+        if stored_plan == "pro"
+        else plan_amount_egp(stored_plan)
+    )
     supabase.rpc("activate_easykash_subscription", {
         "p_user_id": user_id,
         "p_plan_id": stored_plan,
         "p_duration_days": resolved_days,
         "p_provider": provider,
         "p_payment_order_id": payment_order_id,
-        "p_price_monthly_cents": int(round(plan_amount_egp(requested_plan, user_id=user_id) * 100)),
+        "p_price_monthly_cents": int(round(catalog_monthly_egp * 100)),
     }).execute()
 
     # Enroll user in founders_offer_members so they lock in founders rates for life

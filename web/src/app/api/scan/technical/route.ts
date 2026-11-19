@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import {
   resolveRequestMarket,
   getMarketExchange,
+  getMarketExchanges,
   getMarketSupabaseClient,
   toNumber,
   type MarketMode,
@@ -23,7 +24,7 @@ type TechnicalDataset = {
   scanResults: any[];
 };
 
-async function fetchStocksMeta(supabase: any, exchange: string): Promise<any[]> {
+async function fetchStocksMeta(supabase: any, exchanges: string[]): Promise<any[]> {
   const attempts = [
     "symbol, name, name_ar, sector, industry",
     "symbol, name, name_ar, sector",
@@ -34,7 +35,7 @@ async function fetchStocksMeta(supabase: any, exchange: string): Promise<any[]> 
     const { data, error } = await supabase
       .from("stocks")
       .select(selectFields)
-      .eq("exchange", exchange)
+      .in("exchange", exchanges)
       .eq("is_active", true)
       .limit(1000);
     if (!error) return data || [];
@@ -42,7 +43,7 @@ async function fetchStocksMeta(supabase: any, exchange: string): Promise<any[]> 
   return [];
 }
 
-async function fetchIndicatorsWithFallback(supabase: any, exchange: string): Promise<any[]> {
+async function fetchIndicatorsWithFallback(supabase: any, exchanges: string[]): Promise<any[]> {
   const moneyFlowFields = MONEY_FLOW_COLUMNS_ENABLED
     ? ", cmf_20, mm_accumulation, mm_distribution"
     : "";
@@ -71,7 +72,7 @@ async function fetchIndicatorsWithFallback(supabase: any, exchange: string): Pro
     const { data, error } = await supabase
       .from("stock_technical_indicators")
       .select(selectFields)
-      .eq("exchange", exchange)
+      .in("exchange", exchanges)
       .limit(1000)
       .order("date", { ascending: false });
     if (!error) return data || [];
@@ -83,11 +84,11 @@ async function fetchIndicatorsWithFallback(supabase: any, exchange: string): Pro
 
 async function loadTechnicalDataset(market: MarketMode): Promise<TechnicalDataset> {
   const supabase = getMarketSupabaseClient(market);
-  const exchange = getMarketExchange(market);
+  const exchanges = getMarketExchanges(market);
 
   const [stocks, indicators] = await Promise.all([
-    fetchStocksMeta(supabase, exchange),
-    fetchIndicatorsWithFallback(supabase, exchange),
+    fetchStocksMeta(supabase, exchanges),
+    fetchIndicatorsWithFallback(supabase, exchanges),
   ]);
 
   const uniqueSymbols = [...new Set((indicators || []).map((row: any) => row.symbol).filter(Boolean))];
@@ -116,6 +117,18 @@ const getCachedEgxTechnicalDataset = unstable_cache(
 const getCachedTasiTechnicalDataset = unstable_cache(
   async (): Promise<TechnicalDataset> => loadTechnicalDataset("tasi"),
   ["technical-scanner-tasi-daily"],
+  { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] },
+);
+
+const getCachedUaeTechnicalDataset = unstable_cache(
+  async (): Promise<TechnicalDataset> => loadTechnicalDataset("uae"),
+  ["technical-scanner-uae-daily"],
+  { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] },
+);
+
+const getCachedQatarTechnicalDataset = unstable_cache(
+  async (): Promise<TechnicalDataset> => loadTechnicalDataset("qatar"),
+  ["technical-scanner-qatar-daily"],
   { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] },
 );
 
@@ -158,11 +171,22 @@ export async function POST(req: Request) {
 
     const market = resolveRequestMarket(req, body?.market || body?.country || body?.exchange);
     const exchange = getMarketExchange(market);
-    const currency = market === "tasi" ? "SAR" : "EGP";
+    const currency =
+      market === "tasi"
+        ? "SAR"
+        : market === "uae"
+        ? "AED"
+        : market === "qatar"
+        ? "QAR"
+        : "EGP";
 
     const { stocks, indicators, fundamentals, scanResults } =
       market === "tasi"
         ? await getCachedTasiTechnicalDataset()
+        : market === "uae"
+        ? await getCachedUaeTechnicalDataset()
+        : market === "qatar"
+        ? await getCachedQatarTechnicalDataset()
         : await getCachedEgxTechnicalDataset();
 
     if (!indicators || indicators.length === 0) {

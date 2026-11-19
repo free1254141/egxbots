@@ -459,12 +459,20 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Fast-Path + Single-Flight Coalescing via Two-Tier Analysis Cache
+    # Fast-Path + Single-Flight Coalescing via Two-Tier Analysis Cache (Multi-Market)
     # Avoids spinning up an asyncio loop or firing duplicate DeepSeek requests when multiple users ask the same stock question
     early_cache_key: Optional[str] = None
     inflight_lock: Optional[threading.Lock] = None
     usage_stats: Optional[Dict[str, Any]] = None
-    if not images and not reply_text and not user_info.get("has_user_rules"):
+    tg_market: str = "EGX"
+    tg_is_cross: bool = False
+    try:
+        from api.agentic_chat.pipeline import _resolve_query_market
+        tg_market, tg_is_cross = _resolve_query_market(query, active_market="EGX")
+    except Exception:
+        tg_market, tg_is_cross = ("EGX", False)
+
+    if not images and not reply_text and not user_info.get("has_user_rules") and not tg_is_cross:
         try:
             from api.agentic_chat.analysis_cache import (
                 build_analysis_cache_key,
@@ -473,7 +481,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 is_recommendation_cache_key,
                 resolve_scoped_cache_key,
             )
-            early_cache_key = build_analysis_cache_key(query)
+            early_cache_key = build_analysis_cache_key(query, market=tg_market)
             if not allow_recommendations and is_recommendation_cache_key(early_cache_key):
                 early_cache_key = None
             used_cache_key = early_cache_key
@@ -484,6 +492,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     telegram_user_id=unlinked_tg_pf_id,
                     is_b2b=is_b2b,
                     allow_recommendations=allow_recommendations,
+                    market=tg_market,
                 )
                 if cached_hit and cached_hit.get("reply"):
                     reply_text = cached_hit["reply"]
@@ -493,7 +502,10 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     logger.info(f"[NATIVE_VIP_CHAT] Instant Fast-Path Cache Hit for {early_cache_key} (0 DeepSeek tokens)")
                 else:
                     scoped_lock_key = resolve_scoped_cache_key(
-                        early_cache_key, is_b2b=is_b2b, allow_recommendations=allow_recommendations
+                        early_cache_key,
+                        is_b2b=is_b2b,
+                        allow_recommendations=allow_recommendations,
+                        market=tg_market,
                     )
                     inflight_lock = get_inflight_cache_lock(scoped_lock_key)
         except Exception as cache_init_err:
@@ -514,6 +526,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                         telegram_user_id=unlinked_tg_pf_id,
                         is_b2b=is_b2b,
                         allow_recommendations=allow_recommendations,
+                        market=tg_market,
                     )
                     if cached_after_wait and cached_after_wait.get("reply"):
                         reply_text = cached_after_wait["reply"]
@@ -526,10 +539,15 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 from api.agentic_chat.pipeline import run_agentic_chat_stream
 
                 chat_history = (user_info.get("state_row") or {}).get("chat_history") or []
-                formatted_history = [
-                    {"role": h.get("role", "user"), "content": h.get("content", "")}
-                    for h in chat_history[-10:]
-                ]
+                # Standalone canonical Telegram prompts/buttons don't carry old conversation history into Fast-Track
+                formatted_history = (
+                    []
+                    if early_cache_key is not None
+                    else [
+                        {"role": h.get("role", "user"), "content": h.get("content", "")}
+                        for h in chat_history[-10:]
+                    ]
+                )
 
                 async def _run_agentic():
                     full = ""
@@ -551,6 +569,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                         is_b2b=is_b2b,
                         telegram_user_id=unlinked_tg_pf_id,
                         block_group_portfolio=(chat_source != "telegram_private"),
+                        market=tg_market,
                     ):
                         line = sse_chunk.strip()
                         if line.startswith("data:"):

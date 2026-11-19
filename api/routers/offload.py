@@ -27,6 +27,7 @@ from api.perf_utils import (
     SingleFlight,
     get_cairo_date_str,
     get_market_exchange,
+    get_market_exchanges,
     get_market_supabase,
     get_primary_supabase,
     is_unlimited_chat_user,
@@ -63,6 +64,7 @@ _MARKET_ALLOWED_EXCHANGES = {
     "uae": frozenset({"dfm", "adx"}),
     "qatar": frozenset({"qse"}),
 }
+_MARKET_CURRENCY_MAP = {"egx": "EGP", "tasi": "SAR", "uae": "AED", "qatar": "QAR"}
 _ARABIC_LETTER_RE = re.compile(r"[\u0600-\u06FF]")
 _ALLOWED_EVENTS = frozenset({"page_view", "feature_use"})
 
@@ -1110,31 +1112,43 @@ async def api_ai_bot_recommendations(
 # 4. AI Bot Candles (EGX + TASI)
 # ---------------------------------------------------------------------------
 
-def _load_tasi_candles_payload(symbol: str, exchange: str, bot_id: str, limit: int) -> Dict[str, Any]:
-    cache_key = f"tasi:{symbol}:{bot_id}:{limit}"
+def _load_tasi_candles_payload(
+    symbol: str, exchange: str, bot_id: str, limit: int, market: str = "tasi"
+) -> Dict[str, Any]:
+    cache_key = f"{market}:{exchange}:{symbol}:{bot_id}:{limit}"
     found, cached = _CANDLES_CACHE.get(cache_key)
     if found:
         return cached
 
+    exchanges = get_market_exchanges(market)
+    currency = _MARKET_CURRENCY_MAP.get(market, "SAR")
+
     def _fetch() -> Dict[str, Any]:
-        sb = get_market_supabase("tasi")
+        sb = get_market_supabase(market)
         if sb is None:
-            raise RuntimeError("Saudi Supabase unavailable")
+            raise RuntimeError(f"{market.upper()} Supabase unavailable")
         with ThreadPoolExecutor(max_workers=2) as pool:
-            f_prices = pool.submit(
-                lambda: getattr(
+            def _fetch_prices():
+                price_q = (
                     sb.table("stock_prices")
                     .select("date,open,high,low,close,volume")
                     .eq("symbol", symbol)
-                    .eq("exchange", exchange)
-                    .order("date", desc=True)
-                    .limit(limit)
-                    .execute(),
-                    "data",
-                    None,
                 )
-                or []
-            )
+                price_q = (
+                    price_q.in_("exchange", exchanges)
+                    if market == "uae"
+                    else price_q.eq("exchange", get_market_exchange(market))
+                )
+                return (
+                    getattr(
+                        price_q.order("date", desc=True).limit(limit).execute(),
+                        "data",
+                        None,
+                    )
+                    or []
+                )
+
+            f_prices = pool.submit(_fetch_prices)
             f_markers = pool.submit(
                 lambda: _safe_exec(
                     lambda: getattr(
@@ -1193,7 +1207,7 @@ def _load_tasi_candles_payload(symbol: str, exchange: str, bot_id: str, limit: i
                 "action": m.get("action"),
                 "price": m.get("price"),
             })
-        return {"candles": candles, "markers": markers, "timeframe": "1d", "exchange": exchange, "currency": "SAR"}
+        return {"candles": candles, "markers": markers, "timeframe": "1d", "exchange": exchange, "currency": currency}
 
     payload = _CANDLES_SF.do(cache_key, _fetch)
     _CANDLES_CACHE.set(cache_key, payload)
@@ -1219,26 +1233,42 @@ async def api_ai_bot_candles(
     saudi_sym = bool(_SAUDI_TICKER_RE.match(raw_symbol) or re.match(r"^(\^)?TASI(\.SR)?$", raw_symbol, re.IGNORECASE))
     egx_suffix = bool(_EGX_SUFFIX_RE.match(raw_symbol))
     saudi_exch = raw_exch_upper in ("TADAWUL", "TASI", "SR")
-    if not saudi_sym and not egx_suffix and raw_exch_upper not in ("", "EGX", "TADAWUL", "TASI", "SR"):
+    uae_exch = raw_exch_upper in ("DFM", "ADX", "UAE")
+    qatar_exch = raw_exch_upper in ("QSE", "QATAR")
+    if not saudi_sym and not egx_suffix and raw_exch_upper not in ("", "EGX", "TADAWUL", "TASI", "SR", "DFM", "ADX", "UAE", "QSE", "QATAR"):
         return JSONResponse(
-            {"candles": [], "markers": [], "error": "Only EGX and Saudi Tadawul (TASI) market data is available."},
+            {"candles": [], "markers": [], "error": "Only EGX and GCC (TASI, DFM, ADX, QSE) market data is available."},
             status_code=410,
         )
 
     hint = request.query_params.get("market") or request.query_params.get("country") or (
-        "TADAWUL" if saudi_exch else ("EGX" if raw_exch_upper == "EGX" else None)
+        "TADAWUL" if saudi_exch else ("DFM" if uae_exch else ("QSE" if qatar_exch else ("EGX" if raw_exch_upper == "EGX" else None)))
     )
-    market = "tasi" if (saudi_sym or saudi_exch) else ("egx" if (egx_suffix or raw_exch_upper == "EGX") else resolve_request_market(request, hint))
+    market = (
+        "tasi"
+        if (saudi_sym or saudi_exch)
+        else (
+            "uae"
+            if uae_exch
+            else (
+                "qatar"
+                if qatar_exch
+                else ("egx" if (egx_suffix or raw_exch_upper == "EGX") else resolve_request_market(request, hint))
+            )
+        )
+    )
     if all == "true":
         eff_limit = min(max(int(limit or 5000), 1), 5000)
     else:
         raw_lim = 150 if limit is None else int(limit)
         eff_limit = min(max(raw_lim, 1), 5000 if raw_lim > 1000 else 1000)
-    clean_symbol = re.sub(r"\.(SR|SA|TADAWUL)$", "", raw_symbol, flags=re.IGNORECASE).upper() if market == "tasi" else raw_symbol
+    clean_symbol = re.sub(r"\.(SR|SA|TADAWUL|AE|DU|AD|QA)$", "", raw_symbol, flags=re.IGNORECASE).upper() if market != "egx" else raw_symbol
     explicit_in_url = (
         _has_explicit_market_param(request)
         or saudi_sym
         or saudi_exch
+        or uae_exch
+        or qatar_exch
         or egx_suffix
         or raw_exch_upper == "EGX"
     )
@@ -1269,7 +1299,9 @@ async def api_ai_bot_candles(
                 payload = {**payload, "markers": []}
             return JSONResponse(payload, headers=headers)
 
-        payload = _load_tasi_candles_payload(clean_symbol, get_market_exchange("tasi"), bot_id, eff_limit)
+        payload = _load_tasi_candles_payload(
+            clean_symbol, raw_exch_upper or get_market_exchange(market), bot_id, eff_limit, market=market
+        )
         if not with_markers:
             payload = {**payload, "markers": []}
         return JSONResponse(payload, headers=headers)
@@ -2274,7 +2306,16 @@ async def api_disclosures_list(
             "ai_summary,sentiment,action_type,shares_count,stake_before,stake_after,"
             "party_name,party_role,source_url,metadata"
         )
-        qb = (
+        def _apply_exchange_filter(q: Any) -> Any:
+            if market == "uae":
+                return q.in_("metadata->>exchange", ["DFM", "ADX"])
+            if market == "qatar":
+                return q.eq("metadata->>exchange", "QSE")
+            if market == "tasi":
+                return q.eq("metadata->>exchange", "TADAWUL")
+            return q
+
+        qb = _apply_exchange_filter(
             sb.table("egx_disclosures")
             .select(cols, count="exact")
             .order("disclosure_date", desc=True)
@@ -2289,15 +2330,16 @@ async def api_disclosures_list(
                 qb = qb.or_("sentiment.eq.bearish,action_type.eq.sell")
             else:
                 qb = qb.eq("sentiment", sent_clean)
-        if sec_clean != "all" and market != "tasi":
+        if sec_clean != "all" and market == "egx":
             sec_syms = _EGX_DISCLOSURE_SECTORS.get(sec_clean)
             if sec_syms:
                 qb = qb.in_("symbol", list(sec_syms))
 
         if tf_clean != "all":
             latest_res = (
-                sb.table("egx_disclosures")
-                .select("disclosure_date")
+                _apply_exchange_filter(
+                    sb.table("egx_disclosures").select("disclosure_date")
+                )
                 .order("disclosure_date", desc=True)
                 .limit(150)
                 .execute()

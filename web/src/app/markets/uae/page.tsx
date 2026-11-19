@@ -27,6 +27,12 @@ export const metadata: Metadata = {
     url: "https://egxbots.com/markets/uae",
     images: [{ url: "https://egxbots.com/opengraph-image.png", width: 1200, height: 630, alt: "أسهم الإمارات DFM & ADX" }],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "دليل أسهم الإمارات (دبي DFM وأبوظبي ADX) | EGX BOTS",
+    description: "أسعار ومؤشرات أسهم دبي وأبوظبي محدثة يومياً مع تحليل الذكاء الاصطناعي ومستويات الدعم والمقاومة.",
+    images: ["https://egxbots.com/opengraph-image.png"],
+  },
 };
 
 export default async function UaeMarketPage() {

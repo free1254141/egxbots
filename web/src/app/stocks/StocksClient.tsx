@@ -213,6 +213,26 @@ export default function StocksClient({
                   : "Browse all listed companies on the Egyptian Exchange (EGX) by Arabic/English name or ticker, and explore technical indicators, machine learning scores, and liquidity metrics.")
           }
         />
+
+        {/* Quick Regional & Gulf Markets Navigation */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {[
+            { href: "/markets", ar: "🌍 كل الأسواق", en: "🌍 All Markets" },
+            { href: "/stocks", ar: "🇪🇬 مصر (EGX)", en: "🇪🇬 Egypt (EGX)" },
+            { href: "/stocks?market=tasi", ar: "🇸🇦 السعودية (TASI)", en: "🇸🇦 Saudi (TASI)" },
+            { href: "/markets/uae", ar: "🇦🇪 الإمارات (DFM & ADX)", en: "🇦🇪 UAE (DFM & ADX)" },
+            { href: "/markets/qatar", ar: "🇶🇦 قطر (QSE)", en: "🇶🇦 Qatar (QSE)" },
+            { href: "/markets/gold-silver", ar: "🥇 الذهب والفضة", en: "🥇 Gold & Silver" },
+          ].map((tab) => (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className="px-3 py-1.5 text-xs font-black bg-white dark:bg-zinc-900 text-black dark:text-white border-2 border-black dark:border-white shadow-[2px_2px_0px_#000] dark:shadow-[2px_2px_0px_rgba(255,255,255,0.25)] hover:bg-[#FFE600] hover:text-black transition-colors"
+            >
+              {isAr ? tab.ar : tab.en}
+            </Link>
+          ))}
+        </div>
       </div>
 
       {/* Search & Sector Filters Bar */}
