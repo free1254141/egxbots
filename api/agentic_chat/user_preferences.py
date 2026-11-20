@@ -19,6 +19,7 @@ SHARIA_FILTER_TOOLS = frozenset({
     "get_accumulation_stocks",
     "screen_stocks",
     "get_fair_value",
+    "optimize_portfolio",
 })
 
 

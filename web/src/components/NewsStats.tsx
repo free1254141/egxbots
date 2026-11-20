@@ -77,11 +77,11 @@ export default function NewsStats({
     const [sectorTimeline, setSectorTimeline] = useState<{ symbols: string[]; rows: Record<string, number | string | null>[] } | null>(null);
     const [sectorTimelineLoading, setSectorTimelineLoading] = useState(false);
 
-    // Reset active sector details when filters/search changes (NOT the period:
+    // Reset active sector details when filters/search/market changes (NOT the period:
     // the period is global and must apply to the open sector chart as well).
     useEffect(() => {
         setActiveSectorName("");
-    }, [search, dateFilter, monthFilter]);
+    }, [search, dateFilter, monthFilter, market]);
 
     // Keep activeSectorName in sync if parent clears the filter
     useEffect(() => {
@@ -170,7 +170,7 @@ export default function NewsStats({
         return () => {
             cancelled = true;
         };
-    }, [activeSectorName, search, dateFilter, monthFilter, period]);
+    }, [activeSectorName, search, dateFilter, monthFilter, period, market]);
 
     if (loading) {
         return (

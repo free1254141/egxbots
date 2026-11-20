@@ -100,17 +100,21 @@ _DISCLOSURES_CACHE = BoundedTTLCache(max_entries=128, default_ttl=_RUN_TO_RUN_TT
 _DISCLOSURES_SF = SingleFlight()
 _PDF_CACHE = BoundedTTLCache(max_entries=12, default_ttl=3600.0)
 _PDF_SF = SingleFlight()
+_METALS_SERIES_CACHE = BoundedTTLCache(max_entries=4, default_ttl=_RUN_TO_RUN_TTL)
+_METALS_SERIES_SF = SingleFlight()
 
 _TAG_TO_CACHES: Dict[str, Tuple[Tuple[str, BoundedTTLCache], ...]] = {
     "daily-symbols": (
         ("symbols", _SYMBOLS_CACHE),
         ("countries", _COUNTRIES_CACHE),
         ("fundamentals", _FUNDAMENTALS_CACHE),
+        ("metals_series", _METALS_SERIES_CACHE),
     ),
     "daily-market-data": (
         ("symbols", _SYMBOLS_CACHE),
         ("candles", _CANDLES_CACHE),
         ("market_status", _MARKET_STATUS_CACHE),
+        ("metals_series", _METALS_SERIES_CACHE),
         ("fundamentals", _FUNDAMENTALS_CACHE),
         ("recommendations", _RECS_CACHE),
         ("signal_performance", _SIG_PERF_CACHE),
@@ -167,6 +171,7 @@ def clear_offload_caches() -> None:
         _SCAN_AI_CACHE,
         _DISCLOSURES_CACHE,
         _PDF_CACHE,
+        _METALS_SERIES_CACHE,
     ):
         cache.clear()
 
@@ -1780,6 +1785,77 @@ def _compute_tasi_trend_regime(points: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _load_metals_series() -> Dict[str, List[Dict[str, Any]]]:
+    """Load recent XAUUSD (Gold) and XAGUSD (Silver) daily bars once and cache across all 4 markets."""
+    found, cached = _METALS_SERIES_CACHE.get("global_metals")
+    if found:
+        return cached
+
+    def _fetch_metals() -> Dict[str, List[Dict[str, Any]]]:
+        sb = get_market_supabase("tasi")
+        if sb is None:
+            return {"gold": [], "silver": []}
+        rows = _safe_exec(
+            lambda: getattr(
+                sb.table("stock_prices")
+                .select("symbol,date,open,high,low,close,volume")
+                .eq("exchange", "COMMODITIES")
+                .in_("symbol", ["XAUUSD", "XAGUSD"])
+                .order("date", desc=True)
+                .limit(520)
+                .execute(),
+                "data",
+                None,
+            )
+            or [],
+            [],
+        )
+        by_sym: Dict[str, Dict[str, Dict[str, Any]]] = {"XAUUSD": {}, "XAGUSD": {}}
+        for r in rows:
+            sym = str(r.get("symbol") or "").strip().upper()
+            if sym not in by_sym:
+                continue
+            d = str(r.get("date") or "")[:10]
+            close = _to_float(r.get("close"), 0.0)
+            if not d or close <= 0:
+                continue
+            by_sym[sym][d] = {
+                "date": d,
+                "open": _to_float(r.get("open"), close),
+                "high": _to_float(r.get("high"), close),
+                "low": _to_float(r.get("low"), close),
+                "close": close,
+                "volume": _to_float(r.get("volume"), 0.0),
+            }
+        gold = [by_sym["XAUUSD"][d] for d in sorted(by_sym["XAUUSD"].keys())]
+        silver = [by_sym["XAGUSD"][d] for d in sorted(by_sym["XAGUSD"].keys())]
+        return {"gold": gold, "silver": silver}
+
+    payload = _METALS_SERIES_SF.do("global_metals", _fetch_metals)
+    if payload.get("gold") or payload.get("silver"):
+        _METALS_SERIES_CACHE.set("global_metals", payload)
+    return payload
+
+
+def _build_index_series(rows: List[Dict[str, Any]], default_source: str) -> List[Dict[str, Any]]:
+    ordered = []
+    for r in reversed(rows or []):
+        close = _to_float(r.get("close"), 0.0)
+        if close <= 0:
+            continue
+        ordered.append({
+            "date": r.get("date"),
+            "open": close,
+            "high": close,
+            "low": close,
+            "close": close,
+            "volume": 0,
+            "ret": None if r.get("ret") is None else _to_float(r.get("ret"), 0.0),
+            "source": r.get("source") or default_source,
+        })
+    return ordered
+
+
 def _load_market_status_payload(market: str) -> Dict[str, Any]:
     found, cached = _MARKET_STATUS_CACHE.get(market)
     if found:
@@ -1790,6 +1866,74 @@ def _load_market_status_payload(market: str) -> Dict[str, Any]:
         if sb is None:
             raise RuntimeError("Market Supabase unavailable")
         exchange = get_market_exchange(market)
+        metals = _load_metals_series()
+
+        if market == "uae":
+            idx_res = (
+                sb.table("market_index")
+                .select("exchange,date,close,ret,source")
+                .in_("exchange", ["DFM", "ADX"])
+                .order("date", desc=True)
+                .limit(730)
+                .execute()
+            )
+            raw_rows = getattr(idx_res, "data", None) or []
+            dfm_rows = [r for r in raw_rows if str(r.get("exchange") or "").upper() == "DFM"]
+            adx_rows = [r for r in raw_rows if str(r.get("exchange") or "").upper() == "ADX"]
+            dfm_series = _build_index_series(dfm_rows, "DFM")
+            adx_series = _build_index_series(adx_rows, "ADX")
+            primary_series = dfm_series or adx_series
+            if not primary_series:
+                raise RuntimeError("UAE market status snapshot is missing")
+            trend = _compute_tasi_trend_regime(primary_series)
+            return {
+                "dfm": dfm_series,
+                "adx": adx_series,
+                "tasi": [],
+                "egx30": [],
+                "egx100": [],
+                "usdegp": [],
+                "gold": metals["gold"],
+                "silver": metals["silver"],
+                "regime": trend["regime"],
+                "tasi_return": trend["tasiReturn"],
+                "reject_buys": trend["rejectBuys"],
+                "updated_at": primary_series[-1].get("date") or datetime.now(timezone.utc).isoformat(),
+                "market": "uae",
+                "exchange": "DFM",
+                "currency": "AED",
+            }
+
+        if market == "qatar":
+            idx_res = (
+                sb.table("market_index")
+                .select("date,close,ret,source")
+                .eq("exchange", "QSE")
+                .order("date", desc=True)
+                .limit(365)
+                .execute()
+            )
+            qse_series = _build_index_series(getattr(idx_res, "data", None) or [], "QSE")
+            if not qse_series:
+                raise RuntimeError("Qatar market status snapshot is missing")
+            trend = _compute_tasi_trend_regime(qse_series)
+            return {
+                "qse": qse_series,
+                "tasi": [],
+                "egx30": [],
+                "egx100": [],
+                "usdegp": [],
+                "gold": metals["gold"],
+                "silver": metals["silver"],
+                "regime": trend["regime"],
+                "tasi_return": trend["tasiReturn"],
+                "reject_buys": trend["rejectBuys"],
+                "updated_at": qse_series[-1].get("date") or datetime.now(timezone.utc).isoformat(),
+                "market": "qatar",
+                "exchange": "QSE",
+                "currency": "QAR",
+            }
+
         cache_key = "market_status_Saudi Arabia" if market == "tasi" else "market_status_Egypt"
         res = sb.table("market_cache").select("payload").eq("cache_key", cache_key).limit(1).execute()
         rows = getattr(res, "data", None) or []
@@ -1804,6 +1948,8 @@ def _load_market_status_payload(market: str) -> Dict[str, Any]:
                 "egx30": payload.get("egx30") if isinstance(payload.get("egx30"), list) else [],
                 "egx100": payload.get("egx100") if isinstance(payload.get("egx100"), list) else [],
                 "usdegp": payload.get("usdegp") if isinstance(payload.get("usdegp"), list) else [],
+                "gold": metals["gold"],
+                "silver": metals["silver"],
             }
             if not safe_payload["usdegp"]:
                 usd_res = _safe_exec(
@@ -1850,6 +1996,8 @@ def _load_market_status_payload(market: str) -> Dict[str, Any]:
                 "egx30": cached_payload.get("egx30") if isinstance(cached_payload.get("egx30"), list) else [],
                 "egx100": cached_payload.get("egx100") if isinstance(cached_payload.get("egx100"), list) else [],
                 "usdegp": cached_payload.get("usdegp") if isinstance(cached_payload.get("usdegp"), list) else [],
+                "gold": metals["gold"],
+                "silver": metals["silver"],
                 "market": "tasi",
                 "exchange": exchange,
                 "currency": "SAR",
@@ -1863,21 +2011,7 @@ def _load_market_status_payload(market: str) -> Dict[str, Any]:
             .limit(365)
             .execute()
         )
-        ordered = []
-        for r in reversed(getattr(idx_res, "data", None) or []):
-            close = _to_float(r.get("close"), 0.0)
-            if close <= 0:
-                continue
-            ordered.append({
-                "date": r.get("date"),
-                "open": close,
-                "high": close,
-                "low": close,
-                "close": close,
-                "volume": 0,
-                "ret": None if r.get("ret") is None else _to_float(r.get("ret"), 0.0),
-                "source": r.get("source") or "TADAWUL",
-            })
+        ordered = _build_index_series(getattr(idx_res, "data", None) or [], "TADAWUL")
         if not ordered:
             raise RuntimeError("TASI market status snapshot is missing")
         trend = _compute_tasi_trend_regime(ordered)
@@ -1888,6 +2022,8 @@ def _load_market_status_payload(market: str) -> Dict[str, Any]:
             "egx30": [],
             "egx100": [],
             "usdegp": [],
+            "gold": metals["gold"],
+            "silver": metals["silver"],
             "regime": base.get("regime") or trend["regime"],
             "tasi_return": base["tasi_return"] if "tasi_return" in base else trend["tasiReturn"],
             "reject_buys": base["reject_buys"] if "reject_buys" in base else trend["rejectBuys"],

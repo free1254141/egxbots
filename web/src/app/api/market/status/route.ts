@@ -50,6 +50,68 @@ function computeTrendRegime(points: Array<{ close: number; ret: number | null }>
   };
 }
 
+async function loadGlobalMetalsSeries(): Promise<{
+  gold: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>;
+  silver: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>;
+}> {
+  try {
+    const gccSb = getMarketSupabaseClient("tasi");
+    const { data: rows } = await gccSb
+      .from("stock_prices")
+      .select("symbol,date,open,high,low,close,volume")
+      .eq("exchange", "COMMODITIES")
+      .in("symbol", ["XAUUSD", "XAGUSD"])
+      .order("date", { ascending: false })
+      .limit(520);
+
+    const bySym: Record<"XAUUSD" | "XAGUSD", Map<string, any>> = {
+      XAUUSD: new Map(),
+      XAGUSD: new Map(),
+    };
+    for (const r of rows || []) {
+      const sym = String((r as any).symbol || "").trim().toUpperCase();
+      if (sym !== "XAUUSD" && sym !== "XAGUSD") continue;
+      const d = String((r as any).date || "").slice(0, 10);
+      const close = toNumber((r as any).close, 0);
+      if (!d || close <= 0) continue;
+      bySym[sym].set(d, {
+        date: d,
+        open: toNumber((r as any).open, close),
+        high: toNumber((r as any).high, close),
+        low: toNumber((r as any).low, close),
+        close,
+        volume: toNumber((r as any).volume, 0),
+      });
+    }
+    const sortAsc = (m: Map<string, any>) =>
+      Array.from(m.keys())
+        .sort()
+        .map((k) => m.get(k));
+    return { gold: sortAsc(bySym.XAUUSD), silver: sortAsc(bySym.XAGUSD) };
+  } catch {
+    return { gold: [], silver: [] };
+  }
+}
+
+function buildIndexSeries(rows: any[], defaultSource: string) {
+  return [...(rows || [])]
+    .reverse()
+    .map((r: any) => {
+      const close = toNumber(r.close, 0);
+      return {
+        date: r.date,
+        open: close,
+        high: close,
+        low: close,
+        close,
+        volume: 0,
+        ret: r.ret == null ? null : toNumber(r.ret, 0),
+        source: r.source || defaultSource,
+      };
+    })
+    .filter((r) => r.close > 0);
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -67,6 +129,75 @@ export async function GET(req: NextRequest) {
         };
 
     const supabase = getMarketSupabaseClient(market);
+    const metals = await loadGlobalMetalsSeries();
+
+    if (market === "uae") {
+      const { data: indexRows, error: indexError } = await supabase
+        .from("market_index")
+        .select("exchange,date,close,ret,source")
+        .in("exchange", ["DFM", "ADX"])
+        .order("date", { ascending: false })
+        .limit(730);
+      if (indexError) throw indexError;
+      const dfm = buildIndexSeries((indexRows || []).filter((r: any) => String(r.exchange || "").toUpperCase() === "DFM"), "DFM");
+      const adx = buildIndexSeries((indexRows || []).filter((r: any) => String(r.exchange || "").toUpperCase() === "ADX"), "ADX");
+      const primary = dfm.length > 0 ? dfm : adx;
+      if (primary.length === 0) throw new Error("UAE market status snapshot is missing");
+      const { regime, tasiReturn, rejectBuys } = computeTrendRegime(primary);
+      return NextResponse.json(
+        {
+          dfm,
+          adx,
+          tasi: [],
+          egx30: [],
+          egx100: [],
+          usdegp: [],
+          gold: metals.gold,
+          silver: metals.silver,
+          regime,
+          tasi_return: tasiReturn,
+          reject_buys: rejectBuys,
+          updated_at: primary[primary.length - 1]?.date || new Date().toISOString(),
+          market: "uae",
+          exchange: "DFM",
+          currency: "AED",
+        },
+        { headers },
+      );
+    }
+
+    if (market === "qatar") {
+      const { data: indexRows, error: indexError } = await supabase
+        .from("market_index")
+        .select("date,close,ret,source")
+        .eq("exchange", "QSE")
+        .order("date", { ascending: false })
+        .limit(365);
+      if (indexError) throw indexError;
+      const qse = buildIndexSeries(indexRows || [], "QSE");
+      if (qse.length === 0) throw new Error("Qatar market status snapshot is missing");
+      const { regime, tasiReturn, rejectBuys } = computeTrendRegime(qse);
+      return NextResponse.json(
+        {
+          qse,
+          tasi: [],
+          egx30: [],
+          egx100: [],
+          usdegp: [],
+          gold: metals.gold,
+          silver: metals.silver,
+          regime,
+          tasi_return: tasiReturn,
+          reject_buys: rejectBuys,
+          updated_at: qse[qse.length - 1]?.date || new Date().toISOString(),
+          market: "qatar",
+          exchange: "QSE",
+          currency: "QAR",
+        },
+        { headers },
+      );
+    }
+
     const cacheKey = market === "tasi" ? "market_status_Saudi Arabia" : "market_status_Egypt";
     const { data, error } = await supabase
       .from("market_cache")
@@ -84,6 +215,8 @@ export async function GET(req: NextRequest) {
         egx30: Array.isArray(payload.egx30) ? payload.egx30 : [],
         egx100: Array.isArray(payload.egx100) ? payload.egx100 : [],
         usdegp: Array.isArray(payload.usdegp) ? payload.usdegp : [],
+        gold: metals.gold,
+        silver: metals.silver,
       };
 
       // If usdegp is empty in cache, fallback to stock_prices
@@ -131,6 +264,8 @@ export async function GET(req: NextRequest) {
           egx30: Array.isArray(cachedPayload.egx30) ? cachedPayload.egx30 : [],
           egx100: Array.isArray(cachedPayload.egx100) ? cachedPayload.egx100 : [],
           usdegp: Array.isArray(cachedPayload.usdegp) ? cachedPayload.usdegp : [],
+          gold: metals.gold,
+          silver: metals.silver,
           market: "tasi",
           exchange,
           currency: "SAR",
@@ -148,22 +283,7 @@ export async function GET(req: NextRequest) {
 
     if (indexError) throw indexError;
 
-    const ordered = [...(indexRows || [])]
-      .reverse()
-      .map((r: any) => {
-        const close = toNumber(r.close, 0);
-        return {
-          date: r.date,
-          open: close,
-          high: close,
-          low: close,
-          close,
-          volume: 0,
-          ret: r.ret == null ? null : toNumber(r.ret, 0),
-          source: r.source || "TADAWUL",
-        };
-      })
-      .filter((r) => r.close > 0);
+    const ordered = buildIndexSeries(indexRows || [], "TADAWUL");
 
     if (ordered.length === 0) {
       throw new Error("TASI market status snapshot is missing");
@@ -179,6 +299,8 @@ export async function GET(req: NextRequest) {
         egx30: [],
         egx100: [],
         usdegp: [],
+        gold: metals.gold,
+        silver: metals.silver,
         regime: cachedPayload?.regime || regime,
         tasi_return:
           cachedPayload?.tasi_return !== undefined ? cachedPayload.tasi_return : tasiReturn,

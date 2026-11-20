@@ -19,13 +19,14 @@ import httpx
 
 logger = logging.getLogger("agentic_chat.vision")
 
-VISION_SYSTEM_PROMPT = """You are a financial image analyzer. Examine all attached image(s), combine the distinct visible evidence, and return ONLY a valid JSON object with no markdown fences, no comments, and no extra text.
+VISION_SYSTEM_PROMPT = """You are a financial and document image analyzer. Examine all attached image(s), combine the distinct visible evidence, and return ONLY a valid JSON object with no markdown fences, no comments, and no extra text.
 
-Return one JSON object with these keys: image_type, symbols, technical_observations, market_depth, user_relevant_summary, uncertainties, confidence.
+Return one JSON object with these keys: image_type, symbols, technical_observations, market_depth, extracted_text, user_relevant_summary, uncertainties, confidence.
 Do not copy this instruction, do not return a schema, and do not use placeholder values.
 
 Rules:
-- image_type: write exactly one word — portfolio (if it shows broker holdings/positions), chart (candlestick/line), table (price table), market_depth (bid/ask ladder), or unknown.
+- image_type: write exactly one word — portfolio (if it shows broker holdings/positions), chart (candlestick/line), table (price table), market_depth (bid/ask ladder), text_screenshot (if it shows chat text, numbered questions, news, corporate disclosure, or Arabic/English document text), or unknown.
+- extracted_text: if the image contains readable chat text, numbered points/questions, news, or company disclosures, transcribe the visible text faithfully (preserving numbered items 1..N verbatim in their original language, up to 1500 chars); otherwise use empty string "".
 - symbols: for each visible ticker, add an entry: {"symbol":"TICKER","name":"Company name or empty","asset_type":"stock|fund|unknown","visible_values":{"price":null,"average_price":null,"change_pct":null,"return_pct":null,"quantity":null,"market_value":null,"cost_basis":null,"profit_loss":null,"cash_dividends":null}}. Preserve section membership: entries under a visible "Funds/الصناديق" heading are funds, not direct stocks; use unknown if grouping is unclear. Fill only fields whose labels are visible; use null otherwise. Write numbers without commas (50000 not 50,000). Preserve decimal points exactly (181.50 must be 181.5, never 18150).
 - Arabic column mapping (very important):
   * "الوحدات" or "الكمية" = number of shares → quantity.
@@ -239,7 +240,9 @@ def validate_vision_output(data: Any) -> Optional[Dict[str, Any]]:
     seen_symbols = set()
     unique_symbols = []
     img_type = str(data.get("image_type") or "unknown").lower()
-    if img_type not in ("portfolio", "chart", "table", "market_depth", "unknown"):
+    if img_type == "document":
+        img_type = "text_screenshot"
+    if img_type not in ("portfolio", "chart", "table", "market_depth", "text_screenshot", "unknown"):
         img_type = "unknown"
 
     for s in raw_symbols:
@@ -332,6 +335,10 @@ def validate_vision_output(data: Any) -> Optional[Dict[str, Any]]:
     if confidence is None or not (0.0 <= confidence <= 1.0):
         confidence = 0.8 if unique_symbols else 0.5
 
+    extracted_text = str(data.get("extracted_text") or "").strip()[:2000]
+    if img_type == "unknown" and extracted_text and not unique_symbols:
+        img_type = "text_screenshot"
+
     return {
         "image_type": img_type,
         "symbols": unique_symbols,
@@ -341,6 +348,7 @@ def validate_vision_output(data: Any) -> Optional[Dict[str, Any]]:
             "total_ask": coerce_number_or_null(market_depth.get("total_ask")),
             "spread": coerce_number_or_null(market_depth.get("spread")),
         },
+        "extracted_text": extracted_text,
         "user_relevant_summary": str(data.get("user_relevant_summary") or data.get("summary") or ""),
         "uncertainties": list(dict.fromkeys(uncertainties)),
         "confidence": round(confidence, 2),
@@ -455,11 +463,17 @@ async def analyze_image(
             return None, err
 
         first = readable[0]
+        merged_extracted_texts = [
+            f"الصورة {idx + 1}: {str(r.get('extracted_text') or '').strip()}"
+            for idx, (r, _) in enumerate(results)
+            if r and str(r.get("extracted_text") or "").strip()
+        ]
         combined = {
             "image_type": first["image_type"] if all(r["image_type"] == first["image_type"] for r in readable) else "unknown",
             "symbols": [s for r in readable for s in r.get("symbols", [])],
             "technical_observations": [t for r in readable for t in r.get("technical_observations", [])],
             "market_depth": first.get("market_depth") or {"total_bid": None, "total_ask": None, "spread": None},
+            "extracted_text": "\n\n".join(merged_extracted_texts)[:2500],
             "uncertainties": list(dict.fromkeys(
                 [u for r in readable for u in r.get("uncertainties", [])] +
                 [f"تعذر تحليل الصورة رقم {idx + 1}؛ واحتفظت بنتيجة كل صورة أخرى بشكل مستقل." for idx, (r, _) in enumerate(results) if not r]
@@ -628,6 +642,9 @@ def safe_image_evidence_reply(vision: Dict[str, Any], request: str = "") -> str:
     if depth.get("total_bid") is not None or depth.get("total_ask") is not None or depth.get("spread") is not None:
         lines.append(f"\n**عمق السوق الظاهر:** طلب {_fmt(depth.get('total_bid'))}، عرض {_fmt(depth.get('total_ask'))}، فرق السعر {_fmt(depth.get('spread'))}.")
 
+    if vision.get("extracted_text"):
+        lines.append(f"\n**النص المقروء من الصورة:**\n{vision['extracted_text']}")
+
     if vision.get("user_relevant_summary"):
         lines.append(f"\n**ملخص الصورة:** {vision['user_relevant_summary']}")
 
@@ -706,12 +723,22 @@ def format_vision_context_for_prompt(vision: Dict[str, Any]) -> str:
             val_txt = f"={o['value']}" if o.get("value") is not None else ""
             lines.append(f"  * {o.get('symbol', '')} {o.get('indicator', '')}{val_txt}: {o.get('meaning', '')}")
 
+    extracted_text = str(vision.get("extracted_text") or "").strip()
+    if extracted_text:
+        lines.append(f"- النص المقروء حرفياً من الصورة:\n{extracted_text}")
+
     if uncertainties:
         lines.append("- حدود الثقة وملاحظات التحقق:")
         for u in uncertainties:
             lines.append(f"  * {u}")
 
-    if img_type == "unknown" and not symbols and not obs:
+    if (img_type == "text_screenshot" or extracted_text) and not symbols and not obs:
+        lines.append(
+            "\nتوجيه للإجابة:\n"
+            "1. الصورة المرفقة هي لقطة شاشة لنص أو أسئلة أو إفصاح/خبر — اعتمد النص المقروء حرفياً أعلاه دون رفض الصورة بقول إنها «ليست محفظة أو شارت».\n"
+            "2. تعامل مباشرةً مع النقاط أو الأسئلة المذكورة في النص المقروء ونفّذ طلب المستخدم (مثل تحليلها أو جدولتها في الأتمتة عبر manage_automations عند الطلب)."
+        )
+    elif img_type == "unknown" and not symbols and not obs:
         lines.append(
             "\nتوجيه للإجابة:\n"
             "1. الصورة المرفقة هي صورة عادية أو غير مالية ولا تحتوي على محفظة أسهم أو شارت فني أو جدول أسعار أسهم.\n"

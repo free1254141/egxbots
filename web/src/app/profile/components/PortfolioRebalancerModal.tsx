@@ -18,6 +18,42 @@ import type {
   ReplacementCandidate,
 } from "@/app/api/user/portfolio/rebalance/route";
 
+interface OrRiskMetrics {
+  annualVolatilityPct: number;
+  diversificationRatio: number;
+  effectiveStocks: number;
+  hhiConcentration: number;
+  maxStockWeightPct: number;
+  maxSectorWeightPct: number;
+  maxSectorName: string;
+}
+
+interface OrAllocationRow {
+  symbol: string;
+  nameAr: string;
+  sector: string;
+  price: number;
+  currentShares: number;
+  currentWeightPct: number;
+  targetWeightPct: number;
+  actualWeightPct: number;
+  targetShares: number;
+  deltaShares: number;
+  allocatedValue: number;
+  action: "BUY" | "SELL" | "HOLD" | "SKIP";
+  riskContributionPct: number;
+}
+
+interface OrOptimizationPayload {
+  objectiveLabelAr: string;
+  estimatedFees: number;
+  leftoverCash: number;
+  volatilityChangePct: number;
+  metricsBefore: OrRiskMetrics;
+  metricsAfter: OrRiskMetrics;
+  allocations: OrAllocationRow[];
+}
+
 interface RebalanceResponse {
   healthScore: number;
   totalPortfolioEquity: number;
@@ -28,6 +64,7 @@ interface RebalanceResponse {
   aiAdvisory: string;
   holdings: HoldingRebalanceDiagnosis[];
   replacements: ReplacementCandidate[];
+  orOptimization?: OrOptimizationPayload;
 }
 
 export default function PortfolioRebalancerModal({
@@ -210,12 +247,85 @@ export default function PortfolioRebalancerModal({
                 <div className="bg-gradient-to-r from-amber-500/10 via-zinc-100 to-emerald-500/10 dark:from-amber-950/35 dark:via-zinc-900 dark:to-emerald-950/30 border-2 border-amber-500/40 rounded-2xl p-4 shadow-sm">
                   <div className="text-xs font-black text-amber-700 dark:text-amber-300 flex items-center gap-1.5 mb-1.5">
                     <Sparkles className="w-4 h-4" />
-                    <span>{isAr ? "توصية المستشار الذكي (DeepSeek-V3):" : "Executive AI Advisory (DeepSeek-V3):"}</span>
+                    <span>{isAr ? "ملخص التحليل الكمي وإدارة المخاطر:" : "Quantitative Risk & Rebalance Summary:"}</span>
                   </div>
                   <p className="text-xs sm:text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed font-semibold">
                     {result.aiAdvisory}
                   </p>
                 </div>
+
+                {/* Operations Research (OR) Mathematical Allocation Panel */}
+                {result.orOptimization && result.orOptimization.allocations.length > 0 && (
+                  <div className="bg-indigo-50/60 dark:bg-indigo-950/25 border-2 border-indigo-400/50 dark:border-indigo-500/40 rounded-2xl p-4 space-y-3 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs sm:text-sm font-black text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>
+                          {isAr
+                            ? "📐 التوزيع الرياضي الأمثل (بحوث العمليات OR)"
+                            : "📐 Operations Research (OR) Mathematical Allocation"}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-mono font-bold text-indigo-700 dark:text-indigo-300 bg-white/80 dark:bg-zinc-900/80 px-2 py-0.5 rounded-md border border-indigo-300 dark:border-indigo-700">
+                        {isAr
+                          ? `التذبذب السنوي: ${result.orOptimization.metricsBefore.annualVolatilityPct}% ← ${result.orOptimization.metricsAfter.annualVolatilityPct}% | التنويع: ${result.orOptimization.metricsAfter.effectiveStocks}x`
+                          : `Annual Vol: ${result.orOptimization.metricsBefore.annualVolatilityPct}% -> ${result.orOptimization.metricsAfter.annualVolatilityPct}% | Eff. N: ${result.orOptimization.metricsAfter.effectiveStocks}x`}
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px] sm:text-xs font-mono border-collapse">
+                        <thead>
+                          <tr className="border-b border-indigo-200 dark:border-indigo-800 text-zinc-500 dark:text-zinc-400">
+                            <th className="py-1.5 text-start font-black">{isAr ? "السهم" : "Stock"}</th>
+                            <th className="py-1.5 text-start font-black">{isAr ? "القطاع" : "Sector"}</th>
+                            <th className="py-1.5 text-center font-black">{isAr ? "الوزن الحالي ← الأمثل" : "Cur -> Opt %"}</th>
+                            <th className="py-1.5 text-center font-black">{isAr ? "الأسهم المستهدفة" : "Target Shares"}</th>
+                            <th className="py-1.5 text-center font-black">{isAr ? "التعديل" : "Delta"}</th>
+                            <th className="py-1.5 text-end font-black">{isAr ? "حصة المخاطرة" : "Risk %"}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-indigo-100 dark:divide-indigo-900/50">
+                          {result.orOptimization.allocations.map((row) => (
+                            <tr key={row.symbol} className="text-zinc-900 dark:text-zinc-100">
+                              <td className="py-1.5 font-black">{row.symbol}</td>
+                              <td className="py-1.5 font-sans text-zinc-600 dark:text-zinc-400">{row.sector}</td>
+                              <td className="py-1.5 text-center">
+                                {row.currentWeightPct}% {isAr ? "←" : "->"} <strong className="text-indigo-700 dark:text-indigo-300">{row.actualWeightPct}%</strong>
+                              </td>
+                              <td className="py-1.5 text-center font-bold">{row.targetShares.toLocaleString("en-US")}</td>
+                              <td className="py-1.5 text-center font-black">
+                                <span
+                                  className={
+                                    row.action === "BUY"
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : row.action === "SELL"
+                                      ? "text-rose-600 dark:text-rose-400"
+                                      : "text-zinc-500"
+                                  }
+                                >
+                                  {row.deltaShares > 0 ? `+${row.deltaShares}` : row.deltaShares}
+                                </span>
+                              </td>
+                              <td className="py-1.5 text-end">{row.riskContributionPct}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-600 dark:text-zinc-400 pt-1">
+                      <span>
+                        {isAr
+                          ? `العمولات التقديرية لإعادة التوازن: ~${result.orOptimization.estimatedFees.toLocaleString("en-US")} ج.م · الكاش المتبقي: ${result.orOptimization.leftoverCash.toLocaleString("en-US")} ج.م`
+                          : `Est. rebalance fees: ~${result.orOptimization.estimatedFees.toLocaleString("en-US")} EGP · Leftover cash: ${result.orOptimization.leftoverCash.toLocaleString("en-US")} EGP`}
+                      </span>
+                      <span className="italic">
+                        {isAr ? "محاكاة رياضية لإدارة المخاطر والتنويع لأغراض البحث فقط." : "Quantitative risk-modeling simulation for research only."}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Step 1: Current Holdings Diagnosis */}
                 <div className="space-y-3">

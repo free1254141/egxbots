@@ -18,6 +18,7 @@ import {
 import { MarketHealthScore, MarketBreadthStrip, DailyLiquidityUpdateCard, TopMovers } from "@/components/MarketBreadth";
 import { ActiveAISignals, DailyAnalysisSummary } from "@/components/ActiveAISignals";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
+import GlobalMetalsCharts from "@/components/GlobalMetalsCharts";
 
 interface MarketDataPoint {
     date: string;
@@ -33,6 +34,11 @@ interface MarketStatusResponse {
     egx100: MarketDataPoint[];
     usdegp: MarketDataPoint[];
     tasi?: MarketDataPoint[];
+    dfm?: MarketDataPoint[];
+    adx?: MarketDataPoint[];
+    qse?: MarketDataPoint[];
+    gold?: MarketDataPoint[];
+    silver?: MarketDataPoint[];
     regime: string;
     egx30_return: number;
     reject_buys: boolean;
@@ -1171,15 +1177,17 @@ const MoneyFlowTimeline = ({ data, loading, error, isAr, t, onRefresh, dailyFram
 
 export default function MarketClient() {
     const { t, language } = useLanguage();
-    const { market, isSaudi, country, currencyCode, currencyLabel } = useMarket();
+    const { market, isSaudi, isUae, isQatar, isGccChatOnly, country, currencyCode, currencyLabel } = useMarket();
     const activeMarketRef = useRef(market);
     activeMarketRef.current = market;
     const isAr = language === "ar";
+    const defaultTabForMarket = (m: string): "egx30" | "egx100" | "usdegp" | "tasi" | "dfm" | "adx" | "qse" =>
+        m === "tasi" ? "tasi" : m === "uae" ? "dfm" : m === "qatar" ? "qse" : "egx30";
 
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<MarketStatusResponse | null>(null);
-    const [activeTab, setActiveTab] = useState<"egx30" | "egx100" | "usdegp" | "tasi">(isSaudi ? "tasi" : "egx30");
+    const [activeTab, setActiveTab] = useState<"egx30" | "egx100" | "usdegp" | "tasi" | "dfm" | "adx" | "qse">(defaultTabForMarket(market));
 
     const [heatmapData, setHeatmapData] = useState<any>(null);
     const [heatmapDate, setHeatmapDate] = useState<string>("");
@@ -1481,14 +1489,18 @@ export default function MarketClient() {
         setTimelineData(null);
         setSelectedSector(null);
         setDrillOpen(false);
-        setActiveTab(isSaudi ? "tasi" : "egx30");
+        setActiveTab(defaultTabForMarket(market));
         void fetchMarketStatus(market);
         void fetchHeatmapData(undefined, market, country);
         void fetchBreadthData(market);
-        void fetchAISignals(market);
-        void fetchRecommendationCounts(market);
+        if (isGccChatOnly) {
+            setAiSignalsLoading(false);
+        } else {
+            void fetchAISignals(market);
+            void fetchRecommendationCounts(market);
+        }
         void fetchTimelineData(false, market, country);
-        if (isSaudi) {
+        if (market !== "egx") {
             setCorrSymbols([]);
             setCorrData(null);
             setCorrError(null);
@@ -1497,7 +1509,7 @@ export default function MarketClient() {
         } else {
             void fetchCorrSymbols();
         }
-    }, [market, isSaudi, country]);
+    }, [market, isSaudi, isUae, isQatar, isGccChatOnly, country]);
 
     useEffect(() => {
         if (timelineOpen && availableHeatmapDates.length >= 2 && dailyHeatmapFrames.length === 0) {
@@ -1506,10 +1518,10 @@ export default function MarketClient() {
     }, [availableHeatmapDates, timelineOpen, market, country]);
 
     useEffect(() => {
-        if (!isSaudi && selectedCorrSymbol) {
+        if (market === "egx" && selectedCorrSymbol) {
             void fetchCorrData(selectedCorrSymbol);
         }
-    }, [selectedCorrSymbol, isSaudi]);
+    }, [selectedCorrSymbol, market]);
 
     const formatDate = (dateStr: string) => {
         if (!dateStr) return "";
@@ -1535,6 +1547,17 @@ export default function MarketClient() {
     const egx100Stats = data?.egx100 && Array.isArray(data.egx100) && data.egx100.length > 0 ? getStats(data.egx100) : { last: 0, change: 0, changePct: 0 };
     const usdegpStats = data?.usdegp && Array.isArray(data.usdegp) && data.usdegp.length > 0 ? getStats(data.usdegp) : { last: 0, change: 0, changePct: 0 };
     const tasiStats = data?.tasi && Array.isArray(data.tasi) && data.tasi.length > 0 ? getStats(data.tasi) : { last: 0, change: 0, changePct: 0 };
+    const dfmStats = data?.dfm && Array.isArray(data.dfm) && data.dfm.length > 0 ? getStats(data.dfm) : { last: 0, change: 0, changePct: 0 };
+    const adxStats = data?.adx && Array.isArray(data.adx) && data.adx.length > 0 ? getStats(data.adx) : { last: 0, change: 0, changePct: 0 };
+    const qseStats = data?.qse && Array.isArray(data.qse) && data.qse.length > 0 ? getStats(data.qse) : { last: 0, change: 0, changePct: 0 };
+    const effectiveTab: "egx30" | "egx100" | "usdegp" | "tasi" | "dfm" | "adx" | "qse" = isSaudi
+        ? "tasi"
+        : isQatar
+        ? "qse"
+        : isUae
+        ? (activeTab === "adx" || (!(data?.dfm && data.dfm.length > 0) && Boolean(data?.adx && data.adx.length > 0)) ? "adx" : "dfm")
+        : (activeTab === "egx100" || activeTab === "usdegp" ? activeTab : "egx30");
+    const showRecOverlay = !isGccChatOnly && effectiveTab !== "usdegp";
 
     const CustomTooltip = ({ active, payload, label }: any) => {
         if (active && payload && payload.length) {
@@ -1556,7 +1579,7 @@ export default function MarketClient() {
                             <span className="text-[9px] text-zinc-500 dark:text-zinc-400 ml-1">{currencyCode}</span>
                         </span>
                     </p>
-                    {activeTab !== "usdegp" && (
+                    {showRecOverlay && (
                         <p className="flex items-center justify-between gap-3 border-t border-black/10 dark:border-white/10 pt-1.5">
                             <span className="text-[10px] font-bold text-zinc-400">{isAr ? "التوصيات الصادرة" : "Recommendations issued"}</span>
                             <span className="font-mono font-black text-amber-500">{Number(recommendationPayload?.value || 0)}</span>
@@ -1587,7 +1610,13 @@ export default function MarketClient() {
                 <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4" role="status">
                 <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
                 <p className="text-sm font-mono text-zinc-600 dark:text-zinc-500">
-                    {isSaudi ? (isAr ? "جاري تحميل بيانات وتحليلات السوق السعودي (تاسي)..." : "Loading Saudi Tadawul (TASI) market data...") : (isAr ? "جاري تحميل بيانات وتحليلات السوق البورصة المصرية..." : "Loading EGX market data and analysis...")}
+                    {isSaudi
+                        ? (isAr ? "جاري تحميل بيانات وتحليلات السوق السعودي (تاسي)..." : "Loading Saudi Tadawul (TASI) market data...")
+                        : isUae
+                        ? (isAr ? "جاري تحميل بيانات أسواق الإمارات (دبي وأبوظبي) والذهب والفضة..." : "Loading UAE (DFM & ADX) and Metals market data...")
+                        : isQatar
+                        ? (isAr ? "جاري تحميل بيانات بورصة قطر (QSE) والذهب والفضة..." : "Loading Qatar (QSE) and Metals market data...")
+                        : (isAr ? "جاري تحميل بيانات وتحليلات البورصة المصرية..." : "Loading EGX market data and analysis...")}
                 </p>
                 </div>
             </div>
@@ -1625,24 +1654,33 @@ export default function MarketClient() {
     }
 
     const activeChartData =
-        (isSaudi || activeTab === "tasi" ? (data.tasi || []) :
-        activeTab === "egx30" ? data.egx30 :
-        activeTab === "egx100" ? data.egx100 :
+        (effectiveTab === "tasi" ? (data.tasi || []) :
+        effectiveTab === "dfm" ? (data.dfm || []) :
+        effectiveTab === "adx" ? (data.adx || []) :
+        effectiveTab === "qse" ? (data.qse || []) :
+        effectiveTab === "egx30" ? data.egx30 :
+        effectiveTab === "egx100" ? data.egx100 :
         data.usdegp) || [];
     const chartWithRecommendationCounts = activeChartData.map((point) => ({
         ...point,
-        recommendation_count: activeTab === "usdegp" ? 0 : (recommendationsByDate[point.date.slice(0, 10)] || 0),
+        recommendation_count: !showRecOverlay ? 0 : (recommendationsByDate[point.date.slice(0, 10)] || 0),
     }));
 
     const chartColor =
-        isSaudi || activeTab === "tasi" ? "#10B981" :
-        activeTab === "usdegp" ? "#8B5CF6" :
-        activeTab === "egx30" ? "#FFDC58" :
+        effectiveTab === "tasi" ? "#10B981" :
+        effectiveTab === "dfm" ? "#0EA5E9" :
+        effectiveTab === "adx" ? "#14B8A6" :
+        effectiveTab === "qse" ? "#A855F7" :
+        effectiveTab === "usdegp" ? "#8B5CF6" :
+        effectiveTab === "egx30" ? "#FFDC58" :
         "#10B981";
     const chartLabel =
-        isSaudi || activeTab === "tasi" ? "TASI" :
-        activeTab === "usdegp" ? "USD/EGP" :
-        activeTab === "egx30" ? "EGX 30" :
+        effectiveTab === "tasi" ? "TASI" :
+        effectiveTab === "dfm" ? "DFM" :
+        effectiveTab === "adx" ? "ADX" :
+        effectiveTab === "qse" ? "QSE" :
+        effectiveTab === "usdegp" ? "USD/EGP" :
+        effectiveTab === "egx30" ? "EGX 30" :
         "EGX 100";
 
     const regime = data.regime || "sideways";
@@ -1713,6 +1751,14 @@ export default function MarketClient() {
                                     ? (isAr
                                         ? "اشرح لي وضع السوق السعودي (تاسي TASI) ككل اليوم بالتفصيل: حالة المؤشر العام واتجاه السوق، قوة واتساع السوق، السيولة الإجمالية وأهم القطاعات، وإيه الخلاصة للمستثمر حالياً؟"
                                         : "Explain the overall Saudi Tadawul (TASI) market status today in detail: TASI index trend and regime, market breadth and health, total liquidity and top sectors, and the key takeaway for investors right now.")
+                                    : isUae
+                                    ? (isAr
+                                        ? "اشرح لي وضع أسواق الإمارات (دبي DFM وأبوظبي ADX) والذهب والفضة اليوم بالتفصيل: الاتجاه العام، السيولة، وأهم الأسهم القيادية."
+                                        : "Explain the overall UAE markets (DFM & ADX) plus Gold & Silver status today in detail: trend, liquidity, and leading stocks.")
+                                    : isQatar
+                                    ? (isAr
+                                        ? "اشرح لي وضع بورصة قطر (QSE) والذهب والفضة اليوم بالتفصيل: الاتجاه العام، السيولة، وأهم الأسهم القيادية."
+                                        : "Explain the overall Qatar Stock Exchange (QSE) plus Gold & Silver status today in detail: trend, liquidity, and leading stocks.")
                                     : (isAr
                                         ? "اشرح لي وضع السوق المصري ككل اليوم بالتفصيل: حالة المؤشر العام EGX30 واتجاه السوق، قوة واتساع السوق، السيولة الإجمالية وأهم القطاعات، وإيه الخلاصة للمستثمر حالياً؟"
                                         : "Explain the overall Egyptian market status today in detail: EGX30 trend and regime, market breadth and health, total liquidity and top sectors, and what the key takeaway is for investors right now.");
@@ -1801,18 +1847,129 @@ export default function MarketClient() {
                         </div>
                     </div>
                 </div>
+            ) : isUae ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10 font-sans font-medium">
+                    {/* DFM Index Card */}
+                    <div
+                        onClick={() => setActiveTab("dfm")}
+                        className={`relative flex cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950/70 sm:p-6 ${
+                            effectiveTab === "dfm" ? "border-sky-400 ring-2 ring-sky-500/10 dark:border-sky-400/60" : "border-zinc-200 hover:border-sky-200 dark:border-white/10 dark:hover:border-white/20"
+                        }`}
+                    >
+                        <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
+                            <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                                {isAr ? "مؤشر سوق دبي المالي (DFM)" : "Dubai Financial Market (DFM)"}
+                            </span>
+                            <Landmark className={`w-5 h-5 ${effectiveTab === "dfm" ? "text-sky-400" : "text-zinc-500"}`} />
+                        </div>
+                        <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
+                            <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                {dfmStats.last.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                            </span>
+                            <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{t("market.points")}</span>
+                        </div>
+                        <div className={`flex items-center gap-1.5 mt-4 font-mono ${isAr ? "flex-row-reverse" : "flex-row"}`}>
+                            <span className={`text-sm font-black flex items-center ${dfmStats.changePct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                {dfmStats.changePct >= 0 ? "+" : ""}{dfmStats.changePct.toFixed(2)}%
+                            </span>
+                            {dfmStats.changePct >= 0
+                                ? <ArrowUpRight className="w-4 h-4 text-emerald-400" />
+                                : <ArrowDownRight className="w-4 h-4 text-rose-400" />
+                            }
+                        </div>
+                    </div>
+
+                    {/* ADX Index Card */}
+                    <div
+                        onClick={() => setActiveTab("adx")}
+                        className={`relative flex cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950/70 sm:p-6 ${
+                            effectiveTab === "adx" ? "border-teal-400 ring-2 ring-teal-500/10 dark:border-teal-400/60" : "border-zinc-200 hover:border-teal-200 dark:border-white/10 dark:hover:border-white/20"
+                        }`}
+                    >
+                        <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
+                            <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                                {isAr ? "مؤشر سوق أبوظبي (ADX)" : "Abu Dhabi Securities Exchange (ADX)"}
+                            </span>
+                            <Layers className={`w-5 h-5 ${effectiveTab === "adx" ? "text-teal-400" : "text-zinc-500"}`} />
+                        </div>
+                        <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
+                            <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                {adxStats.last.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                            </span>
+                            <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{t("market.points")}</span>
+                        </div>
+                        <div className={`flex items-center gap-1.5 mt-4 font-mono ${isAr ? "flex-row-reverse" : "flex-row"}`}>
+                            <span className={`text-sm font-black flex items-center ${adxStats.changePct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                {adxStats.changePct >= 0 ? "+" : ""}{adxStats.changePct.toFixed(2)}%
+                            </span>
+                            {adxStats.changePct >= 0
+                                ? <ArrowUpRight className="w-4 h-4 text-emerald-400" />
+                                : <ArrowDownRight className="w-4 h-4 text-rose-400" />
+                            }
+                        </div>
+                    </div>
+                </div>
+            ) : isQatar ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10 font-sans font-medium">
+                    {/* QSE Index Card */}
+                    <div
+                        onClick={() => setActiveTab("qse")}
+                        className="relative flex cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950/70 sm:p-6 border-purple-400 ring-2 ring-purple-500/10 dark:border-purple-400/60"
+                    >
+                        <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
+                            <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                                {isAr ? "مؤشر بورصة قطر (QSE)" : "Qatar Stock Exchange (QSE)"}
+                            </span>
+                            <Landmark className="w-5 h-5 text-purple-400" />
+                        </div>
+                        <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
+                            <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                {qseStats.last.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                            </span>
+                            <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{t("market.points")}</span>
+                        </div>
+                        <div className={`flex items-center gap-1.5 mt-4 font-mono ${isAr ? "flex-row-reverse" : "flex-row"}`}>
+                            <span className={`text-sm font-black flex items-center ${qseStats.changePct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                {qseStats.changePct >= 0 ? "+" : ""}{qseStats.changePct.toFixed(2)}%
+                            </span>
+                            {qseStats.changePct >= 0
+                                ? <ArrowUpRight className="w-4 h-4 text-emerald-400" />
+                                : <ArrowDownRight className="w-4 h-4 text-rose-400" />
+                            }
+                        </div>
+                    </div>
+
+                    {/* Qatar Currency & Exchange Card */}
+                    <div className="relative flex flex-col justify-between overflow-hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-zinc-950/70 sm:p-6">
+                        <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
+                            <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                                {isAr ? "السوق والعملة المعتمدة" : "Exchange & Currency"}
+                            </span>
+                            <DollarSign className="w-5 h-5 text-purple-400" />
+                        </div>
+                        <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
+                            <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                {currencyCode}
+                            </span>
+                            <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{currencyLabel}</span>
+                        </div>
+                        <div className={`flex items-center gap-1.5 mt-4 text-xs font-bold text-zinc-500 ${isAr ? "flex-row-reverse" : "flex-row"}`}>
+                            <span>{isAr ? "بورصة قطر للأوراق المالية (QSE)" : "Qatar Stock Exchange (QSE)"}</span>
+                        </div>
+                    </div>
+                </div>
             ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10 font-sans font-medium">
                 {/* EGX 30 Card */}
                 <div
                     onClick={() => setActiveTab("egx30")}
                     className={`relative flex cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950/70 sm:p-6 ${
-                        activeTab === "egx30" ? "border-indigo-400 ring-2 ring-indigo-500/10 dark:border-indigo-400/60" : "border-zinc-200 hover:border-indigo-200 dark:border-white/10 dark:hover:border-white/20"
+                        effectiveTab === "egx30" ? "border-indigo-400 ring-2 ring-indigo-500/10 dark:border-indigo-400/60" : "border-zinc-200 hover:border-indigo-200 dark:border-white/10 dark:hover:border-white/20"
                     }`}
                 >
                     <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
                         <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">{t("market.egx30_card")}</span>
-                        <Landmark className={`w-5 h-5 ${activeTab === "egx30" ? "text-indigo-400" : "text-zinc-500"}`} />
+                        <Landmark className={`w-5 h-5 ${effectiveTab === "egx30" ? "text-indigo-400" : "text-zinc-500"}`} />
                     </div>
                     <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
                         <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
@@ -1835,12 +1992,12 @@ export default function MarketClient() {
                 <div
                     onClick={() => setActiveTab("egx100")}
                     className={`relative flex cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950/70 sm:p-6 ${
-                        activeTab === "egx100" ? "border-blue-400 ring-2 ring-blue-500/10 dark:border-blue-400/60" : "border-zinc-200 hover:border-blue-200 dark:border-white/10 dark:hover:border-white/20"
+                        effectiveTab === "egx100" ? "border-blue-400 ring-2 ring-blue-500/10 dark:border-blue-400/60" : "border-zinc-200 hover:border-blue-200 dark:border-white/10 dark:hover:border-white/20"
                     }`}
                 >
                     <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
                         <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">{t("market.egx100_card")}</span>
-                        <Layers className={`w-5 h-5 ${activeTab === "egx100" ? "text-blue-400" : "text-zinc-500"}`} />
+                        <Layers className={`w-5 h-5 ${effectiveTab === "egx100" ? "text-blue-400" : "text-zinc-500"}`} />
                     </div>
                     <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
                         <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
@@ -1863,12 +2020,12 @@ export default function MarketClient() {
                 <div
                     onClick={() => void setActiveTab("usdegp")}
                     className={`relative flex cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950/70 sm:p-6 ${
-                        activeTab === "usdegp" ? "border-purple-400 ring-2 ring-purple-500/10 dark:border-purple-400/60" : "border-zinc-200 hover:border-purple-200 dark:border-white/10 dark:hover:border-white/20"
+                        effectiveTab === "usdegp" ? "border-purple-400 ring-2 ring-purple-500/10 dark:border-purple-400/60" : "border-zinc-200 hover:border-purple-200 dark:border-white/10 dark:hover:border-white/20"
                     }`}
                 >
                     <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
                         <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">{t("market.usdegp_card")}</span>
-                        <DollarSign className={`w-5 h-5 ${activeTab === "usdegp" ? "text-purple-400" : "text-zinc-500"}`} />
+                        <DollarSign className={`w-5 h-5 ${effectiveTab === "usdegp" ? "text-purple-400" : "text-zinc-500"}`} />
                     </div>
                     <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
                         <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
@@ -1916,16 +2073,19 @@ export default function MarketClient() {
                 <div className={`flex items-center justify-between mb-6 ${isAr ? "flex-row-reverse" : "flex-row"}`}>
                     <div className="space-y-1">
                         <span className="text-xs font-black text-zinc-700 dark:text-zinc-400 uppercase tracking-wider">
-                            {(isSaudi || activeTab === "tasi") ? (isAr ? "المؤشر العام للسوق السعودي (تاسي TASI) — بيانات الجلسات التاريخية" : "Saudi Tadawul All Share Index (TASI) — Daily History") :
-                             activeTab === "egx30" ? t("market.tab_egx30_desc") :
-                             activeTab === "egx100" ? t("market.tab_egx100_desc") :
+                            {effectiveTab === "tasi" ? (isAr ? "المؤشر العام للسوق السعودي (تاسي TASI) — بيانات الجلسات التاريخية" : "Saudi Tadawul All Share Index (TASI) — Daily History") :
+                             effectiveTab === "dfm" ? (isAr ? "مؤشر سوق دبي المالي (DFM) — بيانات الجلسات التاريخية" : "Dubai Financial Market (DFM) — Daily History") :
+                             effectiveTab === "adx" ? (isAr ? "مؤشر سوق أبوظبي للأوراق المالية (ADX) — بيانات الجلسات التاريخية" : "Abu Dhabi Securities Exchange (ADX) — Daily History") :
+                             effectiveTab === "qse" ? (isAr ? "مؤشر بورصة قطر (QSE) — بيانات الجلسات التاريخية" : "Qatar Stock Exchange (QSE) — Daily History") :
+                             effectiveTab === "egx30" ? t("market.tab_egx30_desc") :
+                             effectiveTab === "egx100" ? t("market.tab_egx100_desc") :
                              t("market.tab_usdegp_desc")}
                         </span>
                     </div>
                     <div className={`flex items-center gap-1.5 ${isAr ? "flex-row-reverse" : "flex-row"}`}>
                         <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: chartColor }} />
-                        <span className="text-xs text-zinc-600 dark:text-zinc-400 font-mono uppercase font-bold">{activeTab}</span>
-                        {activeTab !== "usdegp" && <span className="ms-3 inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-500"><span className="h-2 w-2 rounded-sm bg-amber-500" />{isAr ? "عدد التوصيات يومياً" : "Daily recommendations"}</span>}
+                        <span className="text-xs text-zinc-600 dark:text-zinc-400 font-mono uppercase font-bold">{chartLabel}</span>
+                        {showRecOverlay && <span className="ms-3 inline-flex items-center gap-1.5 text-[10px] font-bold text-amber-500"><span className="h-2 w-2 rounded-sm bg-amber-500" />{isAr ? "عدد التوصيات يومياً" : "Daily recommendations"}</span>}
                     </div>
                 </div>
 
@@ -1954,9 +2114,9 @@ export default function MarketClient() {
                                     tick={{ fontSize: 9, fontFamily: 'monospace' }}
                                     orientation={isAr ? "left" : "right"}
                                 />
-                                {activeTab !== "usdegp" && <YAxis yAxisId="recommendations" orientation={isAr ? "right" : "left"} hide domain={[0, (max: number) => Math.max(max * 3, 3)]} />}
+                                {showRecOverlay && <YAxis yAxisId="recommendations" orientation={isAr ? "right" : "left"} hide domain={[0, (max: number) => Math.max(max * 3, 3)]} />}
                                 <Tooltip content={<CustomTooltip />} />
-                                {activeTab !== "usdegp" && <Bar yAxisId="recommendations" dataKey="recommendation_count" name={isAr ? "التوصيات" : "Recommendations"} fill="#f59e0b" fillOpacity={0.78} barSize={8} radius={[2, 2, 0, 0]} />}
+                                {showRecOverlay && <Bar yAxisId="recommendations" dataKey="recommendation_count" name={isAr ? "التوصيات" : "Recommendations"} fill="#f59e0b" fillOpacity={0.78} barSize={8} radius={[2, 2, 0, 0]} />}
                                 <Area
                                     type="monotone"
                                     dataKey="close"
@@ -1976,8 +2136,12 @@ export default function MarketClient() {
                 </div>
             </div>
 
+            {/* Pinned Global Gold & Silver (XAUUSD & XAGUSD) Charts — Fixed Across All 4 Markets */}
+            <GlobalMetalsCharts gold={data.gold} silver={data.silver} isAr={isAr} />
+
             {/* Today's Opportunities Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+            <div className={`grid grid-cols-1 ${isGccChatOnly ? "" : "lg:grid-cols-3"} gap-6 mb-10`}>
+                {!isGccChatOnly && (
                 <div className="lg:col-span-2">
                     {aiSignalsLoading && (
                         <div className="space-y-3">
@@ -2000,7 +2164,8 @@ export default function MarketClient() {
                         />
                     )}
                 </div>
-                <div className="lg:col-span-1">
+                )}
+                <div className={isGccChatOnly ? "w-full" : "lg:col-span-1"}>
                     {breadthLoading && (
                         <div className="space-y-3">
                             <div className="h-6 w-32 bg-zinc-900/50 rounded animate-pulse" />
@@ -2194,13 +2359,13 @@ export default function MarketClient() {
                     isAr={isAr}
                     t={t}
                     currencyCode={currencyCode}
-                    isSaudi={isSaudi}
+                    isSaudi={market !== "egx"}
                     onClose={() => setDrillOpen(false)}
                 />
             )}
 
             {/* Ready Hedge Filters & Macro-Correlation Sections (Egypt-specific USD/Gold macro) */}
-            {!isSaudi ? (
+            {market === "egx" ? (
                 <>
             <HedgeFiltersSection
                 scan={hedgeScan}
@@ -2433,9 +2598,17 @@ export default function MarketClient() {
                 </>
             ) : (
                 <div className="mb-10 border-2 border-emerald-500/40 bg-emerald-500/5 p-4 text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                    {isAr
-                        ? "🇸🇦 محرك الارتباط بالدولار والذهب مخصص للسوق المصري نظراً لارتباط الجنيه بسعر الصرف الموازي، بينما يرتبط الريال السعودي بالدولار بسعر ثابت." 
-                        : "🇸🇦 USD/Gold Hedge & Macro-Correlation is tailored for EGX currency-hedging analysis (SAR is pegged to USD)."}
+                    {isUae
+                        ? (isAr
+                            ? "🇦🇪 محرك الارتباط بسعر الصرف الموازي مخصص للسوق المصري، بينما يرتبط الدرهم الإماراتي (AED) بالدولار بسعر ثابت — ويمكنك متابعة الذهب والفضة العالميين مباشرة في القسم الثابت بالأعلى."
+                            : "🇦🇪 USD/Gold currency-hedging correlation is tailored for EGX (AED is pegged to USD); track Global Gold & Silver directly in the pinned panel above.")
+                        : isQatar
+                        ? (isAr
+                            ? "🇶🇦 محرك الارتباط بسعر الصرف الموازي مخصص للسوق المصري، بينما يرتبط الريال القطري (QAR) بالدولار بسعر ثابت — ويمكنك متابعة الذهب والفضة العالميين مباشرة في القسم الثابت بالأعلى."
+                            : "🇶🇦 USD/Gold currency-hedging correlation is tailored for EGX (QAR is pegged to USD); track Global Gold & Silver directly in the pinned panel above.")
+                        : (isAr
+                            ? "🇸🇦 محرك الارتباط بالدولار والذهب مخصص للسوق المصري نظراً لارتباط الجنيه بسعر الصرف الموازي، بينما يرتبط الريال السعودي بالدولار بسعر ثابت."
+                            : "🇸🇦 USD/Gold Hedge & Macro-Correlation is tailored for EGX currency-hedging analysis (SAR is pegged to USD).")}
                 </div>
             )}
 

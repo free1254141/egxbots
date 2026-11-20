@@ -672,3 +672,138 @@ def run_saudi_daily_job(
         "steps": steps_log,
         "error": err_summary,
     }
+
+
+def run_gcc_metals_daily_job(
+    mode: str = "uae_close",
+    trigger: str = "scheduled",
+    main_sb=None,
+) -> Dict[str, Any]:
+    """Run independent daily automation for UAE (DFM/ADX) Fridays and Global Metals (COMMODITIES) Mon-Fri."""
+    norm_mode = (mode or "uae_close").strip().lower()
+    if norm_mode not in {"uae_close", "metals_close"}:
+        raise ValueError("Invalid GCC/Metals mode; expected 'uae_close' or 'metals_close'")
+
+    if main_sb is None:
+        try:
+            from api.stock_ai import _init_supabase, supabase as _main_supabase
+            if not _main_supabase:
+                _init_supabase()
+                from api.stock_ai import supabase as _main_supabase
+            main_sb = _main_supabase
+        except Exception:
+            main_sb = None
+
+    job_run_id = str(uuid.uuid4())
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    steps_log: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    total_symbols = 0
+
+    _persist_job_run(main_sb, job_run_id, norm_mode, "running", started_at, steps_log, total_symbols, trigger)
+
+    tags_to_invalidate: List[str] = []
+    target_exchanges = ["COMMODITIES"] if norm_mode == "metals_close" else ["DFM", "ADX", "COMMODITIES"]
+    try:
+        from api.gcc_metals_sync import run_gcc_metals_sync
+        gcc_res = run_gcc_metals_sync(exchanges=target_exchanges, daily_only=True)
+        gcc_summary = gcc_res.get("summary") or {}
+        total_symbols = sum(int((v or {}).get("symbols_synced") or 0) for v in gcc_summary.values())
+        ok_sync = bool(gcc_res.get("ok"))
+        _record_step(
+            steps_log,
+            "gcc_metals_sync",
+            "success" if ok_sync else "failed",
+            count=total_symbols,
+            details=",".join(f"{k}:{(v or {}).get('symbols_synced', 0)}" for k, v in gcc_summary.items()) or str(gcc_res.get("error") or ""),
+        )
+        if ok_sync:
+            tags_to_invalidate.extend(["daily-market-data", "daily-symbols"])
+        else:
+            errors.append(f"gcc_metals_sync: {gcc_res.get('error') or 'sync_failed'}")
+    except Exception as exc:
+        _record_step(steps_log, "gcc_metals_sync", "failed", details=str(exc))
+        errors.append(f"gcc_metals_sync: {exc}")
+
+    if norm_mode == "uae_close":
+        try:
+            from api.gcc_news_sync import sync_gcc_market_news
+            news_res = sync_gcc_market_news(market="uae", max_symbols=50, days_back=15)
+            ok_news = bool(news_res.get("ok"))
+            _record_step(
+                steps_log,
+                "gcc_news_sync",
+                "success" if ok_news else "failed",
+                count=int(news_res.get("synced_rows") or 0),
+                details=f"matched={news_res.get('matched_symbols')}",
+            )
+            if ok_news:
+                tags_to_invalidate.append("daily-news-data")
+            else:
+                errors.append(f"gcc_news_sync: {news_res.get('error') or 'news_failed'}")
+        except Exception as exc:
+            _record_step(steps_log, "gcc_news_sync", "failed", details=str(exc))
+            errors.append(f"gcc_news_sync: {exc}")
+
+        try:
+            from api.gcc_disclosures_sync import run_gcc_disclosures_sync
+            disc_res = run_gcc_disclosures_sync(market="uae", days_back=30)
+            disc_results = disc_res.get("results") or {}
+            inserted = sum(int((v or {}).get("inserted") or 0) for v in disc_results.values())
+            ok_disc = bool(disc_res.get("ok"))
+            _record_step(
+                steps_log,
+                "gcc_disclosures_sync",
+                "success" if ok_disc else "failed",
+                count=inserted,
+                details=",".join(f"{k}:{(v or {}).get('inserted', 0)}" for k, v in disc_results.items()),
+            )
+            if ok_disc:
+                tags_to_invalidate.append("daily-disclosures")
+            else:
+                errors.append(f"gcc_disclosures_sync: {disc_res.get('error') or 'disclosures_failed'}")
+        except Exception as exc:
+            _record_step(steps_log, "gcc_disclosures_sync", "failed", details=str(exc))
+            errors.append(f"gcc_disclosures_sync: {exc}")
+
+    if tags_to_invalidate:
+        try:
+            from api.cache_invalidation import invalidate_cache_tags
+            unique_tags = list(dict.fromkeys(tags_to_invalidate))
+            cache_res = invalidate_cache_tags(unique_tags) or {}
+            cache_ok = not cache_res.get("error") and (
+                bool(cache_res.get("invalidated"))
+                or bool(cache_res.get("skipped"))
+                or cache_res.get("status") == 200
+            )
+            _record_step(
+                steps_log,
+                "cache_revalidation",
+                "success" if cache_ok else "failed",
+                count=len(cache_res.get("invalidated") or []),
+                details=str(cache_res.get("error") or f"invalidated={len(cache_res.get('invalidated') or [])} tags"),
+            )
+            if not cache_ok:
+                errors.append(f"cache_revalidation: {cache_res.get('error') or 'revalidation_failed'}")
+        except Exception as exc:
+            _record_step(steps_log, "cache_revalidation", "failed", details=str(exc))
+            errors.append(f"cache_revalidation: {exc}")
+
+    final_status = (
+        "completed"
+        if any(s.get("step") != "cache_revalidation" and s.get("status") == "success" for s in steps_log)
+        else "failed"
+    )
+    err_summary = "; ".join(errors) if errors else None
+    _persist_job_run(main_sb, job_run_id, norm_mode, final_status, started_at, steps_log, total_symbols, trigger, error=err_summary)
+
+    return {
+        "ok": final_status == "completed",
+        "job_run_id": job_run_id,
+        "job_type": norm_mode,
+        "mode": norm_mode,
+        "status": final_status,
+        "total_symbols": total_symbols,
+        "steps": steps_log,
+        "error": err_summary,
+    }

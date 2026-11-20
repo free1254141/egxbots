@@ -141,17 +141,27 @@ _SAUDI_TICKER_RE = re.compile(r"^\d{4}$")
 _BUILTIN_SAUDI_ALIASES: Dict[str, str] = {
     "أرامكو": "2222",
     "ارامكو": "2222",
+    "أرامكوا": "2222",
+    "ارامكوا": "2222",
     "أرامكو السعودية": "2222",
     "ارامكو السعودية": "2222",
     "ARAMCO": "2222",
     "SAUDI ARAMCO": "2222",
     "الراجحي": "1120",
+    "الراجحى": "1120",
+    "الرجحي": "1120",
+    "الرجحى": "1120",
+    "رجحي": "1120",
+    "رجحى": "1120",
     "مصرف الراجحي": "1120",
+    "مصرف الرجحي": "1120",
     "ALRAJHI": "1120",
     "RAJHI": "1120",
     "سابك": "2010",
+    "سابيك": "2010",
     "SABIC": "2010",
     "الاتصالات السعودية": "7010",
+    "اتصالات السعودية": "7010",
     "اس تي سي": "7010",
     "إس تي سي": "7010",
     "STC": "7010",
@@ -162,9 +172,12 @@ _BUILTIN_SAUDI_ALIASES: Dict[str, str] = {
     "SNB": "1180",
     "NCB": "1180",
     "معادن": "1211",
+    "معادين": "1211",
     "MAADEN": "1211",
     "اكوا باور": "2082",
     "أكوا باور": "2082",
+    "اكواباور": "2082",
+    "أكواباور": "2082",
     "ACWA POWER": "2082",
     "ACWA": "2082",
     "سليمان الحبيب": "4013",
@@ -1513,6 +1526,396 @@ def _enrich_rec_distances(rec_item: Dict[str, Any]) -> None:
         rec_item["dist_to_stop_pct"] = round(((sl - lc) / lc) * 100.0, 2)
 
 
+_BANK_INDUSTRY_KEYWORDS = (
+    "bank", "banks", "insurance", "credit", "savings", "lending", "broker", "leasing",
+    "بنك", "بنوك", "مصرف", "مصارف", "تأمين", "تامين",
+)
+_NON_BANK_EXCLUSIONS = (
+    "real estate", "reit", "homebuilding", "property", "construction",
+    "technology", "software", "payment", "fintech", "electronic", "telecom",
+    "عقار", "تطوير عقاري", "تكنولوجيا", "مدفوعات", "برمجيات",
+)
+
+
+def _is_financial_sector(sector: Any, industry: Any, name: Any = None) -> bool:
+    sec_ind = f"{sector or ''} {industry or ''}".lower()
+    full_blob = f"{sec_ind} {name or ''}".lower()
+    if any(ex in full_blob for ex in _NON_BANK_EXCLUSIONS):
+        return False
+    if any(kw in sec_ind for kw in _BANK_INDUSTRY_KEYWORDS):
+        return True
+    # Name-based fallback only if industry is absent (e.g. 'Commercial International Bank', 'Al Rajhi Bank')
+    if not industry and any(kw in full_blob for kw in ("bank", "مصرف", "بنك", "تأمين", "insurance")):
+        return True
+    return False
+
+
+def _build_fundamental_diagnosis(
+    metrics: Dict[str, Any],
+    *,
+    close_price: Optional[float] = None,
+    name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Build a deterministic, sector-aware institutional fundamental diagnosis in plain Arabic
+    so ARTORO gives users a crystal-clear bottom-line answer: is this stock financially good or bad, and WHY?
+    """
+    pe = metrics.get("pe_ratio")
+    pb = metrics.get("pb_ratio")
+    ev_ebitda = metrics.get("ev_ebitda")
+    eps = metrics.get("eps")
+    bvps = metrics.get("book_value_per_share")
+    roe = metrics.get("roe_pct")
+    roa = metrics.get("roa_pct")
+    roic = metrics.get("roic_pct")
+    nm = metrics.get("net_margin_pct")
+    om = metrics.get("operating_margin_pct")
+    rev = metrics.get("revenue")
+    ni = metrics.get("net_income")
+    fcf = metrics.get("free_cash_flow")
+    cash = metrics.get("total_cash")
+    debt = metrics.get("total_debt")
+    de = metrics.get("debt_to_equity")
+    cr = metrics.get("current_ratio")
+    dy = metrics.get("dividend_yield_pct")
+    payout = metrics.get("payout_ratio_pct")
+    f_score = metrics.get("piotroski_score")
+    z_score = metrics.get("altman_z_score")
+    score = metrics.get("fund_score")
+
+    core_present = sum(
+        1 for v in (pe, pb, eps, bvps, roe, roa, nm, ni, de, cr, fcf, dy) if v is not None
+    )
+    if core_present < 2:
+        return None
+
+    is_bank = _is_financial_sector(metrics.get("sector"), metrics.get("industry"), name)
+    loss_making = (eps is not None and eps < 0) or (ni is not None and ni < 0)
+
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+
+    # 1. Valuation Pillar
+    graham_upside: Optional[float] = None
+    if close_price and close_price > 0 and eps and eps > 0 and bvps and bvps > 0:
+        graham_v = (22.5 * eps * bvps) ** 0.5
+        if graham_v > 0:
+            graham_upside = round(((graham_v - close_price) / close_price) * 100.0, 1)
+
+    if loss_making:
+        valuation_label = "شركة خاسرة حالياً (بدون مكرر ربحية موجب)"
+        weaknesses.append("الشركة تحقق خسائر صافية حالياً (ربحية السهم سالبة)")
+    elif pe is not None and pe > 0:
+        if pe <= 9.5:
+            valuation_label = "رخيص وجذاب سعرياً"
+            strengths.append(f"مكرر ربحية منخفض وجذاب (P/E = {pe:.2f}x)")
+        elif pe <= 15.5:
+            valuation_label = "تسعير عادل ومنطقي"
+            strengths.append(f"مكرر ربحية متوازن ومنطقي (P/E = {pe:.2f}x)")
+        elif pe <= 24.0:
+            valuation_label = "مرتفع نسبياً (يسعّر توقعات نمو)"
+            weaknesses.append(f"مكرر الربحية مرتفع نسبياً (P/E = {pe:.2f}x) — يحتاج نمو أرباح لتبريره")
+        else:
+            valuation_label = "غالي / متضخم سعرياً"
+            weaknesses.append(f"السهم مسعّر بمكرر ربحية مرتفع جداً (P/E = {pe:.2f}x)")
+    elif pb is not None and pb > 0:
+        if pb <= 1.1:
+            valuation_label = "يتداول قرب أو أقل من القيمة الدفترية"
+            strengths.append(f"مضاعف قيمة دفترية منخفض (P/B = {pb:.2f}x)")
+        elif pb <= 2.5:
+            valuation_label = "تسعير دفتري متوازن"
+        else:
+            valuation_label = "مرتفع مقارنة بالقيمة الدفترية"
+            weaknesses.append(f"مضاعف القيمة الدفترية مرتفع (P/B = {pb:.2f}x)")
+    else:
+        valuation_label = "بيانات التقييم محدودة"
+
+    if pb is not None and pb > 0 and not loss_making:
+        if pb <= 1.25 and (roe is None or roe >= 12):
+            if not any("P/B" in s for s in strengths):
+                strengths.append(f"سعر قريب من القيمة الدفترية (P/B = {pb:.2f}x)")
+        elif pb >= 4.0 and (roe is None or roe < 25):
+            if not any("P/B" in w for w in weaknesses):
+                weaknesses.append(f"مضاعف القيمة الدفترية مرتفع ({pb:.2f}x)")
+
+    if graham_upside is not None and graham_upside >= 15 and not loss_making:
+        strengths.append(f"يتداول بخصم عن قيمة جراهام الأساسية (فجوة صعود نظرية +{graham_upside:.0f}%)")
+    elif graham_upside is not None and graham_upside <= -30 and not loss_making:
+        weaknesses.append(f"السعر السوقي أعلى من قيمة جراهام الأساسية بنحو {abs(graham_upside):.0f}%")
+
+    # 2. Profitability Pillar
+    if loss_making:
+        profitability_label = "خسائر صافية (ربحية سلبية)"
+    elif roe is not None:
+        if roe >= 20.0:
+            profitability_label = "ربحية ممتازة جداً"
+            strengths.append(f"عائد قوي جداً على حقوق المساهمين (ROE = {roe:.1f}%)")
+        elif roe >= 12.0:
+            profitability_label = "ربحية جيدة وصحية"
+            strengths.append(f"عائد جيد على حقوق المساهمين (ROE = {roe:.1f}%)")
+        elif roe >= 5.0:
+            profitability_label = "ربحية متواضعة"
+            weaknesses.append(f"العائد على حقوق المساهمين متواضع (ROE = {roe:.1f}%)")
+        else:
+            profitability_label = "ربحية ضعيفة جداً"
+            weaknesses.append(f"العائد على حقوق المساهمين ضعيف جداً (ROE = {roe:.1f}%)")
+    elif nm is not None:
+        profitability_label = "ربحية جيدة" if nm >= 10 else ("ربحية ضيقة" if nm > 0 else "خسائر صافية")
+    else:
+        profitability_label = "غير مكتملة"
+
+    if is_bank and roa is not None:
+        if roa >= 1.5:
+            strengths.append(f"كفاءة أصول ممتازة للقطاع المصرفي (ROA = {roa:.2f}%)")
+        elif roa < 0.7:
+            weaknesses.append(f"عائد على الأصول منخفض نسبياً للبنوك (ROA = {roa:.2f}%)")
+    elif not is_bank and nm is not None and not loss_making:
+        if nm >= 18.0:
+            strengths.append(f"هامش ربح صافي قوي ({nm:.1f}%)")
+        elif 0 < nm < 4.0:
+            weaknesses.append(f"هامش ربح صافي ضيق جداً ({nm:.1f}%) — حساس لأي ارتفاع في التكاليف")
+
+    # 3. Financial Health & Balance Sheet Safety Pillar (Bank-Aware!)
+    high_solvency_risk = False
+    if is_bank:
+        health_label = "مؤسسة مالية/بنك (ودائع العملاء التزامات طبيعية — يُقيّم بـ ROE وROA وP/B وليس D/E أو السيولة الصناعية)"
+    else:
+        if de is not None and de <= 0.45 and (cr is None or cr >= 1.2):
+            health_label = "ميزانية صلبة وآمنة (ديون منخفضة)"
+            strengths.append(f"مديونية منخفضة وآمنة (الديون/حقوق الملكية = {de:.2f}x)")
+        elif de is not None and de > 1.8:
+            health_label = "مديونية مرتفعة (مخاطرة تمويل وفوائد)"
+            high_solvency_risk = True
+            weaknesses.append(f"مديونية عالية مقارنة بحقوق الملكية (D/E = {de:.2f}x)")
+        elif cr is not None and cr < 1.0:
+            health_label = "ضغط سيولة قصيرة الأجل"
+            high_solvency_risk = True
+            weaknesses.append(f"نسبة التداول أقل من 1 ({cr:.2f}x) — الالتزامات القصيرة تفوق الأصول المتداولة")
+        elif de is not None or cr is not None:
+            health_label = "ملاءة مالية متوازنة"
+        else:
+            health_label = "بيانات المديونية محدودة"
+
+        if cash is not None and debt is not None and cash > debt and cash > 0:
+            strengths.append("مركز نقدي صافي إيجابي (الكاش يغطي إجمالي الديون بالكامل)")
+        if z_score is not None and z_score < 1.8:
+            high_solvency_risk = True
+            weaknesses.append(f"مؤشر ألتمان للأمان المالي منخفض (Altman Z = {z_score:.2f} — منطقة حذر)")
+        if f_score is not None:
+            if f_score >= 7:
+                strengths.append(f"جودة مالية ومحاسبية قوية (Piotroski F-Score = {int(f_score)}/9)")
+            elif f_score <= 3:
+                weaknesses.append(f"ضعف في مؤشر الجودة المالية (Piotroski F-Score = {int(f_score)}/9)")
+
+    # 4. Cash Flow Quality & Dividends Pillar
+    cash_quality_label = "غير متاح"
+    neg_fcf_vs_profit = False
+    if not is_bank and fcf is not None:
+        if ni is not None and ni > 0:
+            if fcf >= 0.7 * ni:
+                cash_quality_label = "أرباح نقدية حقيقية (التدفق النقدي الحر يغطي صافي الربح)"
+                strengths.append("أرباح عالية الجودة مدعومة بتدفق نقدي حر موجب وقوي (كاش فعلي)")
+            elif fcf > 0:
+                cash_quality_label = "تدفق نقدي حر موجب لكنه أقل من الربح المحاسبي"
+            else:
+                cash_quality_label = "تحذير جودة أرباح: الربح المحاسبي موجب لكن التدفق النقدي الحر سالب"
+                neg_fcf_vs_profit = True
+                weaknesses.append("التدفق النقدي الحر سالب رغم تسجيل أرباح محاسبية (يستحق الانتباه لتحصيل الكاش أو النفقات الرأسمالية)")
+        elif fcf > 0:
+            cash_quality_label = "تدفق نقدي حر موجب"
+        else:
+            cash_quality_label = "تدفق نقدي حر سالب"
+
+    if dy is not None and dy >= 4.0:
+        strengths.append(f"توزيعات نقدية مجزية (عائد توزيع {dy:.1f}%)")
+    if payout is not None and payout > 100.0 and dy is not None and dy > 0:
+        weaknesses.append(f"نسبة توزيع الأرباح تتجاوز 100% ({payout:.0f}%) — استدامة الكوبون تحتاج متابعة")
+
+    # 5. Value Trap Detection
+    value_trap_warning: Optional[str] = None
+    if (
+        not is_bank
+        and pe is not None
+        and 0 < pe <= 10.5
+        and (
+            (neg_fcf_vs_profit and (de is not None and de > 1.2))
+            or high_solvency_risk
+            or (f_score is not None and f_score <= 3)
+        )
+    ):
+        value_trap_warning = (
+            "تنبيه فخ قيمة محتمل (Value Trap): السهم يبدو رخيصاً بمكرر الربحية، لكن هناك ضغط في الديون/السيولة أو جودة التدفق النقدي."
+        )
+
+    # 6. Bottom-Line Verdict & Investor Fit
+    eff_score = float(score) if score is not None else None
+    is_expensive = pe is not None and pe > 22.0
+    is_growth_priced = pe is not None and 16.0 < pe <= 22.0
+    is_cheap_or_fair = pe is not None and 0 < pe <= 16.0
+
+    if loss_making:
+        verdict_ar = "🔴 سلبي مالياً — الشركة تحقق خسائر حالياً (مخاطرة أساسية مرتفعة)"
+        suitable_for = "غير مناسب للاستثمار الأساسي المحافظ حالياً (يصلح للمراقبة حتى التحول للربحية أو للمضاربة بوقف صارم فقط)"
+    elif high_solvency_risk and (eff_score is None or eff_score < 55):
+        verdict_ar = "🔴 ضعيف مالياً — ضغط ديون/سيولة مرتفع يرفع المخاطرة"
+        suitable_for = "مخاطرة مالية مرتفعة — يحتاج حذراً شديداً ولا يناسب المستثمر المحافظ"
+    elif value_trap_warning:
+        verdict_ar = "🟠 حذر (فخ قيمة محتمل) — السعر يبدو رخيصاً لكن الأساسيات فيها مخاطر"
+        suitable_for = "للمراقبة فقط حتى يتحسن التدفق النقدي أو تنخفض المديونية"
+    elif (eff_score is not None and eff_score >= 75) and not is_expensive and not is_growth_priced:
+        verdict_ar = "🟢 ممتاز مالياً — شركة قوية وسعرها جذاب/عادل"
+        suitable_for = (
+            "مناسب للاستثمار المتوسط والطويل (قيمة + توزيعات نقدية)"
+            if (dy is not None and dy >= 3.5)
+            else "مناسب للاستثمار المتوسط والطويل (جودة مالية عالية وتقييم منطقي)"
+        )
+    elif (eff_score is not None and eff_score >= 65) or (roe is not None and roe >= 15 and not high_solvency_risk):
+        if is_expensive:
+            verdict_ar = "🟡 شركة قوية مالياً — لكن سعر السهم الحالي مرتفع جداً"
+            suitable_for = "شركة عالية الجودة؛ الأفضل انتظار تصحيح سعري أو دخول تدريجي بدل المطاردة"
+        elif is_growth_priced:
+            verdict_ar = "🟢 شركة قوية مالياً — مسعّرة كسهم نمو (تقييم متوسط إلى مرتفع نسبياً)"
+            suitable_for = "مناسب لمستثمر النمو على المدى المتوسط مع مراقبة استمرار نمو الأرباح"
+        else:
+            verdict_ar = "🟢 جيد إلى قوي مالياً — أساسيات صحية ومتوازنة"
+            suitable_for = (
+                "مناسب للاستثمار المتوازن وتوزيعات الدخل"
+                if (dy is not None and dy >= 3.0)
+                else "مناسب للاستثمار المتوسط مع متابعة نتائج الأعمال الدورية"
+            )
+    elif (eff_score is not None and eff_score >= 45) or is_cheap_or_fair:
+        verdict_ar = "🟡 متوسط مالياً — يجمع بين نقاط إيجابية وملاحظات تحتاج متابعة"
+        suitable_for = "يحتاج انتقائية ومراقبة للنتائج القادمة (لا تضع فيه وزناً كبيراً من المحفظة)"
+    else:
+        verdict_ar = "🟠 ضعيف مالياً — ربحية متواضعة أو تقييم غير جذاب"
+        suitable_for = "أقل جاذبية استثمارياً مقارنة ببدائل أقوى في نفس السوق"
+
+    diag: Dict[str, Any] = {
+        "verdict_ar": verdict_ar,
+        "is_financial_institution": is_bank,
+        "valuation": valuation_label,
+        "profitability": profitability_label,
+        "financial_health": health_label,
+        "cash_quality": cash_quality_label,
+        "strengths": strengths[:7],
+        "weaknesses": weaknesses[:5],
+        "suitable_for": suitable_for,
+    }
+    if value_trap_warning:
+        diag["value_trap_warning"] = value_trap_warning
+    if graham_upside is not None:
+        diag["graham_upside_pct"] = graham_upside
+    return diag
+
+
+def _extract_rich_fundamentals(
+    fd: Any,
+    fund_score: Any = None,
+    *,
+    close_price: Optional[float] = None,
+    name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Extract normalized financial & fundamental ratios (camelCase + snake_case) plus deterministic diagnosis."""
+    if not isinstance(fd, dict):
+        fd = {}
+    pick = lambda *ks: next((fd.get(k) for k in ks if fd.get(k) is not None and fd.get(k) != ""), None)
+    raw = {
+        "pe_ratio": _safe_float(pick("peRatio", "pe_ratio", "trailing_pe")),
+        "forward_pe": _safe_float(pick("forwardPe", "forward_pe")),
+        "pb_ratio": _safe_float(pick("pbRatio", "pb_ratio")),
+        "ps_ratio": _safe_float(pick("priceToSales", "ps_ratio")),
+        "ev_ebitda": _safe_float(pick("evToEbitda", "ev_ebitda")),
+        "eps": _safe_float(pick("eps", "trailing_eps"), 4),
+        "book_value_per_share": _safe_float(pick("bookValuePerShare", "book_value_per_share", "bvps")),
+        "roe_pct": _safe_float(pick("roe", "return_on_equity")),
+        "roa_pct": _safe_float(pick("roa", "return_on_assets")),
+        "roic_pct": _safe_float(pick("roic")),
+        "dividend_yield_pct": _safe_float(pick("dividendYield", "dividend_yield")),
+        "dividend_per_share": _safe_float(pick("dividendPerShare", "dividend_per_share"), 4),
+        "payout_ratio_pct": _safe_float(pick("payoutRatio", "payout_ratio")),
+        "market_cap": _safe_float(pick("marketCap", "market_cap"), 2),
+        "revenue": _safe_float(pick("revenue", "total_revenue"), 2),
+        "net_income": _safe_float(pick("netIncome", "net_income"), 2),
+        "ebitda": _safe_float(pick("ebitda"), 2),
+        "free_cash_flow": _safe_float(pick("freeCashFlow", "free_cash_flow"), 2),
+        "gross_margin_pct": _safe_float(pick("grossMargin", "gross_margin")),
+        "operating_margin_pct": _safe_float(pick("operatingMargin", "operating_margin")),
+        "net_margin_pct": _safe_float(pick("netMargin", "net_margin", "profit_margin")),
+        "total_cash": _safe_float(pick("totalCash", "total_cash"), 2),
+        "total_debt": _safe_float(pick("totalDebt", "total_debt"), 2),
+        "debt_to_equity": _safe_float(pick("debtToEquity", "debt_to_equity")),
+        "current_ratio": _safe_float(pick("currentRatio", "current_ratio")),
+        "piotroski_score": _safe_float(pick("piotroskiFScore"), 0),
+        "altman_z_score": _safe_float(pick("altmanZScore")),
+        "ex_dividend_date": pick("exDividendDate", "ex_dividend_date"),
+        "earnings_date": pick("earningsDate", "earnings_date"),
+        "sector": pick("sector"),
+        "industry": pick("industry"),
+        "fund_score": _safe_float(fund_score),
+    }
+    clean = {k: v for k, v in raw.items() if v is not None}
+    diag = _build_fundamental_diagnosis(clean, close_price=close_price, name=name or pick("name", "name_ar"))
+    if diag:
+        clean["fundamental_diagnosis"] = diag
+    return clean
+
+
+def _compute_fundamental_fair_value(
+    close: float,
+    vwap: float,
+    ema: float,
+    fd: Optional[Dict[str, Any]],
+) -> Tuple[float, str, Dict[str, Any]]:
+    """Compute institutional fair value (Graham -> P/E -> P/B -> VWAP/EMA fallback) matching fair-value.ts."""
+    f = fd if isinstance(fd, dict) else {}
+    eps = _safe_float(f.get("eps") if f.get("eps") is not None else f.get("trailing_eps"), 4)
+    bvps = _safe_float(
+        f.get("bookValuePerShare")
+        if f.get("bookValuePerShare") is not None
+        else (f.get("book_value_per_share") if f.get("book_value_per_share") is not None else f.get("bvps")),
+        4,
+    )
+    pe = _safe_float(f.get("peRatio") if f.get("peRatio") is not None else f.get("pe_ratio"))
+    pb = _safe_float(f.get("pbRatio") if f.get("pbRatio") is not None else f.get("pb_ratio"))
+    if (eps is None or eps <= 0) and pe and pe > 0 and close > 0:
+        eps = round(close / pe, 4)
+    if (bvps is None or bvps <= 0) and pb and pb > 0 and close > 0:
+        bvps = round(close / pb, 4)
+
+    extra: Dict[str, Any] = {}
+    if pe is not None:
+        extra["pe_ratio"] = pe
+    if pb is not None:
+        extra["pb_ratio"] = pb
+    if eps is not None:
+        extra["eps"] = eps
+    if bvps is not None:
+        extra["book_value_per_share"] = bvps
+    roe = _safe_float(f.get("roe"))
+    if roe is not None:
+        extra["roe_pct"] = roe
+    dy = _safe_float(f.get("dividendYield"))
+    if dy is not None:
+        extra["dividend_yield_pct"] = dy
+    if f.get("sector"):
+        extra["sector"] = f.get("sector")
+
+    if eps and eps > 0 and bvps and bvps > 0:
+        graham = round((22.5 * eps * bvps) ** 0.5, 2)
+        if graham > 0:
+            extra["graham_value"] = graham
+            return graham, "معادلة جراهام الأساسية (Graham Number)", extra
+    if eps and eps > 0:
+        fv_pe = round(eps * 10.0, 2)
+        return fv_pe, "مضاعف الربحية الأساسي (P/E Multiple)", extra
+    if bvps and bvps > 0:
+        fv_pb = round(bvps * 1.5, 2)
+        return fv_pb, "مضاعف القيمة الدفترية (P/B Multiple)", extra
+
+    fv_q = _safe_price((vwap * 0.6) + (ema * 0.4))
+    return fv_q, "التوازن الكمي (VWAP & EMA)", extra
+
+
 def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[str, Any]:
     grouped_syms = _group_symbols_by_exchange(symbols, market=market)
     if not grouped_syms:
@@ -1630,18 +2033,23 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
             pass
 
         fund_map: Dict[str, Dict[str, Any]] = {}
+        fund_score_map: Dict[str, Any] = {}
         try:
             res_fund_batch = (
                 sb.from_("stock_fundamentals")
-                .select("symbol,data")
+                .select("symbol,data,fund_score")
                 .eq("exchange", "EGX")
                 .in_("symbol", egx_syms)
                 .limit(len(egx_syms) + 5)
                 .execute()
             )
             for row in (res_fund_batch.data or []):
-                if isinstance(row, dict) and row.get("symbol") and isinstance(row.get("data"), dict):
-                    fund_map[str(row["symbol"]).upper()] = row["data"]
+                if isinstance(row, dict) and row.get("symbol"):
+                    s_k = str(row["symbol"]).upper()
+                    if isinstance(row.get("data"), dict):
+                        fund_map[s_k] = row["data"]
+                    if row.get("fund_score") is not None:
+                        fund_score_map[s_k] = row.get("fund_score")
         except Exception:
             pass
 
@@ -1677,18 +2085,19 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
             latest_tech = tech_map.get(sym, {})
             wyckoff_info = wyckoff_map.get(sym, {})
 
+            close_price = _safe_price(latest_tech.get("close"))
             fundamentals: Dict[str, Any] = {}
             fd = fund_map.get(sym)
             if isinstance(fd, dict):
                 if stock_name_en == sym and fd.get("name"):
                     stock_name_en = str(fd["name"]).split(",")[0].strip()
-                fundamentals = {
-                    "pe_ratio": _safe_float(fd.get("pe_ratio") or fd.get("trailing_pe")),
-                    "eps": _safe_float(fd.get("eps") or fd.get("trailing_eps")),
-                    "market_cap": fd.get("market_cap"),
-                }
+                fundamentals = _extract_rich_fundamentals(
+                    fd,
+                    fund_score=fund_score_map.get(sym),
+                    close_price=close_price,
+                    name=stock_name_en,
+                )
 
-            close_price = _safe_price(latest_tech.get("close"))
             change_pct = _safe_float(latest_tech.get("change_pct"))
             sharia = is_sharia_compliant(sym)
 
@@ -2080,10 +2489,12 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         "stop_loss": stop_loss,
                         "entry_zone": entry_zone,
                         "king_ai_score": king_score,
-                        "pe_ratio": _safe_float(fd.get("pe_ratio") or fd.get("trailing_pe")),
-                        "eps": _safe_float(fd.get("eps") or fd.get("trailing_eps")),
-                        "market_cap": fd.get("market_cap"),
-                        "fund_score": _safe_float(raw_fund.get("fund_score")),
+                        **_extract_rich_fundamentals(
+                            fd,
+                            fund_score=raw_fund.get("fund_score"),
+                            close_price=close_price,
+                            name=stock_name_en,
+                        ),
                         "verdict": verdict,
                         "has_active_recommendation": sym_u in mkt_rec_by_sym,
                         **(
@@ -3681,6 +4092,23 @@ def _sync_get_fair_value(
                 rows = _get_saudi_computed_market_indicators(sb_sa, lookback_days=22, exchange=eff_mkt)
 
         names_map = _fetch_saudi_names_map(sb_sa, [r.get("symbol") for r in rows[:40] if r.get("symbol")], exchange=eff_mkt)
+        fv_syms_sa = [r.get("symbol") for r in rows[:50] if r.get("symbol")]
+        fv_fund_sa: Dict[str, Dict[str, Any]] = {}
+        if fv_syms_sa:
+            try:
+                f_res_sa = (
+                    sb_sa.from_("stock_fundamentals")
+                    .select("symbol,data")
+                    .eq("exchange", eff_mkt)
+                    .in_("symbol", fv_syms_sa)
+                    .limit(len(fv_syms_sa) + 5)
+                    .execute()
+                )
+                for fr in (f_res_sa.data or []):
+                    if isinstance(fr, dict) and fr.get("symbol") and isinstance(fr.get("data"), dict):
+                        fv_fund_sa[str(fr["symbol"]).upper()] = fr["data"]
+            except Exception:
+                pass
         items = []
         seen = set()
         for r in rows:
@@ -3695,7 +4123,9 @@ def _sync_get_fair_value(
 
             vwap = _safe_price(r.get("vwap_20")) or close
             ema = _safe_price(r.get("ema_50")) or close
-            fair_value = _safe_price((vwap * 0.6) + (ema * 0.4))
+            fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
+                close, vwap, ema, fv_fund_sa.get(str(sym).upper())
+            )
             upside = round(((fair_value - close) / close) * 100, 2)
             nm = names_map.get(sym, {})
             clean_name = (nm.get("name_ar") or _alias_name_for_symbol(sym, eff_mkt) or nm.get("name") or sym).split(",")[0].strip()
@@ -3711,8 +4141,9 @@ def _sync_get_fair_value(
                 "upside_pct": upside,
                 "status": "undervalued" if upside > 5 else ("overvalued" if upside < -5 else "fair"),
                 "status_ar": "أقل من السعر العادل (رخيص) 🟢" if upside > 5 else ("أعلى من السعر العادل (متضخم) 🔴" if upside < -5 else "في النطاق العادل ⚖️"),
-                "model": "التوازن الكمي (VWAP & EMA)",
+                "model": fv_model,
                 "is_sharia_compliant": None,
+                **fv_extra,
             })
 
         if mode == "screen_undervalued":
@@ -3751,6 +4182,24 @@ def _sync_get_fair_value(
     except Exception as e:
         return {"status": "error", "message": f"تعذر حساب السعر العادل: {str(e)}"}
 
+    fv_syms_egx = [str(r.get("symbol")).upper() for r in rows[:50] if r.get("symbol")]
+    fv_fund_egx: Dict[str, Dict[str, Any]] = {}
+    if fv_syms_egx:
+        try:
+            f_res_egx = (
+                sb.from_("stock_fundamentals")
+                .select("symbol,data")
+                .eq("exchange", "EGX")
+                .in_("symbol", fv_syms_egx)
+                .limit(len(fv_syms_egx) + 5)
+                .execute()
+            )
+            for fr in (f_res_egx.data or []):
+                if isinstance(fr, dict) and fr.get("symbol") and isinstance(fr.get("data"), dict):
+                    fv_fund_egx[str(fr["symbol"]).upper()] = fr["data"]
+        except Exception:
+            pass
+
     items = []
     seen = set()
     for r in rows:
@@ -3768,7 +4217,9 @@ def _sync_get_fair_value(
 
         vwap = _safe_price(r.get("vwap_20")) or close
         ema = _safe_price(r.get("ema_50")) or close
-        fair_value = _safe_price((vwap * 0.6) + (ema * 0.4))
+        fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
+            close, vwap, ema, fv_fund_egx.get(str(sym).upper())
+        )
         upside = round(((fair_value - close) / close) * 100, 2)
 
         items.append({
@@ -3781,8 +4232,9 @@ def _sync_get_fair_value(
             "upside_pct": upside,
             "status": "undervalued" if upside > 5 else ("overvalued" if upside < -5 else "fair"),
             "status_ar": "أقل من السعر العادل (رخيص) 🟢" if upside > 5 else ("أعلى من السعر العادل (متضخم) 🔴" if upside < -5 else "في النطاق العادل ⚖️"),
-            "model": "التوازن الكمي (VWAP & EMA)",
+            "model": fv_model,
             "is_sharia_compliant": is_sharia_compliant(sym),
+            **fv_extra,
         })
 
     if mode == "screen_undervalued":
@@ -5108,6 +5560,457 @@ async def execute_manage_portfolio(
 
 
 # ---------------------------------------------------------------------------
+# Tool: optimize_portfolio (Operations Research Quantitative Allocator)
+# ---------------------------------------------------------------------------
+def _sync_optimize_portfolio(
+    user_id: Optional[str],
+    symbols: Optional[List[str]] = None,
+    capital: Optional[float] = None,
+    use_my_portfolio: bool = False,
+    objective: str = "balanced",
+    max_weight_pct: Optional[float] = None,
+    max_sector_pct: Optional[float] = None,
+    min_cash_pct: Optional[float] = None,
+    sharia_only: bool = False,
+    market: Optional[str] = None,
+    telegram_user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Run Operations Research portfolio optimization on user holdings and/or requested symbols."""
+    import math as _math
+    from datetime import datetime, timedelta, timezone
+    from api.portfolio_or_optimizer import (
+        AssetInput,
+        compute_returns_by_date,
+        normalize_objective,
+        optimize_portfolio_or,
+    )
+    from api.sharia_stocks import is_sharia_compliant
+    from api.agentic_chat.market_registry import currency_for_market, normalize_exchange_code
+
+    # Validate explicit capital early (fail closed on <= 0 or NaN/Inf)
+    parsed_capital: Optional[float] = None
+    if capital is not None:
+        try:
+            cap_val = float(capital)
+        except (TypeError, ValueError):
+            return {"status": "error", "message": "قيمة رأس المال غير صالحة؛ أدخل رقماً موجباً مثل 50000 أو 100000."}
+        if not _math.isfinite(cap_val) or cap_val <= 0:
+            return {"status": "error", "message": "يجب إدخال رأس مال صحيح وموجب لتشغيل التحسين الرياضي."}
+        parsed_capital = cap_val
+
+    use_pf = bool(use_my_portfolio)
+    req_syms_raw = [str(s).strip() for s in (symbols or []) if str(s or "").strip()]
+    if not req_syms_raw and not use_pf:
+        use_pf = True
+
+    effective_tg_id = telegram_user_id if telegram_user_id is not None else _TG_PORTFOLIO_CTX.get()
+
+    if use_pf and _GROUP_PORTFOLIO_BLOCKED_CTX.get():
+        return {
+            "status": "redirect_private",
+            "requires_private_chat": True,
+            "private_bot_url": "https://t.me/egxbots_bot?start=b2b_portfolio",
+            "message": (
+                "لحماية خصوصية محفظتك، تم تعطيل قراءة المحفظة الشخصية داخل الجروبات. "
+                "يمكنك إرسال قائمة رموز الأسهم ورأس المال مباشرة للتوزيع الرياضي، أو استخدام البوت الخاص لتحسين محفظتك المسجلة."
+            ),
+        }
+
+    sb = _get_sb()
+    if sb is None:
+        return {"status": "error", "message": "تعذر الاتصال بقاعدة البيانات لتشغيل محرك التحسين الرياضي."}
+
+    # 1. Resolve symbols and existing holdings (supports website auth + unlinked private Telegram)
+    existing_shares_map: Dict[str, float] = {}
+    existing_cash = 0.0
+    resolved_pairs: List[Tuple[str, str]] = []
+    seen_syms: set[str] = set()
+
+    def _add_resolved(raw_token: str, market_hint: Optional[str]) -> Optional[str]:
+        sym_r, exch_r = _resolve_symbol_and_market(raw_token, explicit_market=market_hint)
+        clean_s = str(sym_r or "").strip().upper()
+        canon_e = normalize_exchange_code(exch_r)
+        if not clean_s:
+            return None
+        if clean_s not in seen_syms:
+            seen_syms.add(clean_s)
+            resolved_pairs.append((clean_s, canon_e))
+        return clean_s
+
+    if use_pf:
+        if effective_tg_id is not None:
+            try:
+                tg_state = _load_tg_portfolio_state(sb, int(effective_tg_id))
+                existing_cash = max(0.0, _safe_float(tg_state.get("cash_balance")) or 0.0)
+                for row in (tg_state.get("positions") or []):
+                    qty = _safe_float(row.get("quantity")) or 0.0
+                    raw_sym = str(row.get("symbol") or "").strip()
+                    if raw_sym and qty > 0:
+                        clean_u = _add_resolved(raw_sym, market)
+                        if clean_u:
+                            existing_shares_map[clean_u] = existing_shares_map.get(clean_u, 0.0) + qty
+            except Exception as pf_err:
+                return {"status": "error", "message": f"تعذر قراءة مراكز محفظة تليجرام: {pf_err}"}
+        elif not user_id:
+            if not req_syms_raw:
+                return {
+                    "status": "error",
+                    "requires_login": True,
+                    "message": "يلزم تسجيل الدخول لتحسين محفظتك المحفوظة، أو اذكر قائمة رموز الأسهم ورأس المال المطلوب توزيعه مباشرة.",
+                }
+        else:
+            try:
+                pos_res = (
+                    sb.from_("positions")
+                    .select("symbol, quantity, entry_price")
+                    .eq("user_id", user_id)
+                    .eq("status", "open")
+                    .limit(25)
+                    .execute()
+                )
+                for row in (pos_res.data or []):
+                    qty = _safe_float(row.get("quantity")) or 0.0
+                    raw_sym = str(row.get("symbol") or "").strip()
+                    if raw_sym and qty > 0:
+                        clean_u = _add_resolved(raw_sym, market)
+                        if clean_u:
+                            existing_shares_map[clean_u] = existing_shares_map.get(clean_u, 0.0) + qty
+                prof_res = sb.from_("profiles").select("cash_balance").eq("id", user_id).limit(1).execute()
+                if prof_res.data:
+                    existing_cash = max(0.0, _safe_float(prof_res.data[0].get("cash_balance")) or 0.0)
+            except Exception as pf_err:
+                return {"status": "error", "message": f"تعذر قراءة مراكز المحفظة: {pf_err}"}
+
+    for raw_s in req_syms_raw:
+        _add_resolved(raw_s, market)
+
+    resolved_pairs = resolved_pairs[:20]
+    resolved_syms = [s for s, _ in resolved_pairs]
+    if not resolved_syms:
+        return {
+            "status": "error",
+            "message": "لم يتم العثور على أسهم للتحسين. اذكر رموز الأسهم المطلوب توزيع رأس المال عليها أو أضف مراكز إلى محفظتك أولاً.",
+        }
+
+    # Determine canonical exchange code (EGX, TADAWUL, DFM, ADX, QSE)
+    if market:
+        exch = normalize_exchange_code(market)
+    else:
+        pair_exches = [e for _, e in resolved_pairs if e]
+        if pair_exches:
+            exch = max(set(pair_exches), key=pair_exches.count)
+        else:
+            exch = normalize_exchange_code(_ACTIVE_MARKET_CTX.get() or "EGX")
+    currency = currency_for_market(exch)
+    sharia_mkt_arg = "tasi" if exch == "TADAWUL" else exch.lower()
+
+    # Optional Sharia filter
+    excluded_sharia: List[str] = []
+    if sharia_only:
+        filtered = []
+        for s in resolved_syms:
+            if is_sharia_compliant(s, market=sharia_mkt_arg):
+                filtered.append(s)
+            else:
+                excluded_sharia.append(s)
+        resolved_syms = filtered
+        if not resolved_syms:
+            return {
+                "status": "error",
+                "excluded_non_sharia": excluded_sharia,
+                "message": "جميع الأسهم المطلوبة غير مدرجة في قائمة الأسهم المتوافقة مع الشريعة لهذا السوق.",
+            }
+
+    # 2. Route market tables to the proper market Supabase (EGX primary vs Saudi/GCC SAUDI_SUPABASE)
+    mkt_sb = _get_sb_for_market(exch) or sb
+    ind_map: Dict[str, Dict[str, Any]] = {}
+    stock_meta: Dict[str, Dict[str, Any]] = {}
+    price_rows: List[Dict[str, Any]] = []
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=145)).strftime("%Y-%m-%d")
+
+    try:
+        if exch == "EGX":
+            ti_cols = "symbol, date, close, rsi_14, ema_50, r_vol, atr_14, change_pct, exchange"
+            ti_order = "date"
+        else:
+            ti_cols, ti_order = _saudi_ti_select_and_order(mkt_sb)
+        ind_res = (
+            mkt_sb.from_("stock_technical_indicators")
+            .select(ti_cols)
+            .eq("exchange", exch)
+            .in_("symbol", resolved_syms)
+            .order(ti_order, desc=True)
+            .limit(len(resolved_syms) * 2)
+            .execute()
+        )
+        for row in (ind_res.data or []):
+            s_u = str(row.get("symbol") or "").strip().upper()
+            if s_u and s_u not in ind_map:
+                ind_map[s_u] = row
+    except Exception:
+        pass
+
+    try:
+        st_cols = "symbol, name, name_ar, exchange" if exch == "EGX" else "symbol, name, name_ar, sector, exchange"
+        st_res = (
+            mkt_sb.from_("stocks")
+            .select(st_cols)
+            .eq("exchange", exch)
+            .in_("symbol", resolved_syms)
+            .limit(len(resolved_syms) * 2)
+            .execute()
+        )
+        for row in (st_res.data or []):
+            s_u = str(row.get("symbol") or "").strip().upper()
+            if s_u and s_u not in stock_meta:
+                stock_meta[s_u] = row
+    except Exception:
+        pass
+
+    # Fetch rich institutional fundamentals (sector, industry, fund_score, dividendYield, eps, pe, roe) for ALL markets
+    fund_opt_map: Dict[str, Dict[str, Any]] = {}
+    try:
+        sf_res = (
+            mkt_sb.from_("stock_fundamentals")
+            .select("symbol, data, fund_score")
+            .eq("exchange", exch)
+            .in_("symbol", resolved_syms)
+            .limit(len(resolved_syms) + 5)
+            .execute()
+        )
+        for row in (sf_res.data or []):
+            s_u = str(row.get("symbol") or "").strip().upper()
+            if s_u and s_u not in fund_opt_map:
+                fund_opt_map[s_u] = row
+    except Exception:
+        pass
+
+    try:
+        pr_res = (
+            mkt_sb.from_("stock_prices")
+            .select("symbol, date, close")
+            .eq("exchange", exch)
+            .in_("symbol", resolved_syms)
+            .gte("date", cutoff_date)
+            .order("date", desc=True)
+            .limit(min(2200, len(resolved_syms) * 110))
+            .execute()
+        )
+        price_rows = pr_res.data or []
+    except Exception:
+        price_rows = []
+
+    returns_map = compute_returns_by_date(price_rows)
+    latest_close_map: Dict[str, float] = {}
+    for row in price_rows:
+        s_u = str(row.get("symbol") or "").strip().upper()
+        c_val = _safe_float(row.get("close"))
+        if s_u and c_val and c_val > 0 and s_u not in latest_close_map:
+            latest_close_map[s_u] = c_val
+
+    # Optional Fair Value upside map for ALL 4 markets (cached, zero extra DB queries on warm cache)
+    fv_upside_map: Dict[str, float] = {}
+    _fv_mkt_map = {"EGX": "egx", "TADAWUL": "tasi", "QSE": "qatar", "DFM": "uae", "ADX": "uae"}
+    try:
+        fv_key = _fv_mkt_map.get(exch)
+        if fv_key:
+            from api.routers.offload_public import _get_fair_value
+            fv_rep = _get_fair_value(fv_key)
+            for st in (fv_rep.get("stocks") or []):
+                s_u = str(st.get("symbol") or "").strip().upper()
+                up = _safe_float(st.get("upsidePct"))
+                if s_u and up is not None:
+                    fv_upside_map[s_u] = up
+    except Exception:
+        pass
+
+    try:
+        from api.routers.offload_public import _resolve_sector_ar
+    except Exception:
+        _resolve_sector_ar = None
+
+    # 3. Assemble AssetInput list (combining Fair Value + Fundamental Quality + Technical Health)
+    assets: List[AssetInput] = []
+    missing_syms: List[str] = []
+    fund_summary_by_sym: Dict[str, Dict[str, Any]] = {}
+    for sym in resolved_syms:
+        ind = ind_map.get(sym) or {}
+        meta = stock_meta.get(sym) or {}
+        sf_row = fund_opt_map.get(sym) or {}
+        sf_data = sf_row.get("data") if isinstance(sf_row.get("data"), dict) else {}
+        price = _safe_float(ind.get("close")) or latest_close_map.get(sym)
+        if not price or not _math.isfinite(price) or price <= 0:
+            missing_syms.append(sym)
+            continue
+        atr = _safe_float(ind.get("atr_14"))
+        fallback_vol = max(0.008, min(0.08, (atr / price) if (atr and price > 0) else 0.022))
+
+        f_score = _safe_float(sf_row.get("fund_score"))
+        f_dy = _safe_float(sf_data.get("dividendYield") or sf_data.get("dividend_yield"))
+        f_eps = _safe_float(sf_data.get("eps") or sf_data.get("trailing_eps"), 4)
+        f_ni = _safe_float(sf_data.get("netIncome") or sf_data.get("net_income"), 2)
+        f_pe = _safe_float(sf_data.get("peRatio") or sf_data.get("pe_ratio"))
+        f_roe = _safe_float(sf_data.get("roe") or sf_data.get("return_on_equity"))
+        fund_summary_by_sym[sym] = {
+            k: v
+            for k, v in {
+                "fund_score": f_score,
+                "dividend_yield_pct": f_dy,
+                "pe_ratio": f_pe,
+                "roe_pct": f_roe,
+            }.items()
+            if v is not None
+        }
+
+        # Bounded quantitative composite signal in [-1, 1] (Fundamental Quality + Fair Value + Trend + RSI + RVol)
+        score = 0.0
+        if f_score is not None:
+            # Map fund_score (0..100, centered at 55) into [-0.30, +0.30]
+            score += max(-0.30, min(0.30, (f_score - 55.0) / 130.0))
+        if (f_eps is not None and f_eps < 0) or (f_ni is not None and f_ni < 0):
+            score -= 0.25  # Penalize loss-making companies inside portfolio optimizer
+        elif f_dy is not None and f_dy >= 3.0:
+            score += min(0.12, f_dy / 50.0)
+
+        up_pct = fv_upside_map.get(sym)
+        if up_pct is not None:
+            score += max(-0.35, min(0.35, up_pct / 75.0))
+        ema50 = _safe_float(ind.get("ema_50"))
+        if ema50 and ema50 > 0:
+            score += 0.20 if price >= ema50 else -0.15
+        rsi = _safe_float(ind.get("rsi_14"))
+        if rsi is not None:
+            if 45.0 <= rsi <= 65.0:
+                score += 0.12
+            elif rsi > 74.0:
+                score -= 0.18
+            elif rsi < 35.0:
+                score -= 0.08
+        r_vol = _safe_float(ind.get("r_vol"))
+        if r_vol is not None and r_vol >= 1.1:
+            score += 0.08
+        score = max(-1.0, min(1.0, score))
+
+        raw_sec = meta.get("sector") or sf_data.get("sector")
+        raw_ind = sf_data.get("industry")
+        if _resolve_sector_ar is not None:
+            sector_label = str(_resolve_sector_ar(sym, raw_sec, raw_ind) or raw_sec or "أخرى").strip() or "أخرى"
+        else:
+            sector_label = str(raw_sec or "أخرى").strip() or "أخرى"
+        name_ar = str(meta.get("name_ar") or sf_data.get("name_ar") or meta.get("name") or sf_data.get("name") or sym).strip()
+
+        assets.append(
+            AssetInput(
+                symbol=sym,
+                price=price,
+                name_ar=name_ar,
+                sector=sector_label,
+                current_shares=existing_shares_map.get(sym, 0.0),
+                expected_score=score,
+                fallback_daily_vol=fallback_vol,
+                returns_by_date=returns_map.get(sym) or {},
+            )
+        )
+
+    if not assets:
+        return {
+            "status": "error",
+            "missing_symbols": missing_syms,
+            "message": "لم يتم العثور على أسعار متاحة للرموز المطلوبة في قاعدة البيانات.",
+        }
+
+    holdings_equity = sum(a.current_shares * a.price for a in assets)
+    if parsed_capital is not None:
+        if use_pf and holdings_equity > 0:
+            # If user supplies an amount smaller than current holdings, treat it as additional cash on top of holdings + existing cash;
+            # otherwise treat it as the total target equity (always >= holdings_equity so current weights never exceed 100%).
+            if parsed_capital < holdings_equity:
+                total_capital = holdings_equity + existing_cash + parsed_capital
+            else:
+                total_capital = parsed_capital
+        else:
+            total_capital = parsed_capital
+    elif holdings_equity + existing_cash > 0:
+        total_capital = holdings_equity + existing_cash
+    else:
+        total_capital = 100000.0 if exch == "EGX" else 50000.0
+
+    res = optimize_portfolio_or(
+        assets,
+        total_capital=total_capital,
+        objective=normalize_objective(objective),
+        max_weight_pct=float(max_weight_pct) if max_weight_pct is not None else 35.0,
+        max_sector_pct=float(max_sector_pct) if max_sector_pct is not None else 45.0,
+        min_cash_pct=float(min_cash_pct) if min_cash_pct is not None else 0.0,
+        exchange=exch,
+        turnover_penalty=0.015 if holdings_equity > 0 else 0.0,
+    )
+
+    # Enrich OR allocations with fundamental metrics & portfolio-level weighted fund_score / dividend yield
+    allocs = res.get("allocations") if isinstance(res, dict) else None
+    if isinstance(allocs, list):
+        w_fs_num = w_fs_den = 0.0
+        w_dy_num = 0.0
+        for row in allocs:
+            s_u = str(row.get("symbol") or "").upper()
+            fs_info = fund_summary_by_sym.get(s_u) or {}
+            if fs_info:
+                row.update(fs_info)
+            tw = float(row.get("targetWeightPct") or 0.0)
+            if tw > 0:
+                if fs_info.get("fund_score") is not None:
+                    w_fs_num += tw * float(fs_info["fund_score"])
+                    w_fs_den += tw
+                if fs_info.get("dividend_yield_pct") is not None:
+                    w_dy_num += (tw / 100.0) * float(fs_info["dividend_yield_pct"])
+        if w_fs_den > 0:
+            res["weightedFundScore"] = round(w_fs_num / w_fs_den, 1)
+        if w_dy_num > 0:
+            res["expectedDividendYieldPct"] = round(w_dy_num, 2)
+
+    return {
+        "status": "success",
+        "currency": currency,
+        "exchange": exch,
+        "capitalAssumedDefault": bool(parsed_capital is None and (holdings_equity + existing_cash) <= 0),
+        "excludedNonSharia": excluded_sharia,
+        "missingSymbols": missing_syms,
+        "optimization": res,
+        "disclaimerAr": "نتائج المحاكاة الرياضية (بحوث العمليات) أداة تحليل كمي لإدارة المخاطر والتنويع لأغراض البحث والتعليم الشخصي فقط، وليست توصية استثمارية أو ضماناً للعائد.",
+    }
+
+
+async def execute_optimize_portfolio(
+    user_id: Optional[str],
+    symbols: Optional[List[str]] = None,
+    capital: Optional[float] = None,
+    use_my_portfolio: bool = False,
+    objective: str = "balanced",
+    max_weight_pct: Optional[float] = None,
+    max_sector_pct: Optional[float] = None,
+    min_cash_pct: Optional[float] = None,
+    sharia_only: bool = False,
+    market: Optional[str] = None,
+    telegram_user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    effective_tg_id = telegram_user_id if telegram_user_id is not None else _TG_PORTFOLIO_CTX.get()
+    return await asyncio.to_thread(
+        _sync_optimize_portfolio,
+        user_id,
+        symbols,
+        capital,
+        use_my_portfolio,
+        objective,
+        max_weight_pct,
+        max_sector_pct,
+        min_cash_pct,
+        sharia_only,
+        market,
+        effective_tg_id,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Tool: manage_automations
 # ---------------------------------------------------------------------------
 _TIME_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
@@ -5263,16 +6166,22 @@ def _sync_manage_automations(
                 threading.Thread(target=sync_automations_cache, daemon=True).start()
             except Exception:
                 pass
+            total_after = len(existing_rows) + len(created)
+            remaining_after = max(0, 5 - total_after)
             return {
                 "status": "success",
                 "operation": "create",
                 "created_count": len(created),
+                "total_count": total_after,
+                "max_allowed": 5,
+                "remaining_slots": remaining_after,
                 "scheduled_times": norm_times,
                 "days_of_week": eff_days,
                 "automations": created,
                 "message": (
                     f"تمت جدولة {len(created)} مهمة أتمتة بنجاح بتوقيت القاهرة ({', '.join(norm_times)}) "
-                    f"وسيتم إرسال التقارير تلقائياً إلى تليجرام."
+                    f"وسيتم إرسال التقارير تلقائياً إلى تليجرام. "
+                    f"إجمالي المهام في حسابك الآن: {total_after} من 5 (المتبقي {remaining_after})."
                 ),
             }
         except Exception as e:
@@ -5543,6 +6452,21 @@ BENCHMARK_FIXTURES: Dict[str, Any] = {
         "profit_loss_egp": 2250.0,
         "profit_loss_pct": 3.6,
     },
+    "optimize_portfolio": {
+        "status": "success",
+        "currency": "ج.م",
+        "exchange": "EGX",
+        "optimization": {
+            "objective": "balanced",
+            "totalCapital": 100000.0,
+            "investedAmount": 99650.0,
+            "leftoverCash": 350.0,
+            "estimatedFees": 179.37,
+            "metricsBefore": {"annualVolatilityPct": 28.4, "effectiveStocks": 2.0},
+            "metricsAfter": {"annualVolatilityPct": 22.1, "effectiveStocks": 3.6},
+            "allocations": [],
+        },
+    },
     "manage_user_preferences": {
         "status": "success",
         "operation": "get",
@@ -5790,6 +6714,20 @@ async def dispatch_tool(
                 quantity=arguments.get("quantity"),
                 entry_price=arguments.get("entry_price"),
                 total_cost=arguments.get("total_cost"),
+            )
+
+        elif tool_name == "optimize_portfolio":
+            return await execute_optimize_portfolio(
+                user_id=user_id,
+                symbols=arguments.get("symbols"),
+                capital=arguments.get("capital"),
+                use_my_portfolio=bool(arguments.get("use_my_portfolio", False)),
+                objective=str(arguments.get("objective") or "balanced"),
+                max_weight_pct=arguments.get("max_weight_pct"),
+                max_sector_pct=arguments.get("max_sector_pct"),
+                min_cash_pct=arguments.get("min_cash_pct"),
+                sharia_only=bool(arguments.get("sharia_only", False)),
+                market=arguments.get("market"),
             )
 
         elif tool_name == "enable_autonomous_recommendations":

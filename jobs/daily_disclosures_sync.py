@@ -31,7 +31,7 @@ if ROOT_DIR not in sys.path:
 load_dotenv(os.path.join(ROOT_DIR, '.env'))
 
 from scripts.disclosures.sync_egx_disclosures import (
-    STOCK_MAP, EXCLUDE_KEYWORDS, match_stock, parse_date, analyze_batch_with_ai
+    STOCK_MAP, GULF_EXCLUDE_KEYWORDS as EXCLUDE_KEYWORDS, match_stock, parse_date, analyze_batch_with_ai
 )
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
@@ -95,7 +95,7 @@ def run_daily_sync():
     # Preload latest prices for execution_price enrichment
     price_map = {}
     try:
-        p_res = sb.table('stock_technical_indicators').select('symbol, close').execute()
+        p_res = sb.table('stock_technical_indicators').select('symbol, close').eq('exchange', 'EGX').limit(500).execute()
         for r in (p_res.data or []):
             if r.get('symbol') and r.get('close'):
                 price_map[r['symbol']] = float(r['close'])

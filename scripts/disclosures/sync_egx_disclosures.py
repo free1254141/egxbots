@@ -164,6 +164,8 @@ GULF_EXCLUDE_KEYWORDS = [
     'DEWA', 'TABREED', 'ALANSARI', 'سدكو', 'وربة', 'الريان', 'أدنوك',
     'أخبار تونس', 'أخبار السعودية', 'أخبار الدول', 'يحدث الآن'
 ]
+# Backward-compatible alias imported by jobs/daily_disclosures_sync.py
+EXCLUDE_KEYWORDS = GULF_EXCLUDE_KEYWORDS
 
 def _norm_ar(s: str) -> str:
     if not s:

@@ -120,6 +120,28 @@ export default function NewsPage() {
         setSelectedSector("");
     }, [market]);
 
+    // Keep browser tab title aligned with the active market
+    useEffect(() => {
+        if (typeof document === "undefined") return;
+        const marketTitleAr =
+            market === "uae"
+                ? "أخبار أسهم الإمارات (DFM & ADX) وتحليل المشاعر"
+                : market === "qatar"
+                ? "أخبار بورصة قطر (QSE) وتحليل المشاعر"
+                : isSaudi
+                ? "أخبار السوق السعودي (تاسي) وتحليل المشاعر"
+                : "أخبار وتحليل البورصة المصرية بالذكاء الاصطناعي";
+        const marketTitleEn =
+            market === "uae"
+                ? "UAE (DFM & ADX) Stock News & AI Sentiment"
+                : market === "qatar"
+                ? "Qatar (QSE) Stock News & AI Sentiment"
+                : isSaudi
+                ? "Saudi TASI News & AI Sentiment"
+                : "EGX News & AI Sentiment Pulse";
+        document.title = `${isAr ? marketTitleAr : marketTitleEn} | EGX BOTS`;
+    }, [market, isSaudi, isAr]);
+
     // Trigger fetch when fetchNews callback changes
     useEffect(() => {
         const controller = new AbortController();
@@ -394,7 +416,12 @@ export default function NewsPage() {
                                             href={`/stocks/${item.symbol.toLowerCase()}`}
                                             className="px-2.5 py-1 text-xs font-black uppercase tracking-wider bg-black text-white dark:bg-white dark:text-black border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black hover:border-black transition-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                                         >
-                                            {item.symbol}.EGX
+                                            {item.symbol}.{(() => {
+                                                const ex = (item.exchange || "").toUpperCase();
+                                                if (ex === "TADAWUL") return "TASI";
+                                                if (ex) return ex;
+                                                return market === "uae" ? "DFM" : market === "qatar" ? "QSE" : isSaudi ? "TASI" : "EGX";
+                                            })()}
                                         </Link>
                                         <span className="flex items-center gap-1 text-[10px] font-black text-zinc-500 dark:text-zinc-400">
                                             <Calendar className="w-3.5 h-3.5" />

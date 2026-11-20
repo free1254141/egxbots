@@ -1112,5 +1112,75 @@ def test_run_to_run_cache_ttl_and_selective_tag_invalidation():
     assert egx_calls == 1
 
 
+def test_market_status_includes_gold_and_silver_across_all_4_markets():
+    from api.routers import offload
+
+    offload._MARKET_STATUS_CACHE.clear()
+    offload._METALS_SERIES_CACHE.clear()
+
+    egx_sb = _FakeSupabase(
+        tables={
+            "market_cache": [
+                {
+                    "cache_key": "market_status_Egypt",
+                    "payload": {
+                        "egx30": [{"date": "2026-11-19", "open": 31000, "high": 31200, "low": 30900, "close": 31150}],
+                        "egx100": [{"date": "2026-11-19", "open": 10000, "high": 10100, "low": 9950, "close": 10050}],
+                        "usdegp": [{"date": "2026-11-19", "open": 49.0, "high": 49.2, "low": 48.9, "close": 49.1}],
+                        "regime": "sideways",
+                        "reject_buys": False,
+                        "updated_at": "2026-11-19",
+                    },
+                }
+            ],
+        }
+    )
+    gcc_sb = _FakeSupabase(
+        tables={
+            "market_cache": [],
+            "market_index": [
+                {"date": "2026-11-19", "exchange": "TADAWUL", "close": 11650, "ret": 0.008, "source": "TADAWUL"},
+                {"date": "2026-11-18", "exchange": "TADAWUL", "close": 11550, "ret": 0.002, "source": "TADAWUL"},
+                {"date": "2026-11-19", "exchange": "DFM", "close": 4620, "ret": 0.006, "source": "DFM"},
+                {"date": "2026-11-18", "exchange": "DFM", "close": 4590, "ret": 0.001, "source": "DFM"},
+                {"date": "2026-11-19", "exchange": "ADX", "close": 9410, "ret": 0.004, "source": "ADX"},
+                {"date": "2026-11-18", "exchange": "ADX", "close": 9370, "ret": -0.001, "source": "ADX"},
+                {"date": "2026-11-19", "exchange": "QSE", "close": 10520, "ret": 0.005, "source": "QSE"},
+                {"date": "2026-11-18", "exchange": "QSE", "close": 10470, "ret": 0.002, "source": "QSE"},
+            ],
+            "stock_prices": [
+                {"symbol": "XAUUSD", "exchange": "COMMODITIES", "date": "2026-11-19", "open": 3600, "high": 3630, "low": 3590, "close": 3622.6, "volume": 1000},
+                {"symbol": "XAUUSD", "exchange": "COMMODITIES", "date": "2026-11-18", "open": 3580, "high": 3610, "low": 3570, "close": 3600.0, "volume": 900},
+                {"symbol": "XAGUSD", "exchange": "COMMODITIES", "date": "2026-11-19", "open": 42.1, "high": 43.0, "low": 41.9, "close": 42.8, "volume": 500},
+                {"symbol": "XAGUSD", "exchange": "COMMODITIES", "date": "2026-11-18", "open": 41.5, "high": 42.2, "low": 41.4, "close": 42.1, "volume": 480},
+            ],
+        }
+    )
+    client = _make_client()
+
+    with mock.patch("api.routers.offload.get_market_supabase", side_effect=lambda m: gcc_sb if m in ("tasi", "uae", "qatar") else egx_sb):
+        for m in ("egx", "tasi", "uae", "qatar"):
+            resp = client.get(f"/api/market/status?market={m}")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert [p["close"] for p in body["gold"]] == [3600.0, 3622.6]
+            assert [p["close"] for p in body["silver"]] == [42.1, 42.8]
+            if m == "uae":
+                assert body["currency"] == "AED"
+                assert body["dfm"][-1]["close"] == 4620
+                assert body["adx"][-1]["close"] == 9410
+            elif m == "qatar":
+                assert body["currency"] == "QAR"
+                assert body["qse"][-1]["close"] == 10520
+
+    # Invalidation on daily-market-data and clear_offload_caches both clear metals series cache
+    assert offload._METALS_SERIES_CACHE.get("global_metals")[0] is True
+    offload.invalidate_offload_caches(["daily-market-data"])
+    assert offload._METALS_SERIES_CACHE.get("global_metals")[0] is False
+    offload._METALS_SERIES_CACHE.set("global_metals", {"gold": [], "silver": []})
+    offload.clear_offload_caches()
+    assert offload._METALS_SERIES_CACHE.get("global_metals")[0] is False
+
+
 
 

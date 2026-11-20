@@ -2009,7 +2009,169 @@ def post_portfolio_rebalance(request: Request):
                 candidates.append(st)
 
         candidates.sort(key=lambda s: float(s.get("upsidePct") or 0) * 0.6 + float((ind_map.get(str(s.get("symbol")).upper()) or {}).get("r_vol") or 1) * 15.0, reverse=True)
-        top_reps = candidates[:3]
+
+        # Operations Research (OR) covariance, diversified candidate selection & optimal weights
+        from api.portfolio_or_optimizer import (
+            AssetInput,
+            compute_returns_by_date,
+            optimize_portfolio_or,
+            select_diversified_candidates,
+        )
+
+        pool_cands = candidates[:12]
+        or_syms = list(dict.fromkeys(list(held_syms) + [str(c.get("symbol") or "").upper() for c in pool_cands if c.get("symbol")]))[:25]
+        sector_lookup: Dict[str, str] = {}
+        returns_map: Dict[str, Dict[str, float]] = {}
+        if or_syms:
+            try:
+                from api.routers.offload_public import _resolve_sector_ar
+            except Exception:
+                _resolve_sector_ar = None
+            try:
+                sec_res = (
+                    sb.table("stocks")
+                    .select("symbol,sector")
+                    .eq("exchange", "EGX")
+                    .in_("symbol", or_syms)
+                    .limit(len(or_syms) * 2)
+                    .execute()
+                )
+                for srow in getattr(sec_res, "data", None) or []:
+                    su = str(srow.get("symbol") or "").strip().upper()
+                    if su and su not in sector_lookup:
+                        raw_sec = srow.get("sector")
+                        resolved_sec = _resolve_sector_ar(su, raw_sec, None) if _resolve_sector_ar else str(raw_sec or "").strip()
+                        if resolved_sec:
+                            sector_lookup[su] = resolved_sec
+            except Exception:
+                pass
+            try:
+                cutoff_dt = (datetime.now(timezone.utc) - timedelta(days=145)).strftime("%Y-%m-%d")
+                pr_res = (
+                    sb.table("stock_prices")
+                    .select("symbol,date,close")
+                    .eq("exchange", "EGX")
+                    .in_("symbol", or_syms)
+                    .gte("date", cutoff_dt)
+                    .order("date", desc=True)
+                    .limit(min(2200, len(or_syms) * 100))
+                    .execute()
+                )
+                returns_map = compute_returns_by_date(getattr(pr_res, "data", None) or [])
+            except Exception:
+                returns_map = {}
+
+        held_sector_counts: Dict[str, int] = {}
+        for h in raw_holdings:
+            sec_h = sector_lookup.get(h["sym"]) or str(h["fv"].get("sectorAr") or "أخرى").strip() or "أخرى"
+            held_sector_counts[sec_h] = held_sector_counts.get(sec_h, 0) + 1
+
+        scored_cands = [
+            {
+                "symbol": str(c.get("symbol") or "").upper(),
+                "score": float(c.get("upsidePct") or 0) * 0.6 + float((ind_map.get(str(c.get("symbol")).upper()) or {}).get("r_vol") or 1) * 15.0,
+                "sector": sector_lookup.get(str(c.get("symbol") or "").upper()) or str(c.get("sectorAr") or "أخرى").strip() or "أخرى",
+                "raw": c,
+            }
+            for c in pool_cands
+        ]
+        div_picked = select_diversified_candidates(
+            scored_cands,
+            returns_map,
+            k=3,
+            max_per_sector=1,
+            max_correlation=0.78,
+            existing_sector_counts=held_sector_counts,
+            max_total_per_sector=2,
+        )
+        top_reps = [item["raw"] for item in div_picked]
+
+        # Run OR optimizer on current holdings to compute optimal weights, volatility reduction & integer targets
+        or_optimization: Optional[Dict[str, Any]] = None
+        try:
+            or_assets: List[AssetInput] = []
+            for h in raw_holdings:
+                ind_h = h["ind"]
+                fv_h = h["fv"]
+                cur_p = float(h["currentPrice"])
+                atr_h = float(ind_h.get("atr_14") or 0)
+                fb_vol = max(0.008, min(0.08, (atr_h / cur_p) if (atr_h > 0 and cur_p > 0) else 0.022))
+                score_h = 0.0
+                up_h = fv_h.get("upsidePct")
+                if up_h is not None:
+                    score_h += max(-0.45, min(0.45, float(up_h) / 60.0))
+                ema50_h = float(ind_h.get("ema_50") or cur_p)
+                score_h += 0.25 if cur_p >= ema50_h else -0.20
+                rsi_h = ind_h.get("rsi_14")
+                if rsi_h is not None:
+                    rv = float(rsi_h)
+                    if 45.0 <= rv <= 65.0:
+                        score_h += 0.15
+                    elif rv > 72.0:
+                        score_h -= 0.20
+                or_assets.append(
+                    AssetInput(
+                        symbol=h["sym"],
+                        price=cur_p,
+                        name_ar=(CANONICAL_EGX_STOCK_NAMES.get(h["sym"]) or {}).get("name_ar") or str(fv_h.get("nameAr") or h["sym"]),
+                        sector=sector_lookup.get(h["sym"]) or str(fv_h.get("sectorAr") or "أخرى").strip() or "أخرى",
+                        current_shares=float(h["qty"]),
+                        expected_score=max(-1.0, min(1.0, score_h)),
+                        fallback_daily_vol=fb_vol,
+                        returns_by_date=returns_map.get(h["sym"]) or {},
+                    )
+                )
+            if or_assets:
+                or_optimization = optimize_portfolio_or(
+                    or_assets,
+                    total_capital=total_equity,
+                    objective="balanced",
+                    max_weight_pct=35.0,
+                    max_sector_pct=45.0,
+                    min_cash_pct=round(min(20.0, (cash_balance / total_equity) * 100.0), 1) if cash_balance > 0 else 0.0,
+                    exchange="EGX",
+                    turnover_penalty=0.015,
+                )
+        except Exception:
+            or_optimization = None
+
+        # Allocate deployable cash across diversified replacements using OR risk-adjusted weights
+        rep_alloc_map: Dict[str, Tuple[int, int]] = {}
+        if top_reps and deployable_cash > 0:
+            try:
+                rep_assets = []
+                for st in top_reps:
+                    sym_r = str(st["symbol"]).upper()
+                    ind_r = ind_map.get(sym_r) or {}
+                    cur_r = float(st["currentPrice"])
+                    atr_r = float(ind_r.get("atr_14") or cur_r * 0.035)
+                    rep_assets.append(
+                        AssetInput(
+                            symbol=sym_r,
+                            price=cur_r,
+                            name_ar=str(st.get("nameAr") or sym_r),
+                            sector=sector_lookup.get(sym_r) or str(st.get("sectorAr") or "أخرى").strip() or "أخرى",
+                            expected_score=max(-0.5, min(1.0, float(st.get("upsidePct") or 0) / 50.0)),
+                            fallback_daily_vol=max(0.008, min(0.08, atr_r / max(cur_r, 0.01))),
+                            returns_by_date=returns_map.get(sym_r) or {},
+                        )
+                    )
+                rep_or = optimize_portfolio_or(
+                    rep_assets,
+                    total_capital=max(2500.0 * len(top_reps), float(deployable_cash)),
+                    objective="balanced",
+                    max_weight_pct=50.0,
+                    max_sector_pct=60.0,
+                    exchange="EGX",
+                )
+                for alloc in rep_or.get("allocations") or []:
+                    rep_alloc_map[alloc["symbol"]] = (
+                        int(round(float(alloc.get("allocatedValue") or 0))),
+                        max(1, int(alloc.get("targetShares") or 1)),
+                    )
+            except Exception:
+                rep_alloc_map = {}
+
         per_alloc = max(2500, round(deployable_cash / len(top_reps))) if top_reps else 0
         replacements = []
         for st in top_reps:
@@ -2021,22 +2183,24 @@ def post_portfolio_rebalance(request: Request):
             r_vol = round(float(ind.get("r_vol") or 1.0), 2)
             sl = round(max(0.01, cur_p - 2.0 * atr), 2)
             tp = round(min(fair_val, cur_p + 3.5 * atr), 2)
-            shares = max(1, int(per_alloc // cur_p)) if per_alloc > 0 else 1
+            alloc_egp, shares = rep_alloc_map.get(sym, (per_alloc, max(1, int(per_alloc // cur_p)) if per_alloc > 0 else 1))
+            if alloc_egp <= 0:
+                alloc_egp = per_alloc
             replacements.append(
                 {
                     "symbol": sym,
                     "nameAr": st.get("nameAr") or sym,
-                    "sectorAr": st.get("sectorAr") or "",
+                    "sectorAr": sector_lookup.get(sym) or st.get("sectorAr") or "",
                     "currentPrice": cur_p,
                     "fairValue": fair_val,
                     "upsidePct": st.get("upsidePct"),
                     "rsi14": st.get("rsi14"),
                     "relativeVolume": r_vol,
-                    "suggestedAllocationEgp": per_alloc,
+                    "suggestedAllocationEgp": alloc_egp,
                     "suggestedShares": shares,
                     "stopLoss": sl,
                     "targetPrice": tp,
-                    "catalystAr": f"يتداول بخصم +{st.get('upsidePct')}% عن سعره العادل ({fair_val} ج.م) مع سيولة تجميعية ({r_vol}x) أعلى من متوسط 50 جلسة.",
+                    "catalystAr": f"يتداول بخصم +{st.get('upsidePct')}% عن سعره العادل ({fair_val} ج.م) مع سيولة تجميعية ({r_vol}x) أعلى من متوسط 50 جلسة وتنويع قطاعي محسوب.",
                 }
             )
 
@@ -2055,13 +2219,21 @@ def post_portfolio_rebalance(request: Request):
             try:
                 cur_str = " | ".join(f"{h['symbol']} ({h['actionLabelAr']}, ربح/خسارة {h['pnlPct']}%, وزن {h['weightPct']}%)" for h in holdings_diag)
                 rep_str = " | ".join(f"{r['symbol']} (سعر {r['currentPrice']}, عادل {r['fairValue']}, مستهدف {r['targetPrice']})" for r in replacements)
+                or_summary = ""
+                if or_optimization:
+                    mb = or_optimization.get("metricsBefore") or {}
+                    ma = or_optimization.get("metricsAfter") or {}
+                    or_summary = (
+                        f"\n- نتائج التحسين الرياضي (OR): التذبذب السنوي قبل {mb.get('annualVolatilityPct')}% ← بعد {ma.get('annualVolatilityPct')}%، "
+                        f"التنويع الفعّال {mb.get('effectiveStocks')} ← {ma.get('effectiveStocks')}، عمولات تقديرية {or_optimization.get('estimatedFees')} ج.م"
+                    )
                 prompt = (
-                    f"أنت مستشار مالي خبير في البورصة المصرية (EGX). لخص في 3 جمل عربية واضحة ومباشرة خطة إعادة تدوير المحفظة التالية:\n"
+                    f"أنت محلل كمي ومساعد أدوات بحثية للبورصة المصرية (EGX). لخص في 3 جمل عربية واضحة ومباشرة قراءة إعادة توازن المحفظة التالية (لأغراض البحث وإدارة المخاطر دون وعود ربح):\n"
                     f"- التقييم الصحي للمحفظة: {health}/100\n"
                     f"- المراكز الحالية: {cur_str}\n"
                     f"- السيولة المقترح تحريرها للتدوير: {total_freed} ج.م + كاش متاح {cash_balance} ج.م\n"
-                    f"- الأسهم البديلة المرشحة: {rep_str}\n"
-                    f"اكتب نصيحة عملية مركزة بدون مقدمات إنشائية."
+                    f"- الأسهم البديلة المرشحة: {rep_str}{or_summary}\n"
+                    f"اكتب ملخصاً عملياً مركزاً بدون مقدمات إنشائية."
                 )
                 r = requests.post(
                     "https://api.deepseek.com/chat/completions",
@@ -2087,6 +2259,7 @@ def post_portfolio_rebalance(request: Request):
                 "aiAdvisory": advisory,
                 "holdings": holdings_diag,
                 "replacements": replacements,
+                **({"orOptimization": or_optimization} if or_optimization else {}),
             },
             headers=_PRIVATE_NO_STORE,
         )

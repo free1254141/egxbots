@@ -141,11 +141,35 @@ def _finalize_usage_cost(acc: Dict[str, Any], cached: bool = False) -> Dict[str,
     }
 
 
+_ARABIC_WEEKDAYS = ("الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد")
+
+
+def _compact_history_content(content: Any, *, is_recent: bool) -> str:
+    """
+    Preserve BOTH head and tail of truncated history messages so ARTORO never forgets
+    numbered questions or conclusions at the bottom of its previous reply, while keeping
+    older turns compact to cut multi-turn uncached prompt token costs.
+    """
+    text = str(content or "")
+    max_len = 2800 if is_recent else 700
+    if len(text) <= max_len:
+        return text
+    if is_recent:
+        head_len, tail_len = 1500, 1250
+        sep = "\n[...تم اختصار الوسط للاحتفاظ ببداية ونهاية الرد...]\n"
+    else:
+        head_len, tail_len = 420, 260
+        sep = "\n...\n"
+    return f"{text[:head_len].rstrip()}{sep}{text[-tail_len:].lstrip()}"
+
+
 def _collect_structured_outputs(
     result: Any,
     tables_data: List[Any],
     recommendations_data: List[Any],
     visuals_data: Optional[Dict[str, Any]] = None,
+    *,
+    acc_fallback_rows: Optional[List[Any]] = None,
 ) -> None:
     """Collect structured stock/recommendation/visual rows from a single tool output."""
     if not isinstance(result, dict):
@@ -153,7 +177,10 @@ def _collect_structured_outputs(
     if "stocks" in result and isinstance(result["stocks"], list):
         tables_data.extend(result["stocks"])
     elif "accumulation_stocks" in result and isinstance(result["accumulation_stocks"], list):
-        tables_data.extend(result["accumulation_stocks"])
+        if acc_fallback_rows is not None:
+            acc_fallback_rows.extend(result["accumulation_stocks"])
+        else:
+            tables_data.extend(result["accumulation_stocks"])
     if "recommendations" in result and isinstance(result["recommendations"], list):
         recommendations_data.extend(result["recommendations"])
 
@@ -378,6 +405,8 @@ def _append_tool_results(
     tables_data: List[Any],
     recommendations_data: List[Any],
     visuals_data: Optional[Dict[str, Any]] = None,
+    *,
+    acc_fallback_rows: Optional[List[Any]] = None,
 ) -> None:
     """Serialize tool outputs into DeepSeek tool messages and collect structured table rows."""
     for tc, result in zip(tool_calls, tool_results):
@@ -385,7 +414,13 @@ def _append_tool_results(
         if isinstance(result, Exception):
             content_str = json.dumps({"status": "error", "message": str(result)}, ensure_ascii=False)
         else:
-            _collect_structured_outputs(result, tables_data, recommendations_data, visuals_data)
+            _collect_structured_outputs(
+                result,
+                tables_data,
+                recommendations_data,
+                visuals_data,
+                acc_fallback_rows=acc_fallback_rows,
+            )
             content_str = json.dumps(_strip_ui_only_fields_for_llm(result), ensure_ascii=False)
 
         formatted_messages.append({
@@ -844,9 +879,11 @@ async def _run_agentic_chat_stream_impl(
             telegram_channel_guidance = (
                 f"السوق النشط الآن هو {active_cfg.name_ar} ({active_cfg.ui_code} — {active_cfg.currency_ar}): التزم بعملة السوق ({active_cfg.currency_ar}) دون خلط العملات."
             )
+    cairo_day_ar = _ARABIC_WEEKDAYS[now_cairo.weekday()]
+    riyadh_day_ar = _ARABIC_WEEKDAYS[now_riyadh.weekday()]
     date_context = (
-        f"📅 التوقيت الحالي: القاهرة {now_cairo.strftime('%Y-%m-%d %H:00')} | "
-        f"الرياض {now_riyadh.strftime('%Y-%m-%d %H:00')}. "
+        f"📅 التوقيت الحالي: القاهرة {cairo_day_ar} {now_cairo.strftime('%Y-%m-%d %H:00')} | "
+        f"الرياض {riyadh_day_ar} {now_riyadh.strftime('%Y-%m-%d %H:00')} (الجمعة والسبت عطلة البورصات العربية). "
         f"تبويب السوق النشط حالياً في الواجهة: {active_mkt_desc} "
         "(يُستخدم فقط كخيار افتراضي للأسئلة العامة غير المحددة، ويمكنك دائماً خدمة جميع الأسواق المتاحة في قاعدة البيانات معاً). "
         f"{telegram_channel_guidance} "
@@ -873,26 +910,30 @@ async def _run_agentic_chat_stream_impl(
         if user_rules_prompt:
             formatted_messages.append({"role": "system", "content": user_rules_prompt})
 
-    # Add bounded conversation history (last 10 turns max)
+    # Add bounded conversation history (last 8 turns: recent 2 preserve head+tail up to 2800 chars, older compact to 700 chars)
     has_conversation_history = False
     history_start_idx = len(formatted_messages)
     if history and isinstance(history, list):
-        for msg in history[-10:]:
+        trimmed_history = history[-8:]
+        n_hist = len(trimmed_history)
+        for h_idx, msg in enumerate(trimmed_history):
             role = msg.get("role", "user")
             content = msg.get("content", "")
             img_url = msg.get("image_url") or msg.get("imageUrl")
+            is_recent_turn = h_idx >= n_hist - 2
             if role in ("user", "assistant") and (content or img_url):
                 has_conversation_history = True
+                compact_text = _compact_history_content(content, is_recent=is_recent_turn) if content else ""
                 if role == "user" and img_url:
                     formatted_messages.append({
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": str(content)[:2000] if content else "صورة مرفقة"},
+                            {"type": "text", "text": compact_text if compact_text else "صورة مرفقة"},
                             {"type": "image_url", "image_url": {"url": img_url}}
                         ]
                     })
                 else:
-                    formatted_messages.append({"role": role, "content": str(content)[:2000]})
+                    formatted_messages.append({"role": role, "content": compact_text})
     history_end_idx = len(formatted_messages)
 
     # 1. Vision Analysis Pipeline (Ported 1:1 from legacy Vercel system)
@@ -999,6 +1040,7 @@ async def _run_agentic_chat_stream_impl(
 
     accumulated_reply = ""
     tables_data: List[Any] = []
+    acc_fallback_rows: List[Any] = []
     recommendations_data: List[Any] = []
     visuals_data: Dict[str, Any] = {}
     tools_executed_count = 0
@@ -1065,8 +1107,9 @@ async def _run_agentic_chat_stream_impl(
     round_count = 0
 
     # Single-Stock Fast-Track: works identically across ALL registered exchanges (EGX, TASI, QSE, DFM, ADX, ...).
+    # Covers both general analysis (`vip_stock_SYM`) and dedicated financial/fundamental analysis (`vip_stock_SYM_financials`).
     fast_stock_match = (
-        re.fullmatch(r"vip_stock_([A-Z0-9]{2,12})", candidate_cache_key)
+        re.fullmatch(r"vip_stock_([A-Z0-9]{2,12})(_financials)?", candidate_cache_key)
         if (
             candidate_cache_key
             and not has_conversation_history
@@ -1079,14 +1122,23 @@ async def _run_agentic_chat_stream_impl(
     )
     if fast_stock_match:
         fast_sym = fast_stock_match.group(1)
+        is_financials_fast = bool(fast_stock_match.group(2))
         fast_mkt_ui = ui_market_label(effective_market)
-        fast_tool_specs = [
-            ("get_stock", {"symbols": [fast_sym], "market": fast_mkt_ui}),
-            ("get_fair_value", {"symbols": [fast_sym], "mode": "specific_stocks", "market": fast_mkt_ui}),
-            ("get_news", {"symbols": [fast_sym], "market": fast_mkt_ui}),
-            ("get_disclosures", {"symbol": fast_sym, "market": fast_mkt_ui}),
-            ("get_price_traps", {"symbol": fast_sym, "market": fast_mkt_ui}),
-        ]
+        if is_financials_fast:
+            fast_tool_specs = [
+                ("get_stock", {"symbols": [fast_sym], "market": fast_mkt_ui}),
+                ("get_fair_value", {"symbols": [fast_sym], "mode": "specific_stocks", "market": fast_mkt_ui}),
+                ("get_news", {"symbols": [fast_sym], "market": fast_mkt_ui}),
+                ("get_disclosures", {"symbol": fast_sym, "market": fast_mkt_ui}),
+            ]
+        else:
+            fast_tool_specs = [
+                ("get_stock", {"symbols": [fast_sym], "market": fast_mkt_ui}),
+                ("get_fair_value", {"symbols": [fast_sym], "mode": "specific_stocks", "market": fast_mkt_ui}),
+                ("get_news", {"symbols": [fast_sym], "market": fast_mkt_ui}),
+                ("get_disclosures", {"symbol": fast_sym, "market": fast_mkt_ui}),
+                ("get_price_traps", {"symbol": fast_sym, "market": fast_mkt_ui}),
+            ]
         yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': f'جاري جلب أحدث بيانات السوق ({len(fast_tool_specs)} مصادر)...'}, ensure_ascii=False)}\n\n"
         t_tools_start = time.time()
         fast_results = await asyncio.gather(
@@ -1097,7 +1149,7 @@ async def _run_agentic_chat_stream_impl(
             return_exceptions=True,
         )
         t_tools = time.time() - t_tools_start
-        logger.info(f"[agentic_chat] Single-Stock Fast-Track ({fast_sym}): Tools({len(fast_tool_specs)})={t_tools:.2f}s (skipped Round 1 LLM)")
+        logger.info(f"[agentic_chat] Single-Stock Fast-Track ({fast_sym}, fin={is_financials_fast}): Tools({len(fast_tool_specs)})={t_tools:.2f}s (skipped Round 1 LLM)")
         fast_ctx_payload: Dict[str, Any] = {}
         for (t_name, _), r in zip(fast_tool_specs, fast_results):
             if isinstance(r, Exception):
@@ -1106,13 +1158,18 @@ async def _run_agentic_chat_stream_impl(
                 _collect_structured_outputs(r, tables_data, recommendations_data, visuals_data)
                 fast_ctx_payload[t_name] = _strip_ui_only_fields_for_llm(r)
 
+        fast_mode_note = (
+            "السؤال يطلب تحليلاً مالياً وأساسياً: طبّق قاعدة التحليل المالي والأساسي الاحترافي (ابدأ بـ «🎯 الخلاصة من الآخر»، اشرح الأرقام بمعناها العملي، اعتمد على `fundamental_diagnosis`، وإذا ورد في الأخبار نتائج مالية ربعية أحدث تتعارض مع آخر قوائم سنوية فنبّه المستخدم بوضوح لهذا الفرق الزمني، اعرض نقاط القوة مقابل المخاطر بوضوح، واختصر الفني في سطرين للتوقيت فقط)، وذلك بدون كتابة أي وسوم استدعاء أدوات أو DSML."
+            if is_financials_fast
+            else "اكتب الآن التقرير التحليلي الكامل مباشرة للمستخدم اعتماداً على هذه الأرقام الموثقة فقط، وبدون كتابة أي وسوم استدعاء أدوات أو DSML."
+        )
         fast_ctx_msg = {
             "role": "system",
             "content": (
                 f"بيانات السوق الموثقة المستخرجة فعلياً من قاعدة البيانات لسهم {fast_sym} "
                 f"(نتائج {', '.join(t_name for t_name, _ in fast_tool_specs)}):\n"
                 f"{json.dumps(fast_ctx_payload, ensure_ascii=False)}\n"
-                "تم تنفيذ جميع الأدوات المطلوبة بنجاح. اكتب الآن التقرير التحليلي الكامل مباشرة للمستخدم اعتماداً على هذه الأرقام الموثقة فقط، وبدون كتابة أي وسوم استدعاء أدوات أو DSML."
+                f"تم تنفيذ جميع الأدوات المطلوبة بنجاح. {fast_mode_note}"
             ),
         }
         # Build clean grounded messages excluding any prior conversational turns
@@ -1142,7 +1199,7 @@ async def _run_agentic_chat_stream_impl(
                     "tools": active_tools_schema,
                     "tool_choice": "auto",
                     "temperature": 0.2,
-                    "max_tokens": 4000,
+                    "max_tokens": 3000,
                 }
 
                 t_turn1_start = time.time()
@@ -1407,7 +1464,20 @@ async def _run_agentic_chat_stream_impl(
                     tool_results = [results_by_idx[i] for i in range(len(prepared_calls))]
                 else:
                     tool_default_mkt = effective_market if not is_cross_market else ui_exch
-                    tool_results = await asyncio.gather(
+                    # Deduplicate identical read-only tool calls within the same round (e.g. duplicate get_accumulation_stocks)
+                    sig_to_first_idx: Dict[str, int] = {}
+                    unique_calls: List[Tuple[int, str, Dict[str, Any]]] = []
+                    dup_map: Dict[int, int] = {}
+                    for idx, fn_name, fn_args in prepared_calls:
+                        is_mutating = fn_name in ("manage_portfolio", "manage_automations", "manage_user_preferences")
+                        sig = None if is_mutating else f"{fn_name}:{json.dumps(fn_args, sort_keys=True, ensure_ascii=False)}"
+                        if sig and sig in sig_to_first_idx:
+                            dup_map[idx] = sig_to_first_idx[sig]
+                        else:
+                            if sig:
+                                sig_to_first_idx[sig] = idx
+                            unique_calls.append((idx, fn_name, fn_args))
+                    unique_results = await asyncio.gather(
                         *[
                             dispatch_tool(
                                 fn_name,
@@ -1416,14 +1486,29 @@ async def _run_agentic_chat_stream_impl(
                                 user_prompt=message,
                                 default_market=tool_default_mkt,
                             )
-                            for _, fn_name, fn_args in prepared_calls
+                            for _, fn_name, fn_args in unique_calls
                         ],
                         return_exceptions=True,
                     )
+                    res_by_idx: Dict[int, Any] = {idx: r for (idx, _, _), r in zip(unique_calls, unique_results)}
+                    tool_results = [
+                        {"status": "duplicate_omitted", "note": "Identical call already returned in this round."}
+                        if i in dup_map
+                        else res_by_idx[i]
+                        for i in range(len(prepared_calls))
+                    ]
                 t_tools = time.time() - t_tools_start
                 logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
-                _append_tool_results(tool_calls, list(tool_results), formatted_messages, tables_data, recommendations_data, visuals_data)
+                _append_tool_results(
+                    tool_calls,
+                    list(tool_results),
+                    formatted_messages,
+                    tables_data,
+                    recommendations_data,
+                    visuals_data,
+                    acc_fallback_rows=acc_fallback_rows,
+                )
 
                 # For confirmed standalone requests inside a multi-turn session, strip prior turns
                 # before Round 2 synthesis so saved shared cache contains zero cross-stock bleed and saves input tokens.
@@ -1461,7 +1546,7 @@ async def _run_agentic_chat_stream_impl(
                     "model": "deepseek-chat",
                     "messages": formatted_messages,
                     "temperature": 0.3,
-                    "max_tokens": 4000,
+                    "max_tokens": 3000,
                 }
                 if not fast_stock_match:
                     synthesis_payload["tools"] = active_tools_schema
@@ -1521,7 +1606,15 @@ async def _run_agentic_chat_stream_impl(
                                     return_exceptions=True,
                                 )
                                 formatted_messages.append({"role": "assistant", "content": None, "tool_calls": dsml_extra_calls})
-                                _append_tool_results(dsml_extra_calls, list(extra_results), formatted_messages, tables_data, recommendations_data, visuals_data)
+                                _append_tool_results(
+                                    dsml_extra_calls,
+                                    list(extra_results),
+                                    formatted_messages,
+                                    tables_data,
+                                    recommendations_data,
+                                    visuals_data,
+                                    acc_fallback_rows=acc_fallback_rows,
+                                )
                                 retry_payload = {
                                     **synthesis_payload,
                                     "tools": active_tools_schema,
@@ -1639,9 +1732,12 @@ async def _run_agentic_chat_stream_impl(
             })
 
     # 2. Stocks Comparison Matrix or Stock Analysis Table
-    if tables_data:
+    # Use accumulation_stocks as table rows ONLY when no explicit get_stock/get_comparison rows exist
+    # (prevents single-stock queries like FWRY from mixing with 10 unrelated market accumulation stocks).
+    effective_table_rows = tables_data if tables_data else acc_fallback_rows
+    if effective_table_rows:
         merged_stocks = {}
-        for s in tables_data:
+        for s in effective_table_rows:
             if not isinstance(s, dict) or not s.get("symbol"):
                 continue
             sym = str(s["symbol"]).upper().strip()

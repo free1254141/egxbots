@@ -620,16 +620,34 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
         if len(syms) == 1:
             return f"vip_stock_{next(iter(syms))}"
 
-    # Parallel open recommendations discovery (get_recommendations + get_technical_scan / get_accumulation_stocks)
+    # Parallel open recommendations discovery (keep pure recommendations isolated from full market-pulse + screener)
     if "get_recommendations" in names_set and names_set.issubset(
         {"get_recommendations", "get_technical_scan", "screen_stocks", "get_accumulation_stocks", "get_market"}
     ):
         recs_keys = [p[2] for p in parsed if p[0] == "get_recommendations"]
         market_ok = all(p[2] == "vip_market_summary" for p in parsed if p[0] == "get_market")
         if recs_keys and market_ok and len(set(recs_keys)) == 1:
-            if "get_market" in names_set and names_set == {"get_recommendations", "get_market"}:
+            if names_set == {"get_recommendations", "get_market"}:
                 return recs_keys[0]
             if recs_keys[0] == "vip_open_recommendations":
+                if "get_market" in names_set and (
+                    "get_technical_scan" in names_set
+                    or "screen_stocks" in names_set
+                    or "get_accumulation_stocks" in names_set
+                ):
+                    scan_ok = all(
+                        p[2] == "vip_tech_screener"
+                        for p in parsed
+                        if p[0] in ("get_technical_scan", "screen_stocks")
+                    )
+                    acc_ok = all(
+                        p[2] == "vip_accumulation"
+                        for p in parsed
+                        if p[0] == "get_accumulation_stocks"
+                    )
+                    if scan_ok and acc_ok:
+                        return "vip_market_pulse_and_recs"
+                    return None
                 return "vip_open_recommendations"
 
     # Parallel Market Overview / Accumulation / Screener discovery (e.g. "أقوى الأسهم اللي بتجمع سيولة وأحجام تداول")
@@ -719,7 +737,9 @@ def build_analysis_cache_key(
     if any(w in tokens for w in DIALOGUE_WORDS):
         return None
 
-    # Skip custom numerical calculation queries (e.g. zakaat / purification / position sizing on N shares or EGP)
+    # Skip custom numerical calculation & portfolio optimization queries (without shadowing dividend queries like توزيعات أرباح)
+    if re.search(r"(?:وزع|توزيع\s+(?:راس|مبلغ|المخاطر|السيول|الوزن|الاوزان|الاسهم|المحفظ|فلوس)|توازن|تدوير|تحسين\s+المحفظ|rebalance|optimi[sz])", norm):
+        return None
     has_number = bool(re.search(r"\b\d+\b", norm))
     if has_number and re.search(r"(?:زكاه|تطهير|حساب|احسب|احسبلي|مبلغ|كميه)", norm):
         return None
@@ -841,7 +861,7 @@ def build_analysis_cache_key(
             return f"vip_stock_{found_sym}_sharia"
         if re.search(r"سيوله|تجميع|وايكوف", norm):
             return f"vip_stock_{found_sym}_liquidity"
-        if re.search(r"قوائم|مالي|ربحيه|مضاعف|قيمه عادله", norm):
+        if re.search(r"قوائم|مالي|ماليا|اساسي|اساسيا|ربحيه|مضاعف|قيمه عادله|ميزانيه|ديون|قوه ماليه", norm):
             return f"vip_stock_{found_sym}_financials"
         return f"vip_stock_{found_sym}"
 
@@ -874,7 +894,14 @@ def get_minimum_required_length(cache_key: str) -> int:
 
 def is_recommendation_cache_key(cache_key: Optional[str]) -> bool:
     """Return True if cache_key represents public open/weekly recommendations output."""
-    return bool(cache_key and (cache_key == "vip_open_recommendations" or cache_key.startswith("vip_recs_")))
+    return bool(
+        cache_key
+        and (
+            cache_key == "vip_open_recommendations"
+            or cache_key == "vip_market_pulse_and_recs"
+            or cache_key.startswith("vip_recs_")
+        )
+    )
 
 
 def resolve_scoped_cache_key(

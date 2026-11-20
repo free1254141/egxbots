@@ -737,3 +737,122 @@ def test_chat_review_optimizations_standalone_telegram_and_automation_metrics():
     assert asst_posts[0]["latency_ms"] == 4321
     assert asst_posts[0]["metadata"]["chat_source"] == "scheduled_automation"
     assert asst_posts[0]["metadata"]["usage"] == sample_usage
+
+
+def test_nov19_audit_logic_cost_vision_and_automation_fixes():
+    """Verify all fixes from the Nov 19 production audit (cache collision, Saudi typos, head+tail history, vision text_screenshot, comparison isolation, 15-stock automation, total_count)."""
+    import api.agentic_chat.analysis_cache as ac
+    import api.agentic_chat.pipeline as pl
+    import api.agentic_chat.vision as vis
+    import api.scheduled_automations_worker as auto_w
+    import api.agentic_chat.prompts as pr
+
+    # 1. Cache collision guard: get_market + get_technical_scan + get_recommendations must NOT overwrite vip_open_recommendations
+    mixed_calls = [
+        {"function": {"name": "get_market", "arguments": '{"market":"EGX"}'}},
+        {"function": {"name": "get_technical_scan", "arguments": '{"market":"EGX"}'}},
+        {"function": {"name": "get_recommendations", "arguments": '{"status":"open","market":"EGX"}'}},
+    ]
+    mixed_key = ac.resolve_tool_calls_to_cache_key(mixed_calls)
+    assert mixed_key == "vip_market_pulse_and_recs"
+    assert ac.is_recommendation_cache_key(mixed_key) is True
+
+    # 1b. Non-default technical scan preset combined with market+recs must NOT collide on vip_market_pulse_and_recs
+    non_default_preset_calls = [
+        {"function": {"name": "get_market", "arguments": '{"market":"EGX"}'}},
+        {"function": {"name": "get_technical_scan", "arguments": '{"preset":"top_losers","market":"EGX"}'}},
+        {"function": {"name": "get_recommendations", "arguments": '{"status":"open","market":"EGX"}'}},
+    ]
+    assert ac.resolve_tool_calls_to_cache_key(non_default_preset_calls) is None
+
+    pure_recs_calls = [
+        {"function": {"name": "get_recommendations", "arguments": '{"status":"open","market":"EGX"}'}},
+        {"function": {"name": "get_market", "arguments": '{"market":"EGX"}'}},
+    ]
+    assert ac.resolve_tool_calls_to_cache_key(pure_recs_calls) == "vip_open_recommendations"
+
+    # 2. Saudi typo alias ("الرجحى" -> 1120) works in cross-market query
+    hints = pl.known_symbol_hints("حلل فورى والرجحى ماليا")
+    hint_syms = {s for h in hints for s in h.get("symbols", [])}
+    assert "FWRY" in hint_syms
+    assert "1120" in hint_syms
+
+    # 3. Smart head+tail history preserves the tail of the immediately preceding reply (e.g. 5 numbered questions)
+    long_reply = ("مقدمة التحليل " * 250) + "\n1. تاريخ الاستحقاق\n5. نسبة التوزيع الدقيقة"
+    recent_compact = pl._compact_history_content(long_reply, is_recent=True)
+    older_compact = pl._compact_history_content(long_reply, is_recent=False)
+    assert "5. نسبة التوزيع الدقيقة" in recent_compact
+    assert len(recent_compact) <= 2860
+    assert len(older_compact) <= 710
+
+    # 4. Vision supports text_screenshot & preserves extracted_text without rejecting it as non-portfolio
+    validated_v = vis.validate_vision_output({
+        "image_type": "text_screenshot",
+        "symbols": [],
+        "technical_observations": [],
+        "extracted_text": "1. تاريخ الاستحقاق\n2. تاريخ التعديل Ex-Date",
+        "user_relevant_summary": "لقطة شاشة تحتوي على الأسئلة الخمسة المقترحة",
+        "confidence": 0.95,
+    })
+    assert validated_v["image_type"] == "text_screenshot"
+    assert "تاريخ الاستحقاق" in validated_v["extracted_text"]
+    v_prompt = vis.format_vision_context_for_prompt(validated_v)
+    assert "تاريخ الاستحقاق" in v_prompt
+    assert "دون رفض الصورة" in v_prompt
+    assert "تاريخ الاستحقاق" in vis.safe_image_evidence_reply(validated_v)
+
+    # 5. Single-stock tables_data is NOT polluted by unrelated accumulation_stocks rows
+    tables_data, recs_data, visuals_data, acc_fallback = [], [], {}, []
+    pl._collect_structured_outputs(
+        {"stocks": [{"symbol": "FWRY", "close": 17.3}]},
+        tables_data, recs_data, visuals_data, acc_fallback_rows=acc_fallback,
+    )
+    pl._collect_structured_outputs(
+        {"accumulation_stocks": [{"symbol": "INEG", "close": 0.618}, {"symbol": "COSG", "close": 1.41}]},
+        tables_data, recs_data, visuals_data, acc_fallback_rows=acc_fallback,
+    )
+    assert [s["symbol"] for s in tables_data] == ["FWRY"]
+    assert len(acc_fallback) == 2
+    assert len(visuals_data.get("accumulation") or []) == 2
+
+    # 6. Prompts no longer contradict manage_automations and enforce corporate-action & tool-name rules
+    assert "manage_automations" in pr.ARTORO_PLATFORM_CONTEXT
+    assert "لا أستطيع إنشاء أتمتة" in pr.ARTORO_PLATFORM_CONTEXT
+    assert "مكسب صافي" in pr.AGENTIC_SYSTEM_PROMPT
+    assert "get_accumulation_stocks" in pr.AGENTIC_SYSTEM_PROMPT
+
+    # 7. Scheduled automation worker fetches all 15 portfolio symbols + intraday r_vol label + disclosures
+    captured_eps = []
+    portfolio_15 = [{"symbol": f"SYM{i:02d}", "quantity": 100, "entry_price": 10.0} for i in range(1, 16)]
+
+    def _fake_worker_supa(ep, **_kw):
+        captured_eps.append(ep)
+        if ep.startswith("stocks?"):
+            return [{"symbol": f"SYM{i:02d}", "name": f"S{i}", "name_ar": f"سهم {i}"} for i in range(1, 16)]
+        if ep.startswith("positions?"):
+            return portfolio_15
+        if ep.startswith("stock_technical_indicators?"):
+            return [
+                {"symbol": f"SYM{i:02d}", "date": "2026-11-19", "close": 10.5, "change_pct": 1.0, "rsi_14": 55, "ema_20": 10.2, "r_vol": 0.02}
+                for i in range(1, 16)
+            ]
+        if ep.startswith("egx_disclosures?"):
+            return [{"symbol": "SYM01", "disclosure_date": "2026-11-19", "title": "توزيع سهم مجاني لكل سهم", "sentiment": "bullish"}]
+        return []
+
+    with patch.object(auto_w, "_supabase_request", side_effect=_fake_worker_supa):
+        brief = auto_w._fetch_market_indicators_brief(
+            [],
+            prompt="حلل أسهم محفظتي الـ15 وراجع الإفصاحات وتوزيع الأسهم المجانية",
+            task_name="تقرير المحفظة",
+            user_id="user-15",
+            in_trading_hours=True,
+        )
+    assert "#SYM15" in brief
+    assert "تراكمي لحظي أثناء الجلسة" in brief
+    assert "توزيع سهم مجاني لكل سهم" in brief
+    ti_ep = next(e for e in captured_eps if e.startswith("stock_technical_indicators?"))
+    assert "SYM15" in ti_ep
+    assert "order=date.desc" in ti_ep
+    disc_ep = next(e for e in captured_eps if e.startswith("egx_disclosures?"))
+    assert "SYM15" in disc_ep

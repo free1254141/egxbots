@@ -387,6 +387,60 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "optimize_portfolio",
+            "description": (
+                "محرك بحوث العمليات (Operations Research) لتوزيع رأس المال أو إعادة توازن المحفظة رياضياً تحت قيود المخاطرة والقطاعات "
+                "(يدعم جميع الأسواق: مصر EGX، السعودية TASI، الإمارات DFM/ADX، قطر QSE). "
+                "يحسب مصفوفة التغاير والارتباط التاريخية (Covariance/Correlation) من الأسعار الفعلية، ويستخرج الأوزان المثلى وعدد الأسهم الصحيح (Integer Shares) "
+                "وتقدير عمولات التداول ومؤشرات التذبذب والتنويع قبل وبعد التحسين. "
+                "استدعِ هذه الأداة عندما يطلب المستخدم توزيع مبلغ مالي على قائمة أسهم، أو إعادة توازن محفظته بطريقة علمية/بأقل مخاطرة/بتوزيع متكافئ للمخاطرة، "
+                "أو فرض حد أقصى لوزن السهم أو القطاع."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbols": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "قائمة أكواد أو أسماء الأسهم المطلوب توزيع رأس المال عليها (مثلاً ['COMI', 'FWRY', 'ABUK', 'TMGH'] أو ['2222', '1120', '2010']). اتركها فارغة إذا كان use_my_portfolio=true.",
+                    },
+                    "capital": {
+                        "type": "number",
+                        "description": "إجمالي رأس المال المراد توزيعه بعملة السوق (مثلاً 100000 ج.م أو 50000 ر.س). اختياري عند استخدام use_my_portfolio=true (يُحسب تلقائياً من قيمة المحفظة + الكاش + أي سيولة إضافية).",
+                    },
+                    "use_my_portfolio": {
+                        "type": "boolean",
+                        "description": "اضبطه على true لإعادة توازن مراكز محفظة المستخدم المحفوظة حالياً (يمكن دمجه مع symbols لإضافة أسهم جديدة مع المحفظة الحالية).",
+                    },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["balanced", "min_risk", "risk_parity", "max_diversification"],
+                        "description": "هدف التحسين الرياضي: balanced (متوازن عائد ومخاطرة - افتراضي)، min_risk (أقل مخاطرة وتذبذب GMV)، risk_parity (توزيع متكافئ للمخاطرة)، max_diversification (أقصى تنويع).",
+                    },
+                    "max_weight_pct": {
+                        "type": "number",
+                        "description": "الحد الأقصى لوزن السهم الواحد كنسبة مئوية (الافتراضي 35، بين 10 و 100).",
+                    },
+                    "max_sector_pct": {
+                        "type": "number",
+                        "description": "الحد الأقصى لوزن القطاع الواحد كنسبة مئوية (الافتراضي 45، بين 15 و 100).",
+                    },
+                    "min_cash_pct": {
+                        "type": "number",
+                        "description": "نسبة السيولة النقدية المحتفظ بها ككاش أمان % (الافتراضي 0، بين 0 و 80).",
+                    },
+                    "sharia_only": {
+                        "type": "boolean",
+                        "description": "اضبطه على true لاستبعاد الأسهم غير المتوافقة مع الشريعة قبل التوزيع الرياضي.",
+                    },
+                    "market": dict(_MARKET_PARAM_SCHEMA),
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "calculate_position",
             "description": "حساب مركز مؤقت دون حفظ في المحفظة (حساب القيمة السوقية والتكلفة والأرباح والخسائر بالجنيه المصري أو الريال السعودي حسب السهم).",
             "parameters": {

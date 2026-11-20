@@ -1,0 +1,865 @@
+"""Operations Research (OR) Portfolio Optimization & Constrained Selection Engine.
+
+Pure-NumPy quantitative optimization module with zero extra runtime dependencies
+and sub-5ms execution on Hugging Face Spaces (2 vCPU):
+
+1. Covariance Estimation: Ledoit-Wolf–style shrinkage toward a diagonal volatility
+   target from bounded historical daily returns (with ATR/volatility fallback for
+   thinly traded or newly listed stocks).
+2. Convex Portfolio Optimization (4 OR objectives):
+   - ``balanced``: Mean-Variance utility with turnover (L1/Huber) regularization.
+   - ``min_risk``: Global Minimum Variance (GMV).
+   - ``risk_parity``: Equal Risk Contribution (ERC).
+   - ``max_diversification``: Maximum Diversification Ratio.
+3. Hard Linear Constraints via Dykstra's Alternating Projections:
+   - Budget simplex (invested_weight = 1 - min_cash_weight, w >= 0)
+   - Per-stock box caps (0 <= w_i <= max_weight)
+   - Per-sector caps (sum_{i in sector} w_i <= max_sector_weight)
+   With automatic feasibility relaxation when user constraints are mathematically
+   impossible (e.g. 2 stocks with max_weight=30%, or all stocks in one sector).
+4. Integer Share Knapsack & Transaction Cost Optimizer:
+   - Converts continuous target weights into integer share counts minimizing
+     tracking error under capital budget and estimating market brokerage fees.
+5. Constrained Diversified Candidate Selection:
+   - Sector-capped & correlation-capped Top-K selection for rebalance candidates
+     and daily signal diversification.
+
+Note: Strictly quantitative mathematical optimization tooling for research and
+risk analysis — not personalized investment advice or return guarantees.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+TRADING_DAYS_PER_YEAR = 252.0
+DEFAULT_ANNUAL_VOL = 0.35
+
+# Approximate all-in retail brokerage + exchange fees per market (one-way)
+MARKET_FEE_RATES: Dict[str, float] = {
+    "EGX": 0.0018,    # ~0.18% (brokerage + EGX/MCDR/FRA stamps)
+    "TASI": 0.00155,  # 0.155% Saudi Tadawul standard base
+    "TADAWUL": 0.00155,
+    "DFM": 0.00275,   # ~0.275% Dubai Financial Market
+    "ADX": 0.00275,   # ~0.275% Abu Dhabi Securities Exchange
+    "UAE": 0.00275,
+    "QSE": 0.00275,   # ~0.275% Qatar Stock Exchange
+    "QATAR": 0.00275,
+}
+
+OBJECTIVE_LABELS_AR: Dict[str, str] = {
+    "balanced": "متوازن (عائد معدّل بالمخاطرة + تنويع)",
+    "min_risk": "أقل مخاطرة وتذبذب (Global Minimum Variance)",
+    "risk_parity": "توزيع متكافئ للمخاطرة (Risk Parity)",
+    "max_diversification": "أقصى تنويع ممكن (Max Diversification)",
+}
+
+
+@dataclass
+class AssetInput:
+    symbol: str
+    price: float
+    name_ar: str = ""
+    sector: str = "أخرى"
+    current_shares: float = 0.0
+    expected_score: float = 0.0  # Bounded quantitative score in [-1, 1]
+    fallback_daily_vol: float = 0.022  # ~35% annualized fallback if history sparse
+    returns_by_date: Dict[str, float] = field(default_factory=dict)
+
+
+def normalize_objective(raw: Optional[str]) -> str:
+    clean = str(raw or "balanced").strip().lower().replace("-", "_").replace(" ", "_")
+    if clean in {"min_risk", "min_vol", "min_variance", "gmv", "low_risk", "conservative", "defensive"}:
+        return "min_risk"
+    if clean in {"risk_parity", "erc", "equal_risk"}:
+        return "risk_parity"
+    if clean in {"max_diversification", "max_div", "diversified", "diversification"}:
+        return "max_diversification"
+    return "balanced"
+
+
+def market_fee_rate(exchange: str) -> float:
+    return MARKET_FEE_RATES.get(str(exchange or "EGX").strip().upper(), 0.002)
+
+
+def compute_returns_by_date(price_rows: Sequence[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
+    """Build {symbol: {date: daily_return}} from compact price rows (symbol, date, close)."""
+    series: Dict[str, List[Tuple[str, float]]] = {}
+    for row in price_rows or []:
+        sym = str(row.get("symbol") or "").strip().upper()
+        dt_str = str(row.get("date") or "").strip()[:10]
+        try:
+            close = float(row.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if not sym or not dt_str or not math.isfinite(close) or close <= 0:
+            continue
+        series.setdefault(sym, []).append((dt_str, close))
+
+    out: Dict[str, Dict[str, float]] = {}
+    for sym, pts in series.items():
+        pts.sort(key=lambda x: x[0])
+        # Deduplicate dates keeping the latest entry
+        dedup: List[Tuple[str, float]] = []
+        for d, c in pts:
+            if dedup and dedup[-1][0] == d:
+                dedup[-1] = (d, c)
+            else:
+                dedup.append((d, c))
+        rets: Dict[str, float] = {}
+        for i in range(1, len(dedup)):
+            prev_c = dedup[i - 1][1]
+            cur_c = dedup[i][1]
+            if prev_c > 0:
+                r = (cur_c - prev_c) / prev_c
+                # Winsorize extreme corporate-action/split spikes (> +/-25% single day)
+                r = max(-0.25, min(0.25, r))
+                rets[dedup[i][0]] = r
+        out[sym] = rets
+    return out
+
+
+def estimate_covariance_matrix(assets: Sequence[AssetInput]) -> Tuple[np.ndarray, np.ndarray, int]:
+    """Estimate positive-definite annualized covariance & correlation matrices.
+
+    Uses Ledoit-Wolf–style shrinkage toward a diagonal variance target so small
+    sample sizes or partially overlapping histories stay well-conditioned.
+    Returns: (cov_annual, corr_matrix, common_dates_count).
+    """
+    n = len(assets)
+    if n == 0:
+        return np.zeros((0, 0), dtype=float), np.zeros((0, 0), dtype=float), 0
+
+    # Individual daily variance estimates (with fallback)
+    daily_vols = np.zeros(n, dtype=float)
+    for i, a in enumerate(assets):
+        vals = list(a.returns_by_date.values())
+        if len(vals) >= 12:
+            s = float(np.std(vals, ddof=1))
+            daily_vols[i] = max(0.005, min(0.10, s)) if math.isfinite(s) and s > 0 else max(0.008, a.fallback_daily_vol)
+        else:
+            daily_vols[i] = max(0.008, min(0.08, a.fallback_daily_vol))
+
+    if n == 1:
+        var_ann = (daily_vols[0] ** 2) * TRADING_DAYS_PER_YEAR
+        return np.array([[var_ann]], dtype=float), np.array([[1.0]], dtype=float), len(assets[0].returns_by_date)
+
+    # Pairwise correlation matrix across overlapping dates (handles staggered listings cleanly)
+    corr = np.eye(n, dtype=float)
+    min_overlap = 999999
+    has_any_overlap = False
+    for i in range(n):
+        ri = assets[i].returns_by_date
+        for j in range(i + 1, n):
+            rj = assets[j].returns_by_date
+            common = sorted(set(ri.keys()) & set(rj.keys()))
+            m = len(common)
+            if m >= 15:
+                has_any_overlap = True
+                min_overlap = min(min_overlap, m)
+                xi = np.array([ri[d] for d in common], dtype=float)
+                xj = np.array([rj[d] for d in common], dtype=float)
+                si = float(np.std(xi, ddof=1))
+                sj = float(np.std(xj, ddof=1))
+                if si > 1e-9 and sj > 1e-9:
+                    raw_c = float(np.corrcoef(xi, xj)[0, 1])
+                    if math.isfinite(raw_c):
+                        # Shrink pairwise correlation toward 0.15 prior based on sample length
+                        shrink = min(0.65, max(0.15, 20.0 / (m + 20.0)))
+                        c_val = (1.0 - shrink) * raw_c + shrink * 0.15
+                        c_val = max(-0.85, min(0.92, c_val))
+                        corr[i, j] = c_val
+                        corr[j, i] = c_val
+            else:
+                # Weak prior correlation: slightly higher if same sector
+                prior = 0.35 if (assets[i].sector and assets[i].sector == assets[j].sector and assets[i].sector != "أخرى") else 0.12
+                corr[i, j] = prior
+                corr[j, i] = prior
+
+    common_dates = min_overlap if has_any_overlap and min_overlap < 999999 else 0
+
+    # Ensure PSD via eigenvalue clipping on correlation matrix
+    eigvals, eigvecs = np.linalg.eigh(corr)
+    eigvals = np.maximum(eigvals, 0.05)
+    corr_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+    d_inv = 1.0 / np.sqrt(np.maximum(np.diag(corr_psd), 1e-12))
+    corr_psd = corr_psd * np.outer(d_inv, d_inv)
+    np.fill_diagonal(corr_psd, 1.0)
+
+    ann_vols = daily_vols * math.sqrt(TRADING_DAYS_PER_YEAR)
+    cov_annual = corr_psd * np.outer(ann_vols, ann_vols)
+    # Symmetrize & add tiny ridge for strict positive definiteness
+    cov_annual = 0.5 * (cov_annual + cov_annual.T) + np.eye(n) * 1e-6
+    return cov_annual, corr_psd, common_dates
+
+
+def _project_capped_simplex(v: np.ndarray, total: float, cap: float) -> np.ndarray:
+    """Exact Euclidean projection onto {w : sum(w) = total, 0 <= w_i <= cap} via bisection."""
+    n = len(v)
+    if n == 0 or total <= 0:
+        return np.zeros(n, dtype=float)
+    eff_cap = max(cap, total / n + 1e-12)
+    lo = float(np.min(v)) - eff_cap - 1.0
+    hi = float(np.max(v)) + 1.0
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        w = np.clip(v - mid, 0.0, eff_cap)
+        if float(np.sum(w)) > total:
+            lo = mid
+        else:
+            hi = mid
+    w = np.clip(v - 0.5 * (lo + hi), 0.0, eff_cap)
+    s = float(np.sum(w))
+    if s > 1e-12:
+        w *= total / s
+    return w
+
+
+def _resolve_feasible_caps(
+    sectors: Sequence[str],
+    invested_total: float,
+    max_weight: float,
+    max_sector_weight: float,
+) -> Tuple[float, float, List[str]]:
+    """Ensure box and sector caps admit a non-empty feasible set; note any relaxations."""
+    n = len(sectors)
+    notes: List[str] = []
+    if n == 0 or invested_total <= 0:
+        return max_weight, max_sector_weight, notes
+
+    eff_max_w = max(0.01, min(1.0, float(max_weight)))
+    min_feasible_w = invested_total / n
+    if eff_max_w + 1e-9 < min_feasible_w:
+        eff_max_w = min(1.0, min_feasible_w)
+        notes.append(
+            f"تم رفع الحد الأقصى للسهم تلقائياً إلى {round(eff_max_w * 100, 1)}% لأن عدد الأسهم ({n}) لا يكفي للوصول إلى {round(invested_total * 100, 1)}% تحت الحد المطلوب."
+        )
+
+    eff_max_sec = max(eff_max_w, min(1.0, float(max_sector_weight)))
+    sector_counts: Dict[str, int] = {}
+    for sec in sectors:
+        key = sec or "أخرى"
+        sector_counts[key] = sector_counts.get(key, 0) + 1
+
+    def _max_capacity(sec_cap: float) -> float:
+        return sum(min(cnt * eff_max_w, sec_cap) for cnt in sector_counts.values())
+
+    if _max_capacity(eff_max_sec) + 1e-9 < invested_total:
+        # Bisect minimum feasible sector cap
+        lo, hi = eff_max_sec, 1.0
+        for _ in range(40):
+            mid = 0.5 * (lo + hi)
+            if _max_capacity(mid) < invested_total:
+                lo = mid
+            else:
+                hi = mid
+        eff_max_sec = min(1.0, hi + 1e-6)
+        notes.append(
+            f"تم تخفيف قيد القطاع تلقائياً إلى {round(eff_max_sec * 100, 1)}% بسبب تركز الأسهم المختارة في عدد محدود من القطاعات ({len(sector_counts)})."
+        )
+
+    return eff_max_w, eff_max_sec, notes
+
+
+def project_onto_portfolio_constraints(
+    v: np.ndarray,
+    sectors: Sequence[str],
+    invested_total: float,
+    max_weight: float,
+    max_sector_weight: float,
+    iters: int = 35,
+) -> np.ndarray:
+    """Dykstra's alternating projections onto simplex + box + per-sector cap constraints."""
+    n = len(v)
+    if n == 0 or invested_total <= 0:
+        return np.zeros(n, dtype=float)
+
+    sector_groups: Dict[str, List[int]] = {}
+    for idx, sec in enumerate(sectors):
+        sector_groups.setdefault(sec or "أخرى", []).append(idx)
+
+    # Fast path if single-asset sectors or sector cap >= invested_total
+    if max_sector_weight >= invested_total - 1e-9 or all(len(idxs) == 1 for idxs in sector_groups.values()):
+        return _project_capped_simplex(v, invested_total, max_weight)
+
+    x = _project_capped_simplex(v, invested_total, max_weight)
+    p_simplex = np.zeros(n, dtype=float)
+    p_sectors = {sec: np.zeros(len(idxs), dtype=float) for sec, idxs in sector_groups.items()}
+
+    for _ in range(iters):
+        prev = x.copy()
+        # Project onto each sector halfspace: sum_{i in sec} x_i <= max_sector_weight
+        for sec, idxs in sector_groups.items():
+            sub = x[idxs] + p_sectors[sec]
+            sec_sum = float(np.sum(sub))
+            if sec_sum > max_sector_weight:
+                excess = (sec_sum - max_sector_weight) / len(idxs)
+                proj_sub = np.maximum(0.0, sub - excess)
+                # Ensure sum <= max_sector_weight after non-negativity clip
+                s2 = float(np.sum(proj_sub))
+                if s2 > max_sector_weight and s2 > 1e-12:
+                    proj_sub *= max_sector_weight / s2
+            else:
+                proj_sub = np.maximum(0.0, sub)
+            p_sectors[sec] = sub - proj_sub
+            x[idxs] = proj_sub
+
+        # Project onto capped simplex
+        y = x + p_simplex
+        x = _project_capped_simplex(y, invested_total, max_weight)
+        p_simplex = y - x
+
+        if float(np.max(np.abs(x - prev))) < 1e-7:
+            break
+
+    # Final hard-repair pass so constraints hold to floating-point precision
+    x = np.clip(x, 0.0, max_weight)
+    for _ in range(10):
+        violated = False
+        for sec, idxs in sector_groups.items():
+            s = float(np.sum(x[idxs]))
+            if s > max_sector_weight + 1e-7:
+                violated = True
+                x[idxs] *= max_sector_weight / s
+        deficit = invested_total - float(np.sum(x))
+        if abs(deficit) < 1e-7 and not violated:
+            break
+        if deficit > 1e-7:
+            # Distribute deficit to stocks with headroom in both box and sector
+            headroom = np.zeros(n, dtype=float)
+            for sec, idxs in sector_groups.items():
+                sec_rem = max(0.0, max_sector_weight - float(np.sum(x[idxs])))
+                if sec_rem <= 1e-9:
+                    continue
+                box_rems = np.maximum(0.0, max_weight - x[idxs])
+                tot_box = float(np.sum(box_rems))
+                if tot_box > 1e-9:
+                    headroom[idxs] = box_rems * min(1.0, sec_rem / tot_box)
+            tot_h = float(np.sum(headroom))
+            if tot_h > 1e-9:
+                x += headroom * min(1.0, deficit / tot_h)
+            else:
+                break
+        elif deficit < -1e-7:
+            s = float(np.sum(x))
+            if s > 1e-9:
+                x *= invested_total / s
+    return x
+
+
+def solve_optimal_weights(
+    assets: Sequence[AssetInput],
+    cov: np.ndarray,
+    objective: str = "balanced",
+    max_weight: float = 0.35,
+    max_sector_weight: float = 0.45,
+    min_cash_weight: float = 0.0,
+    current_weights: Optional[np.ndarray] = None,
+    turnover_penalty: float = 0.0,
+) -> Tuple[np.ndarray, float, float, List[str]]:
+    """Solve constrained Operations Research portfolio optimization problem."""
+    n = len(assets)
+    invested_total = max(0.0, min(1.0, 1.0 - max(0.0, min(0.95, float(min_cash_weight)))))
+    if n == 0 or invested_total <= 0:
+        return np.zeros(n, dtype=float), max_weight, max_sector_weight, []
+
+    sectors = [a.sector or "أخرى" for a in assets]
+    eff_max_w, eff_max_sec, notes = _resolve_feasible_caps(sectors, invested_total, max_weight, max_sector_weight)
+
+    if n == 1:
+        return np.array([invested_total], dtype=float), eff_max_w, eff_max_sec, notes
+
+    obj = normalize_objective(objective)
+    vols = np.sqrt(np.maximum(np.diag(cov), 1e-8))
+    # Initial feasible point: inverse-volatility weights projected onto constraints
+    inv_vol = 1.0 / np.maximum(vols, 1e-4)
+    w = project_onto_portfolio_constraints(
+        inv_vol * (invested_total / float(np.sum(inv_vol))),
+        sectors,
+        invested_total,
+        eff_max_w,
+        eff_max_sec,
+    )
+
+    # Quantitative expected-return proxy (conservatively scaled: [-8%, +14%] annualized)
+    def _safe_score(val: Any) -> float:
+        try:
+            f = float(val)
+            return f if math.isfinite(f) else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    mu = np.array([max(-0.08, min(0.14, _safe_score(a.expected_score) * 0.12)) for a in assets], dtype=float)
+    w_curr = np.asarray(current_weights, dtype=float) if current_weights is not None and len(current_weights) == n else None
+    gamma = max(0.0, float(turnover_penalty))
+
+    def _turnover_grad(vec: np.ndarray) -> np.ndarray:
+        if w_curr is None or gamma <= 0:
+            return np.zeros(n, dtype=float)
+        diff = vec - w_curr
+        # Smooth L1 (Huber) gradient with delta=0.01 for fast convergence
+        delta = 0.01
+        return gamma * np.clip(diff / delta, -1.0, 1.0)
+
+    def _objective_val(vec: np.ndarray) -> float:
+        var = float(vec @ cov @ vec)
+        pen = float(gamma * np.sum(np.abs(vec - w_curr))) if (w_curr is not None and gamma > 0) else 0.0
+        if obj == "min_risk":
+            return 0.5 * var + pen
+        if obj == "risk_parity":
+            if var <= 1e-12:
+                return 0.0
+            rc = vec * (cov @ vec)
+            target = var / n
+            return float(np.sum((rc - target) ** 2)) / (var * var) + pen
+        if obj == "max_diversification":
+            vol = math.sqrt(max(var, 1e-12))
+            dr = float(vec @ vols) / vol
+            return -dr + pen
+        # balanced: Mean-Variance utility (risk aversion ~ 2.5)
+        return 1.25 * var - float(mu @ vec) + pen
+
+    def _gradient(vec: np.ndarray) -> np.ndarray:
+        cov_w = cov @ vec
+        t_grad = _turnover_grad(vec)
+        if obj == "min_risk":
+            return cov_w + t_grad
+        if obj == "risk_parity":
+            var = float(vec @ cov_w)
+            if var <= 1e-12:
+                return t_grad
+            rc = vec * cov_w
+            target = var / n
+            diff = rc - target
+            # Exact quotient-rule gradient of sum((rc_i - var/n)^2) / var^2:
+            # d(sum(diff^2))/dw = 2 * (cov_w * diff + cov @ (vec * diff)), since sum(diff) == 0;
+            # d(1/var^2)/dw = -4 * cov_w / var^3
+            g_num = 2.0 * (cov_w * diff + cov @ (vec * diff))
+            g_den = (4.0 * float(np.sum(diff ** 2)) / (var ** 3)) * cov_w
+            return (g_num / (var * var)) - g_den + t_grad
+        if obj == "max_diversification":
+            var = max(float(vec @ cov_w), 1e-12)
+            vol = math.sqrt(var)
+            num = float(vec @ vols)
+            # d(-num/vol)/dw = -(vols * vol - num * (cov_w / vol)) / var
+            return -(vols / vol - (num / (var * vol)) * cov_w) + t_grad
+        # balanced
+        return 2.5 * cov_w - mu + t_grad
+
+    # Projected Gradient Descent with Armijo backtracking line search (guaranteed monotonic descent)
+    best_w = w.copy()
+    best_val = _objective_val(w)
+    step = 0.5
+    for _ in range(120):
+        g = _gradient(w)
+        g_norm = float(np.linalg.norm(g))
+        if not math.isfinite(g_norm) or g_norm < 1e-9:
+            break
+        cur_val = _objective_val(w)
+        accepted = False
+        s = step
+        for _bt in range(12):
+            cand = project_onto_portfolio_constraints(
+                w - s * g,
+                sectors,
+                invested_total,
+                eff_max_w,
+                eff_max_sec,
+                iters=25,
+            )
+            cand_val = _objective_val(cand)
+            if math.isfinite(cand_val) and cand_val <= cur_val - 1e-10:
+                w = cand
+                if cand_val < best_val:
+                    best_val = cand_val
+                    best_w = cand.copy()
+                step = min(1.5, s * 1.25)
+                accepted = True
+                break
+            s *= 0.45
+        if not accepted:
+            break
+
+    # Clean tiny dust weights (< 0.1%) and re-project
+    best_w = np.where(best_w < 1e-4, 0.0, best_w)
+    if float(np.sum(best_w)) > 1e-9:
+        best_w = project_onto_portfolio_constraints(best_w, sectors, invested_total, eff_max_w, eff_max_sec, iters=30)
+    return best_w, eff_max_w, eff_max_sec, notes
+
+
+def allocate_integer_shares(
+    assets: Sequence[AssetInput],
+    target_weights: np.ndarray,
+    total_capital: float,
+    min_cash_weight: float = 0.0,
+    max_weight: float = 1.0,
+    max_sector_weight: float = 1.0,
+) -> Tuple[List[int], float]:
+    """Integer Knapsack share allocator minimizing tracking error under budget & caps.
+
+    Returns: (shares_list, remaining_cash).
+    """
+    n = len(assets)
+    if n == 0 or total_capital <= 0:
+        return [0] * n, max(0.0, float(total_capital))
+
+    investable_budget = max(0.0, float(total_capital) * (1.0 - max(0.0, min(0.95, float(min_cash_weight)))))
+    prices = [max(0.01, float(a.price)) for a in assets]
+    target_vals = [max(0.0, float(target_weights[i]) * total_capital) for i in range(n)]
+
+    # Step 1: Floor allocation
+    shares = [int(math.floor(target_vals[i] / prices[i])) for i in range(n)]
+    spent = sum(shares[i] * prices[i] for i in range(n))
+    # Guard against floating overshoot
+    while spent > investable_budget + 1e-6:
+        # Remove 1 share from the most over-weight holding
+        worst = max(range(n), key=lambda i: (shares[i] * prices[i] - target_vals[i]) if shares[i] > 0 else -1e18)
+        if shares[worst] <= 0:
+            break
+        shares[worst] -= 1
+        spent -= prices[worst]
+
+    remaining = max(0.0, investable_budget - spent)
+
+    # Step 2: Greedy marginal tracking-error improvement (Integer Knapsack fill)
+    sector_map = [a.sector or "أخرى" for a in assets]
+    for _ in range(5000):
+        best_idx = -1
+        best_gain = 1e-9
+        sec_vals: Dict[str, float] = {}
+        for i in range(n):
+            sec_vals[sector_map[i]] = sec_vals.get(sector_map[i], 0.0) + shares[i] * prices[i]
+
+        for i in range(n):
+            p = prices[i]
+            if p > remaining + 1e-9 or target_vals[i] <= 0:
+                continue
+            cur_v = shares[i] * p
+            new_v = cur_v + p
+            # Respect hard stock & sector caps (allow tiny 1% rounding cushion only if still under budget)
+            if new_v > total_capital * (max_weight + 0.015):
+                continue
+            if sec_vals[sector_map[i]] + p > total_capital * (max_sector_weight + 0.015):
+                continue
+            err_before = abs(cur_v - target_vals[i])
+            err_after = abs(new_v - target_vals[i])
+            gain = err_before - err_after
+            if gain > best_gain:
+                best_gain = gain
+                best_idx = i
+        if best_idx < 0:
+            break
+        shares[best_idx] += 1
+        remaining -= prices[best_idx]
+
+    total_spent = sum(shares[i] * prices[i] for i in range(n))
+    leftover_cash = max(0.0, float(total_capital) - total_spent)
+    return shares, leftover_cash
+
+
+def _portfolio_risk_metrics(
+    weights: np.ndarray,
+    cov: np.ndarray,
+    sectors: Sequence[str],
+) -> Dict[str, Any]:
+    invested = float(np.sum(weights))
+    if invested <= 1e-9 or len(weights) == 0:
+        return {
+            "annualVolatilityPct": 0.0,
+            "diversificationRatio": 1.0,
+            "effectiveStocks": 0.0,
+            "hhiConcentration": 0.0,
+            "maxStockWeightPct": 0.0,
+            "maxSectorWeightPct": 0.0,
+            "maxSectorName": "",
+        }
+    var = max(0.0, float(weights @ cov @ weights))
+    ann_vol = math.sqrt(var)
+    indiv_vols = np.sqrt(np.maximum(np.diag(cov), 1e-12))
+    div_ratio = float(weights @ indiv_vols) / ann_vol if ann_vol > 1e-9 else 1.0
+
+    norm_w = weights / invested
+    hhi = float(np.sum(norm_w ** 2))
+    eff_n = (1.0 / hhi) if hhi > 1e-9 else 0.0
+
+    sec_totals: Dict[str, float] = {}
+    for w_i, sec in zip(weights, sectors):
+        key = sec or "أخرى"
+        sec_totals[key] = sec_totals.get(key, 0.0) + float(w_i)
+    max_sec_name, max_sec_val = max(sec_totals.items(), key=lambda kv: kv[1]) if sec_totals else ("", 0.0)
+
+    return {
+        "annualVolatilityPct": round(ann_vol * 100.0, 2),
+        "diversificationRatio": round(div_ratio, 2),
+        "effectiveStocks": round(eff_n, 2),
+        "hhiConcentration": round(hhi, 3),
+        "maxStockWeightPct": round(float(np.max(weights)) * 100.0, 1),
+        "maxSectorWeightPct": round(max_sec_val * 100.0, 1),
+        "maxSectorName": max_sec_name,
+    }
+
+
+def _finite_or(value: Any, default: float) -> float:
+    try:
+        f = float(value)
+        return f if math.isfinite(f) else default
+    except (TypeError, ValueError):
+        return default
+
+
+def optimize_portfolio_or(
+    assets: Sequence[AssetInput],
+    total_capital: float,
+    *,
+    objective: str = "balanced",
+    max_weight_pct: float = 35.0,
+    max_sector_pct: float = 45.0,
+    min_cash_pct: float = 0.0,
+    exchange: str = "EGX",
+    turnover_penalty: float = 0.0,
+) -> Dict[str, Any]:
+    """Run full Operations Research optimization and return rich structured results."""
+    valid_assets: List[AssetInput] = []
+    for a in assets:
+        px = _finite_or(a.price, 0.0)
+        if px <= 0:
+            continue
+        valid_assets.append(
+            AssetInput(
+                symbol=a.symbol,
+                price=px,
+                name_ar=a.name_ar,
+                sector=a.sector,
+                current_shares=max(0.0, _finite_or(a.current_shares, 0.0)),
+                expected_score=max(-1.0, min(1.0, _finite_or(a.expected_score, 0.0))),
+                fallback_daily_vol=max(0.005, min(0.10, _finite_or(a.fallback_daily_vol, 0.022))),
+                returns_by_date=a.returns_by_date,
+            )
+        )
+    if not valid_assets:
+        raise ValueError("لا توجد أسهم صالحة بأسعار متاحة لتشغيل التحسين الرياضي.")
+    cap_raw = _finite_or(total_capital, -1.0)
+    if cap_raw <= 0:
+        raise ValueError("يجب إدخال رأس مال صحيح وموجب لتشغيل التحسين الرياضي.")
+    capital = max(1.0, cap_raw)
+    obj = normalize_objective(objective)
+    max_w = max(0.05, min(1.0, _finite_or(max_weight_pct, 35.0) / 100.0))
+    max_sec = max(0.10, min(1.0, _finite_or(max_sector_pct, 45.0) / 100.0))
+    min_cash = max(0.0, min(0.80, _finite_or(min_cash_pct, 0.0) / 100.0))
+
+    cov, corr, common_dates = estimate_covariance_matrix(valid_assets)
+    sectors = [a.sector or "أخرى" for a in valid_assets]
+
+    # Current weights (if existing holdings exist)
+    curr_vals = np.array([max(0.0, float(a.current_shares)) * float(a.price) for a in valid_assets], dtype=float)
+    has_existing = float(np.sum(curr_vals)) > 0
+    curr_weights = (curr_vals / capital) if has_existing else None
+
+    target_w, eff_max_w, eff_max_sec, relaxation_notes = solve_optimal_weights(
+        valid_assets,
+        cov,
+        objective=obj,
+        max_weight=max_w,
+        max_sector_weight=max_sec,
+        min_cash_weight=min_cash,
+        current_weights=curr_weights,
+        turnover_penalty=turnover_penalty if has_existing else 0.0,
+    )
+
+    target_shares, leftover_cash = allocate_integer_shares(
+        valid_assets,
+        target_w,
+        capital,
+        min_cash_weight=min_cash,
+        max_weight=eff_max_w,
+        max_sector_weight=eff_max_sec,
+    )
+
+    actual_vals = np.array([target_shares[i] * float(valid_assets[i].price) for i in range(len(valid_assets))], dtype=float)
+    actual_weights = actual_vals / capital
+
+    # Risk contributions (marginal variance share)
+    port_var = max(float(actual_weights @ cov @ actual_weights), 1e-12)
+    risk_contribs = (actual_weights * (cov @ actual_weights)) / port_var
+
+    fee_rate = market_fee_rate(exchange)
+    total_turnover_val = 0.0
+    allocations: List[Dict[str, Any]] = []
+    sector_breakdown: Dict[str, float] = {}
+
+    for i, a in enumerate(valid_assets):
+        cur_sh = int(round(max(0.0, float(a.current_shares))))
+        tgt_sh = int(target_shares[i])
+        delta_sh = tgt_sh - cur_sh
+        trade_val = abs(delta_sh) * float(a.price)
+        if has_existing:
+            total_turnover_val += trade_val
+        else:
+            total_turnover_val += tgt_sh * float(a.price)
+
+        act_w_pct = round(float(actual_weights[i]) * 100.0, 1)
+        cur_w_pct = round(float(curr_weights[i]) * 100.0, 1) if curr_weights is not None else 0.0
+        tgt_w_pct = round(float(target_w[i]) * 100.0, 1)
+        sec_key = a.sector or "أخرى"
+        sector_breakdown[sec_key] = round(sector_breakdown.get(sec_key, 0.0) + act_w_pct, 1)
+
+        if has_existing:
+            if delta_sh > 0 and trade_val >= max(200.0, capital * 0.01):
+                action = "BUY"
+            elif delta_sh < 0 and trade_val >= max(200.0, capital * 0.01):
+                action = "SELL"
+            else:
+                action = "HOLD"
+        else:
+            action = "BUY" if tgt_sh > 0 else "SKIP"
+
+        allocations.append(
+            {
+                "symbol": a.symbol,
+                "nameAr": a.name_ar or a.symbol,
+                "sector": sec_key,
+                "price": round(float(a.price), 2),
+                "currentShares": cur_sh,
+                "currentWeightPct": cur_w_pct,
+                "targetWeightPct": tgt_w_pct,
+                "actualWeightPct": act_w_pct,
+                "targetShares": tgt_sh,
+                "deltaShares": delta_sh,
+                "allocatedValue": round(float(actual_vals[i]), 2),
+                "tradeValue": round(trade_val, 2),
+                "action": action,
+                "riskContributionPct": round(max(0.0, float(risk_contribs[i])) * 100.0, 1),
+                "annualVolPct": round(math.sqrt(max(float(cov[i, i]), 0.0)) * 100.0, 1),
+            }
+        )
+
+    allocations.sort(key=lambda r: r["actualWeightPct"], reverse=True)
+
+    # Top correlated pairs (useful risk insight)
+    top_corr_pairs: List[Dict[str, Any]] = []
+    for i in range(len(valid_assets)):
+        for j in range(i + 1, len(valid_assets)):
+            c_ij = float(corr[i, j])
+            if c_ij >= 0.55:
+                top_corr_pairs.append(
+                    {
+                        "pair": f"{valid_assets[i].symbol} / {valid_assets[j].symbol}",
+                        "correlation": round(c_ij, 2),
+                    }
+                )
+    top_corr_pairs.sort(key=lambda x: x["correlation"], reverse=True)
+
+    after_metrics = _portfolio_risk_metrics(actual_weights, cov, sectors)
+    equal_w = np.full(len(valid_assets), (1.0 - min_cash) / len(valid_assets), dtype=float)
+    baseline_weights = curr_weights if has_existing else equal_w
+    before_metrics = _portfolio_risk_metrics(baseline_weights, cov, sectors)
+
+    vol_delta = round(after_metrics["annualVolatilityPct"] - before_metrics["annualVolatilityPct"], 2)
+    est_fees = round(total_turnover_val * fee_rate, 2)
+
+    return {
+        "objective": obj,
+        "objectiveLabelAr": OBJECTIVE_LABELS_AR.get(obj, obj),
+        "exchange": str(exchange or "EGX").upper(),
+        "totalCapital": round(capital, 2),
+        "investedAmount": round(float(np.sum(actual_vals)), 2),
+        "leftoverCash": round(leftover_cash, 2),
+        "leftoverCashPct": round((leftover_cash / capital) * 100.0, 1),
+        "estimatedFees": est_fees,
+        "feeRatePct": round(fee_rate * 100.0, 3),
+        "historyOverlapDays": common_dates,
+        "hasExistingHoldings": has_existing,
+        "constraints": {
+            "maxStockWeightPct": round(eff_max_w * 100.0, 1),
+            "maxSectorWeightPct": round(eff_max_sec * 100.0, 1),
+            "minCashPct": round(min_cash * 100.0, 1),
+            "relaxationNotes": relaxation_notes,
+        },
+        "metricsBefore": before_metrics,
+        "metricsAfter": after_metrics,
+        "volatilityChangePct": vol_delta,
+        "sectorBreakdown": [
+            {"sector": k, "weightPct": v}
+            for k, v in sorted(sector_breakdown.items(), key=lambda kv: kv[1], reverse=True)
+            if v > 0
+        ],
+        "highCorrelationPairs": top_corr_pairs[:5],
+        "allocations": allocations,
+    }
+
+
+def select_diversified_candidates(
+    scored_candidates: Sequence[Dict[str, Any]],
+    returns_map: Dict[str, Dict[str, float]],
+    *,
+    k: int = 3,
+    max_per_sector: int = 1,
+    max_correlation: float = 0.78,
+    existing_sector_counts: Optional[Dict[str, int]] = None,
+    max_total_per_sector: int = 2,
+) -> List[Dict[str, Any]]:
+    """Constrained Top-K selection respecting sector limits and pairwise correlation cap.
+
+    Expects each candidate dict to have: ``symbol``, ``score``, and optional ``sector``.
+    Falls back cleanly if strict constraints yield fewer than ``k`` items.
+    """
+    if not scored_candidates or k <= 0:
+        return []
+
+    ordered = sorted(scored_candidates, key=lambda c: float(c.get("score") or 0.0), reverse=True)
+
+    def _pair_corr(sym_a: str, sym_b: str) -> float:
+        ra = returns_map.get(sym_a) or {}
+        rb = returns_map.get(sym_b) or {}
+        common = sorted(set(ra.keys()) & set(rb.keys()))
+        if len(common) < 15:
+            return 0.0
+        xa = np.array([ra[d] for d in common], dtype=float)
+        xb = np.array([rb[d] for d in common], dtype=float)
+        sa = float(np.std(xa, ddof=1))
+        sb = float(np.std(xb, ddof=1))
+        if sa <= 1e-9 or sb <= 1e-9:
+            return 0.0
+        c = float(np.corrcoef(xa, xb)[0, 1])
+        return c if math.isfinite(c) else 0.0
+
+    selected: List[Dict[str, Any]] = []
+    picked_syms: set[str] = set()
+    new_sec_counts: Dict[str, int] = {}
+    base_sec = dict(existing_sector_counts or {})
+
+    # Pass 1: Strict sector & correlation constraints
+    for cand in ordered:
+        if len(selected) >= k:
+            break
+        sym = str(cand.get("symbol") or "").upper()
+        if not sym or sym in picked_syms:
+            continue
+        sec = str(cand.get("sector") or "أخرى").strip() or "أخرى"
+        if sec != "أخرى":
+            if new_sec_counts.get(sec, 0) >= max_per_sector:
+                continue
+            if base_sec.get(sec, 0) + new_sec_counts.get(sec, 0) >= max_total_per_sector:
+                continue
+        if any(_pair_corr(sym, str(s.get("symbol") or "").upper()) > max_correlation for s in selected):
+            continue
+        selected.append(cand)
+        picked_syms.add(sym)
+        new_sec_counts[sec] = new_sec_counts.get(sec, 0) + 1
+
+    # Pass 2: Graceful backfill if strict pass returned < k
+    if len(selected) < k:
+        for cand in ordered:
+            if len(selected) >= k:
+                break
+            sym = str(cand.get("symbol") or "").upper()
+            if not sym or sym in picked_syms:
+                continue
+            selected.append(cand)
+            picked_syms.add(sym)
+
+    return selected

@@ -79,8 +79,15 @@ def _fetch_rss_items(query: str, hl: str = "ar", gl: str = "SA", ceid: str = "SA
             continue
         raw_title = title_el.text.strip()
         source = source_el.text.strip() if source_el is not None and source_el.text else "Google News"
-        if " - " in raw_title and source != "Google News":
-            raw_title = raw_title.rsplit(" - ", 1)[0].strip()
+        if source and source != "Google News":
+            suffix = f" - {source}"
+            if raw_title.endswith(suffix):
+                raw_title = raw_title[: -len(suffix)].strip()
+            elif " - " in raw_title:
+                raw_title = raw_title.rsplit(" - ", 1)[0].strip()
+        raw_title = re.sub(r"\s*[-–|]\s*(?:ارقام|أرقام)\s*:.*$", "", raw_title).strip()
+        if "ارقام" in source or "أرقام" in source:
+            source = "أرقام"
 
         pub_date = dt.date.today().isoformat()
         if pub_el is not None and pub_el.text:

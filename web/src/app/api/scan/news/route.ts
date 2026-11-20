@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMarketSupabaseClient, resolveRequestMarket, toNumber, type MarketMode } from "@/lib/supabase/route-data";
+import { getMarketExchanges, getMarketSupabaseClient, resolveRequestMarket, toNumber, type MarketMode } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 import { getNewsRows, newsLabel } from "@/lib/news-data";
 
@@ -34,7 +34,9 @@ export async function GET(req: Request) {
       } else {
         const [{ data: fundRows }, { data: stockMetaRows }] = await Promise.all([
           supabase.from("stock_fundamentals").select("symbol, data"),
-          market === "tasi" ? supabase.from("stocks").select("symbol, sector").eq("exchange", "TADAWUL") : Promise.resolve({ data: null }),
+          market !== "egx"
+            ? supabase.from("stocks").select("symbol, sector").in("exchange", getMarketExchanges(market))
+            : Promise.resolve({ data: null }),
         ]);
 
         if (fundRows) {

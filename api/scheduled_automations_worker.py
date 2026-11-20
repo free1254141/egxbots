@@ -465,15 +465,17 @@ def _fetch_market_indicators_brief(
     prompt: str = "",
     task_name: str = "",
     user_id: str = "",
+    *,
+    in_trading_hours: bool = False,
 ) -> str:
-    """Fetches rich precalculated technical indicators, open recommendations, Wyckoff scans, and portfolio."""
+    """Fetches rich precalculated technical indicators, open recommendations, Wyckoff scans, disclosures, and full 15-stock portfolio."""
     combined_text = f"{task_name} {prompt}"
     extracted_syms, name_map = _extract_symbols_from_text(combined_text)
-    all_symbols = list(dict.fromkeys([s.upper() for s in (symbols or [])] + extracted_syms))[:8]
+    all_symbols = list(dict.fromkeys([s.upper() for s in (symbols or [])] + extracted_syms))[:15]
 
     sections: List[str] = []
 
-    # 1. User Portfolio (if prompt asks about portfolio / محفظتي)
+    # 1. User Portfolio (if prompt asks about portfolio / محفظتي) — full 15-stock PRO coverage
     if user_id and any(k in combined_text for k in ("محفظت", "محفظة", "أسهمي", "اسهمي", "مراكزي", "portfolio")):
         pos_rows = _supabase_request(
             f"positions?user_id=eq.{user_id}&status=eq.open&select=symbol,quantity,entry_price&limit=15"
@@ -486,7 +488,7 @@ def _fetch_market_indicators_brief(
             port_lines = ["💼 محفظة المشترك المسجلة حالياً:"]
             for p in pos_rows:
                 psym = str(p.get("symbol") or "").upper().replace(".CA", "")
-                if psym and psym not in all_symbols and len(all_symbols) < 10:
+                if psym and psym not in all_symbols and len(all_symbols) < 15:
                     all_symbols.append(psym)
                 pname = name_map.get(psym, psym)
                 port_lines.append(
@@ -494,12 +496,19 @@ def _fetch_market_indicators_brief(
                 )
             sections.append("\n".join(port_lines))
 
-    # 2. Specific Symbols or Top Bullish Market Indicators
+    # 2. Specific Symbols (all up to 15, deduplicated to latest date per symbol) or Top Bullish Market Indicators
     if all_symbols:
-        sym_filter = ",".join(all_symbols[:8])
-        rows = _supabase_request(
-            f"stock_technical_indicators?symbol=in.({sym_filter})&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&limit=10"
+        sym_filter = ",".join(all_symbols[:15])
+        raw_rows = _supabase_request(
+            f"stock_technical_indicators?symbol=in.({sym_filter})&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&order=date.desc&limit=45"
         ) or []
+        rows: List[Dict[str, Any]] = []
+        seen_syms: set[str] = set()
+        for r in (raw_rows if isinstance(raw_rows, list) else []):
+            rsym = str(r.get("symbol") or "").upper()
+            if rsym and rsym not in seen_syms:
+                seen_syms.add(rsym)
+                rows.append(r)
     else:
         latest_ti_rows = _supabase_request(
             "stock_technical_indicators?exchange=eq.EGX&select=date&order=date.desc&limit=1"
@@ -541,7 +550,11 @@ def _fetch_market_indicators_brief(
             if bb_l and bb_u:
                 extra.append(f"دعم/مقاومة بولينجر: {float(bb_l):.2f} - {float(bb_u):.2f}")
             if rvol is not None:
-                extra.append(f"السيولة النسبية: {float(rvol):.2f}x")
+                rv_f = float(rvol)
+                if in_trading_hours and rv_f < 0.15:
+                    extra.append(f"السيولة النسبية: {rv_f:.2f}x (تراكمي لحظي أثناء الجلسة — غير مكتمل بعد)")
+                else:
+                    extra.append(f"السيولة النسبية: {rv_f:.2f}x")
             if ai_sc is not None:
                 ai_val = float(ai_sc)
                 ai_pct = ai_val * 100.0 if ai_val <= 1.0 else (ai_val * 10.0 if ai_val <= 10.0 else ai_val)
@@ -553,6 +566,23 @@ def _fetch_market_indicators_brief(
                 f"• {label}{date_tag}: آخر سعر مسجل {close} ج.م ({chg:+.2f}%) | RSI: {rsi:.1f} | EMA20: {ema20}{extra_str}"
             )
         sections.append("\n".join(lines))
+
+    # 2b. Official Disclosures for specific symbols when asked about news/disclosures/bonus shares
+    if all_symbols and any(k in combined_text for k in ("أخبار", "اخبار", "إفصاح", "افصاح", "توزيع", "مجاني", "مجانى", "رأس المال", "استحقاق")):
+        disc_filter = ",".join(all_symbols[:15])
+        disc_rows = _supabase_request(
+            f"egx_disclosures?symbol=in.({disc_filter})&select=symbol,disclosure_date,title,sentiment&order=disclosure_date.desc&limit=6"
+        ) or []
+        if isinstance(disc_rows, list) and disc_rows:
+            disc_lines = ["📢 أحدث الإفصاحات الرسمية المسجلة للأسهم المطلوبة:"]
+            for d in disc_rows:
+                dsym = str(d.get("symbol") or "").upper()
+                ddate = str(d.get("disclosure_date") or "")[:10]
+                dtitle = str(d.get("title") or "").strip()[:160]
+                if dtitle:
+                    disc_lines.append(f"• #{dsym} [{ddate}]: {dtitle}")
+            if len(disc_lines) > 1:
+                sections.append("\n".join(disc_lines))
 
     # 3. Open Recommendations (if prompt asks about recommendations / توصيات / إيجابية / صفقات)
     if any(k in combined_text for k in ("توصي", "صفق", "مفتوح", "إشارات", "اشارات", "مرشح", "ايجاب", "إيجاب", "شراء")):
@@ -603,10 +633,6 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
     if not deepseek_key:
         return "أهلاً بك! تعذر الاتصال بمحرك الذكاء الاصطناعي حالياً لعدم توفر المفتاح. برجاء المراجعة مع الدعم الفني."
 
-    words = re.findall(r"[A-Za-z]{2,8}", prompt)
-    symbols = [w.upper() for w in words if w.upper() not in {"THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "EGX"}]
-    indicators_brief = _fetch_market_indicators_brief(symbols, prompt=prompt, task_name=user_name, user_id=user_id)
-
     now_cairo = dt.datetime.now(ZoneInfo("Africa/Cairo"))
     try:
         from api.egx_trading_calendar import is_egx_session
@@ -615,10 +641,21 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
         egx_open = False
     cairo_mins = now_cairo.hour * 60 + now_cairo.minute
     in_trading_hours = egx_open and (10 * 60 <= cairo_mins <= 14 * 60 + 30)
+    words = re.findall(r"[A-Za-z]{2,8}", prompt)
+    symbols = [w.upper() for w in words if w.upper() not in {"THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "EGX"}]
+    indicators_brief = _fetch_market_indicators_brief(
+        symbols,
+        prompt=prompt,
+        task_name=user_name,
+        user_id=user_id,
+        in_trading_hours=in_trading_hours,
+    )
+    arabic_days = ("الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد")
+    day_ar = arabic_days[now_cairo.weekday()]
     session_status_str = (
-        f"جلسة البورصة المصرية مفتوحة حالياً للتداول (10:00 ص – 2:30 م بتوقيت القاهرة) — التوقيت الآن: {now_cairo.strftime('%Y-%m-%d %H:%M')} القاهرة."
+        f"جلسة البورصة المصرية مفتوحة حالياً للتداول (10:00 ص – 2:30 م بتوقيت القاهرة) — التوقيت الآن: {day_ar} {now_cairo.strftime('%Y-%m-%d %H:%M')} القاهرة."
         if in_trading_hours
-        else f"البورصة المصرية مغلقة حالياً (خارج ساعات التداول الرسمية 10:00 ص – 2:30 م الأحد–الخميس) — التوقيت الآن: {now_cairo.strftime('%Y-%m-%d %H:%M')} القاهرة."
+        else f"البورصة المصرية مغلقة حالياً (خارج ساعات التداول الرسمية 10:00 ص – 2:30 م الأحد–الخميس) — التوقيت الآن: {day_ar} {now_cairo.strftime('%Y-%m-%d %H:%M')} القاهرة."
     )
 
     system_prompt = (
@@ -646,7 +683,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.3,
-        "max_tokens": 3500,
+        "max_tokens": 2800,
     }
 
     # 1. Primary engine: DeepSeek Chat with browser-standard User-Agent

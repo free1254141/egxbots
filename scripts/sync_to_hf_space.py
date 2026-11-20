@@ -33,6 +33,7 @@ FILES_TO_SYNC = [
     "api/update_ml_scores.py",
     "api/macro_correlation.py",
     "api/payment_common.py",
+    "api/portfolio_or_optimizer.py",
     "Dockerfile",
     "api/stock_aliases.py",
     "api/saudi_stock_aliases.py",

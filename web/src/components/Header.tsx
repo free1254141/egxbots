@@ -522,6 +522,7 @@ export default function Header() {
               { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI" },
               { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW" },
               { href: "/scanner/technical", label: t("nav.scanner.tech"), icon: <Activity className="w-4 h-4 shrink-0" />, activePath: "/scanner/technical" },
+              { href: "/scanner/market", label: t("nav.scanner.market"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/scanner/market" },
               { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
           ]
         : [

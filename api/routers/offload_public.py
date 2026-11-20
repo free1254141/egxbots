@@ -2543,11 +2543,12 @@ def _classify_market_sector(raw_sec: str, raw_ind: str) -> Dict[str, str]:
 def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
     sb = get_market_supabase(market)
     exchange = get_market_exchange(market)
-    currency = "SAR" if market == "tasi" else "EGP"
-    curr_ar = "ر.س" if market == "tasi" else "ج.م"
+    exchanges = get_market_exchanges(market)
+    currency = "SAR" if market == "tasi" else ("AED" if market == "uae" else ("QAR" if market == "qatar" else "EGP"))
+    curr_ar = "ر.س" if market == "tasi" else ("د.إ" if market == "uae" else ("ر.ق" if market == "qatar" else "ج.م"))
     if sb is None:
         return None
-    d_rows = getattr(sb.table("stock_technical_indicators").select("date").eq("exchange", exchange).order("date", desc=True).limit(1).execute(), "data", None) or []
+    d_rows = getattr(sb.table("stock_technical_indicators").select("date").in_("exchange", exchanges).order("date", desc=True).limit(1).execute(), "data", None) or []
     if not d_rows:
         return None
     latest_date = d_rows[0]["date"]
@@ -2555,7 +2556,7 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
     def _q_ind():
         for f in ("symbol, close, volume, ema_50, ema_200, rsi_14, vol_sma20, r_vol, cmf_20, change_pct", "symbol, close, volume, ema_50, ema_200, rsi_14, vol_sma20, r_vol, change_pct", "symbol, close, volume, ema_50, ema_200, rsi_14, volume_sma_20, r_vol, change_pct", "symbol, close, volume, change_pct"):
             try:
-                return getattr(sb.table("stock_technical_indicators").select(f).eq("exchange", exchange).eq("date", latest_date).limit(500).execute(), "data", None) or []
+                return getattr(sb.table("stock_technical_indicators").select(f).in_("exchange", exchanges).eq("date", latest_date).limit(500).execute(), "data", None) or []
             except Exception:
                 continue
         return []
@@ -2563,7 +2564,7 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
     def _q_funds():
         for f in ("symbol, name, name_ar, data", "symbol, name, data", "symbol, data"):
             try:
-                return getattr(sb.table("stock_fundamentals").select(f).eq("exchange", exchange).limit(500).execute(), "data", None) or []
+                return getattr(sb.table("stock_fundamentals").select(f).in_("exchange", exchanges).limit(500).execute(), "data", None) or []
             except Exception:
                 continue
         return []
@@ -2575,11 +2576,11 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
             return []
 
     def _q_tasi():
-        if market != "tasi":
+        if market not in ("tasi", "uae", "qatar"):
             return []
         for f in ("symbol, name, name_ar, sector", "symbol, name, sector"):
             try:
-                return getattr(sb.table("stocks").select(f).eq("exchange", exchange).eq("is_active", True).limit(500).execute(), "data", None) or []
+                return getattr(sb.table("stocks").select(f).in_("exchange", exchanges).eq("is_active", True).limit(500).execute(), "data", None) or []
             except Exception:
                 continue
         return []
@@ -2616,7 +2617,7 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
         pl = _parse_json_obj(r.get("data")) or {}
         if not isinstance(pl, dict):
             pl = {}
-        nm = r.get("name_ar") or pl.get("name_ar") or (name_map.get(sym, "") if market == "tasi" else "") or r.get("name") or pl.get("name") or pl.get("Name") or ""
+        nm = r.get("name_ar") or pl.get("name_ar") or (name_map.get(sym, "") if market in ("tasi", "uae", "qatar") else "") or r.get("name") or pl.get("name") or pl.get("Name") or ""
         if r.get("name_ar") or (nm and sym not in name_map):
             name_map[sym] = str(r.get("name_ar") or nm)
         rs = str(pl.get("sector") or pl.get("Sector") or "")

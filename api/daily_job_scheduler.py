@@ -40,10 +40,20 @@ _scheduler_state: Dict[str, Any] = {
     "saudi_last_run_at": None,
     "saudi_last_run_status": None,
     "saudi_last_run_job_id": None,
+    # Independent UAE Friday (DFM/ADX) & Global Metals (COMMODITIES) schedule
+    "gcc_enabled": True,
+    "uae_friday_close_time": "15:30",  # Asia/Dubai (Fri after DFM/ADX close)
+    "metals_close_time_utc": "22:15",  # UTC (Mon-Fri after COMEX settlement)
+    "gcc_status": "idle",
+    "gcc_current_mode": None,
+    "gcc_last_run_at": None,
+    "gcc_last_run_status": None,
+    "gcc_last_run_job_id": None,
 }
 _run_history: List[Dict[str, Any]] = []
 _scheduler_lock = threading.RLock()
 _saudi_scheduler_lock = threading.RLock()
+_gcc_scheduler_lock = threading.RLock()
 _scheduler_thread = None
 _stop_event = threading.Event()
 _last_recommendation_retry_at = time.monotonic()
@@ -55,6 +65,7 @@ _last_marketing_lifecycle_at = time.monotonic()
 _last_short_swings_retry_at = time.monotonic()
 _last_phase_attempts = {}
 _saudi_last_phase_attempts = {}
+_gcc_last_phase_attempts = {}
 _completed_phases = set()
 _DEFAULT_STALE_RUN_MINUTES = 90
 
@@ -121,7 +132,19 @@ def _now_riyadh() -> datetime:
         from zoneinfo import ZoneInfo
         return datetime.now(ZoneInfo("Asia/Riyadh"))
     except Exception:
-        return datetime.utcnow() + timedelta(hours=3)
+        return datetime.now(timezone(timedelta(hours=3)))
+
+
+def _now_dubai() -> datetime:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Dubai"))
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=4)))
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _parse_run_timestamp(value: Any) -> Optional[datetime]:
@@ -339,6 +362,77 @@ def _claim_saudi_phase_in_process(now: datetime, phase: str) -> bool:
         return True
 
 
+def _gcc_job_ran_today(today: str, mode: str) -> bool:
+    tz = _now_dubai().tzinfo if mode == "uae_close" else timezone.utc
+    return _job_ran_today(today, mode, tz, f"gcc:{today}:{mode}")
+
+
+def _due_gcc_modes(
+    now_dubai: Optional[datetime] = None,
+    now_utc: Optional[datetime] = None,
+) -> List[str]:
+    if not _saudi_configured() or not _scheduler_state.get("gcc_enabled", True):
+        return []
+    now_dubai = now_dubai or _now_dubai()
+    now_utc = now_utc or _now_utc()
+    modes: List[str] = []
+    # Friday UAE (DFM/ADX) close: UAE trades Mon-Fri; Mon-Thu are covered by saudi_close, Friday needs its own run.
+    if now_dubai.weekday() == 4:
+        dubai_min = now_dubai.hour * 60 + now_dubai.minute
+        if dubai_min >= _minutes(_scheduler_state.get("uae_friday_close_time", "15:30")):
+            modes.append("uae_close")
+    # Global Gold & Silver (COMMODITIES): settle Mon-Fri ~21:00-22:00 UTC (after Saudi close).
+    if now_utc.weekday() in {0, 1, 2, 3, 4}:
+        utc_min = now_utc.hour * 60 + now_utc.minute
+        if utc_min >= _minutes(_scheduler_state.get("metals_close_time_utc", "22:15")):
+            modes.append("metals_close")
+    return modes
+
+
+def _run_gcc_daily_refresh(mode: str = "uae_close", source: str = "scheduled"):
+    from api.saudi_daily_runner import run_gcc_metals_daily_job
+    return run_gcc_metals_daily_job(mode=mode, trigger=source)
+
+
+def _execute_gcc_mode(mode: str, source: str):
+    try:
+        result = _run_gcc_daily_refresh(mode=mode, source=source)
+        with _gcc_scheduler_lock:
+            _scheduler_state["gcc_last_run_at"] = datetime.utcnow().isoformat()
+            _scheduler_state["gcc_last_run_status"] = result.get("status", "completed")
+            _scheduler_state["gcc_last_run_job_id"] = result.get("job_run_id", source)
+    except Exception as exc:
+        print(f"[DAILY-JOB-SCHEDULER] GCC/Metals {mode} run failed: {exc}")
+        with _gcc_scheduler_lock:
+            _scheduler_state["gcc_last_run_at"] = datetime.utcnow().isoformat()
+            _scheduler_state["gcc_last_run_status"] = "failed"
+    finally:
+        with _gcc_scheduler_lock:
+            _scheduler_state["gcc_status"] = "idle"
+
+
+def _claim_gcc_mode_in_process(now_dubai: datetime, now_utc: datetime, mode: str) -> bool:
+    today = now_dubai.date().isoformat() if mode == "uae_close" else now_utc.date().isoformat()
+    key = f"gcc:{today}:{mode}"
+    with _gcc_scheduler_lock:
+        last = _gcc_last_phase_attempts.get(key, {})
+        if (
+            _scheduler_state.get("gcc_status") == "running"
+            or last.get("attempts", 0) >= 3
+            or time.monotonic() - last.get("at", -100000) < 900
+        ):
+            return False
+        if _gcc_job_ran_today(today, mode):
+            _gcc_last_phase_attempts[key] = {"at": time.monotonic(), "attempts": last.get("attempts", 0)}
+            return False
+        if len(_gcc_last_phase_attempts) > 10:
+            _gcc_last_phase_attempts.clear()
+        _gcc_last_phase_attempts[key] = {"at": time.monotonic(), "attempts": last.get("attempts", 0) + 1}
+        _scheduler_state["gcc_status"] = "running"
+        _scheduler_state["gcc_current_mode"] = mode
+        return True
+
+
 def _execute_phase(phase, source):
     import asyncio
     try:
@@ -392,6 +486,19 @@ def run_startup_catchup() -> bool:
         else:
             threading.Thread(target=_retry_saudi_stages, args=(now_saudi,),
                              daemon=True, name="saudi-daily-job-startup-recovery").start()
+
+    now_dubai = _now_dubai()
+    now_utc = _now_utc()
+    for gcc_mode in _due_gcc_modes(now_dubai, now_utc):
+        if _claim_gcc_mode_in_process(now_dubai, now_utc, gcc_mode):
+            threading.Thread(
+                target=_execute_gcc_mode,
+                args=(gcc_mode, "startup_catchup"),
+                daemon=True,
+                name=f"gcc-daily-job-{gcc_mode}-catchup",
+            ).start()
+            started = True
+            break
     return started
 
 
@@ -666,6 +773,20 @@ def _scheduler_worker():
                     daemon=True,
                     name=f"saudi-daily-job-{saudi_phase}",
                 ).start()
+
+            # Independent UAE Friday close (DFM/ADX) & Mon-Fri Metals close (COMMODITIES)
+            now_dubai = _now_dubai()
+            now_utc = _now_utc()
+            for gcc_mode in _due_gcc_modes(now_dubai, now_utc):
+                if _claim_gcc_mode_in_process(now_dubai, now_utc, gcc_mode):
+                    print(f"[DAILY-JOB-SCHEDULER] Triggering GCC/Metals {gcc_mode} job")
+                    threading.Thread(
+                        target=_execute_gcc_mode,
+                        args=(gcc_mode, "scheduled"),
+                        daemon=True,
+                        name=f"gcc-daily-job-{gcc_mode}",
+                    ).start()
+                    break
 
             if not enabled:
                 with _scheduler_lock:

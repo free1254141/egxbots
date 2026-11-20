@@ -360,6 +360,9 @@ def test_saudi_runner_cache_revalidation_success_with_status_200(monkeypatch):
     monkeypatch.setattr(saudi_daily_runner, "_run_intraday_snapshot_and_short_swings", lambda *_a, **_kw: {"indicators_count": 264, "latest_date": "2026-11-16", "market_status": {}, "swings_payload": {}})
     monkeypatch.setattr("api.saudi_news_sync.run_saudi_news_sync", lambda **_kw: {"ok": True, "rows_saved": 10, "total_headlines": 20})
     monkeypatch.setattr("api.saudi_disclosures_sync.run_saudi_disclosures_sync", lambda **_kw: {"ok": True, "saved": 2, "fetched": 5})
+    monkeypatch.setattr("api.gcc_metals_sync.run_gcc_metals_sync", lambda **_kw: {"ok": True, "summary": {"DFM": {"symbols_synced": 33}}})
+    monkeypatch.setattr("api.gcc_news_sync.sync_gcc_market_news", lambda **_kw: {"ok": True, "synced_rows": 5, "matched_symbols": 3})
+    monkeypatch.setattr("api.gcc_disclosures_sync.run_gcc_disclosures_sync", lambda **_kw: {"ok": True, "results": {"uae": {"inserted": 1}}})
     monkeypatch.setattr("api.cache_invalidation.invalidate_cache_tags", lambda tags: {"invalidated": list(tags), "skipped": False, "status": 200})
 
     out = saudi_daily_runner.run_saudi_daily_job(phase="midday", trigger="manual", dry_run=True, main_sb=fake_sb, saudi_sb=fake_sb)
@@ -610,6 +613,9 @@ def test_saudi_runner_resumes_only_missing_stages(monkeypatch):
     )
     monkeypatch.setattr("api.saudi_news_sync.run_saudi_news_sync", lambda **_kw: {"ok": True, "rows_saved": 5, "total_headlines": 10})
     monkeypatch.setattr("api.saudi_disclosures_sync.run_saudi_disclosures_sync", lambda **_kw: {"ok": True, "saved": 1, "fetched": 2})
+    monkeypatch.setattr("api.gcc_metals_sync.run_gcc_metals_sync", lambda **_kw: {"ok": True, "summary": {"DFM": {"symbols_synced": 33}}})
+    monkeypatch.setattr("api.gcc_news_sync.sync_gcc_market_news", lambda **_kw: {"ok": True, "synced_rows": 5, "matched_symbols": 3})
+    monkeypatch.setattr("api.gcc_disclosures_sync.run_gcc_disclosures_sync", lambda **_kw: {"ok": True, "results": {"uae": {"inserted": 1}}})
     monkeypatch.setattr("api.cache_invalidation.invalidate_cache_tags", lambda tags: {"invalidated": list(tags), "skipped": False, "status": 200})
 
     out = saudi_daily_runner.run_saudi_daily_job(
@@ -842,6 +848,9 @@ def test_saudi_runner_close_dispatches_vip_report(monkeypatch):
     )
     monkeypatch.setattr("api.saudi_news_sync.run_saudi_news_sync", lambda **_kw: {"ok": True, "rows_saved": 5, "total_headlines": 10})
     monkeypatch.setattr("api.saudi_disclosures_sync.run_saudi_disclosures_sync", lambda **_kw: {"ok": True, "saved": 1, "fetched": 2})
+    monkeypatch.setattr("api.gcc_metals_sync.run_gcc_metals_sync", lambda **_kw: {"ok": True, "summary": {"DFM": {"symbols_synced": 33}}})
+    monkeypatch.setattr("api.gcc_news_sync.sync_gcc_market_news", lambda **_kw: {"ok": True, "synced_rows": 5, "matched_symbols": 3})
+    monkeypatch.setattr("api.gcc_disclosures_sync.run_gcc_disclosures_sync", lambda **_kw: {"ok": True, "results": {"uae": {"inserted": 1}}})
     monkeypatch.setattr("api.cache_invalidation.invalidate_cache_tags", lambda tags: {"invalidated": list(tags), "skipped": False, "status": 200})
 
     called_report = []
@@ -900,3 +909,116 @@ def test_saudi_short_swings_rs_leader_fires_between_022_and_045_breadth(monkeypa
     audit_sig = next((a for a in res["signal_audit"] if a["symbol"] == "1120" and a["date"] == dates[-2].date().isoformat()), None)
     assert audit_sig is not None
     assert 0.22 <= audit_sig["breadth"] < 0.45
+
+
+def test_egx_daily_disclosures_sync_imports_exclude_keywords():
+    from jobs import daily_disclosures_sync
+    from scripts.disclosures import sync_egx_disclosures
+
+    assert sync_egx_disclosures.EXCLUDE_KEYWORDS is sync_egx_disclosures.GULF_EXCLUDE_KEYWORDS
+    assert daily_disclosures_sync.EXCLUDE_KEYWORDS is sync_egx_disclosures.GULF_EXCLUDE_KEYWORDS
+    assert len(daily_disclosures_sync.EXCLUDE_KEYWORDS) > 0
+
+
+def test_gcc_and_metals_scheduler_friday_uae_and_weekday_metals(monkeypatch):
+    monkeypatch.setenv("SAUDI_SUPABASE_URL", "https://saudi.supabase.co")
+    monkeypatch.setenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    monkeypatch.setitem(daily_job_scheduler._scheduler_state, "gcc_enabled", True)
+    monkeypatch.setitem(daily_job_scheduler._scheduler_state, "uae_friday_close_time", "15:30")
+    monkeypatch.setitem(daily_job_scheduler._scheduler_state, "metals_close_time_utc", "22:15")
+
+    dubai_tz = ZoneInfo("Asia/Dubai")
+    utc_tz = dt.timezone.utc
+
+    # Thursday 16:00 Dubai / 12:00 UTC -> covered by saudi_close, nothing extra due yet
+    assert daily_job_scheduler._due_gcc_modes(
+        dt.datetime(2026, 11, 19, 16, 0, tzinfo=dubai_tz),
+        dt.datetime(2026, 11, 19, 12, 0, tzinfo=utc_tz),
+    ) == []
+
+    # Thursday 22:20 UTC -> global metals close due
+    assert daily_job_scheduler._due_gcc_modes(
+        dt.datetime(2026, 11, 20, 2, 20, tzinfo=dubai_tz),
+        dt.datetime(2026, 11, 19, 22, 20, tzinfo=utc_tz),
+    ) == ["metals_close"]
+
+    # Friday 15:30 Dubai / 11:30 UTC -> UAE Friday close due
+    assert daily_job_scheduler._due_gcc_modes(
+        dt.datetime(2026, 11, 20, 15, 30, tzinfo=dubai_tz),
+        dt.datetime(2026, 11, 20, 11, 30, tzinfo=utc_tz),
+    ) == ["uae_close"]
+
+    # Friday 22:30 UTC (still Friday in Dubai? No, 02:30 Sat in Dubai) -> metals_close due
+    assert daily_job_scheduler._due_gcc_modes(
+        dt.datetime(2026, 11, 21, 2, 30, tzinfo=dubai_tz),
+        dt.datetime(2026, 11, 20, 22, 30, tzinfo=utc_tz),
+    ) == ["metals_close"]
+
+    # Friday 19:50 Dubai / 15:50 UTC -> only uae_close
+    assert daily_job_scheduler._due_gcc_modes(
+        dt.datetime(2026, 11, 20, 19, 50, tzinfo=dubai_tz),
+        dt.datetime(2026, 11, 20, 15, 50, tzinfo=utc_tz),
+    ) == ["uae_close"]
+
+    # Saturday / Sunday -> nothing due
+    assert daily_job_scheduler._due_gcc_modes(
+        dt.datetime(2026, 11, 21, 16, 0, tzinfo=dubai_tz),
+        dt.datetime(2026, 11, 21, 22, 30, tzinfo=utc_tz),
+    ) == []
+    assert daily_job_scheduler._due_gcc_modes(
+        dt.datetime(2026, 11, 22, 16, 0, tzinfo=dubai_tz),
+        dt.datetime(2026, 11, 22, 22, 30, tzinfo=utc_tz),
+    ) == []
+
+
+def test_run_gcc_metals_daily_job_modes(monkeypatch):
+    from api import saudi_daily_runner
+
+    fake_sb = _FakeSaudiSupabase()
+    sync_calls = []
+    news_calls = []
+    disc_calls = []
+    cache_calls = []
+
+    monkeypatch.setattr(
+        "api.gcc_metals_sync.run_gcc_metals_sync",
+        lambda **kw: (sync_calls.append(kw) or {"ok": True, "summary": {e: {"symbols_synced": 2} for e in kw.get("exchanges", [])}}),
+    )
+    monkeypatch.setattr(
+        "api.gcc_news_sync.sync_gcc_market_news",
+        lambda **kw: (news_calls.append(kw) or {"ok": True, "synced_rows": 12, "matched_symbols": 6}),
+    )
+    monkeypatch.setattr(
+        "api.gcc_disclosures_sync.run_gcc_disclosures_sync",
+        lambda **kw: (disc_calls.append(kw) or {"ok": True, "results": {"uae": {"inserted": 4}}}),
+    )
+    monkeypatch.setattr(
+        "api.cache_invalidation.invalidate_cache_tags",
+        lambda tags: (cache_calls.append(list(tags)) or {"invalidated": list(tags), "skipped": False, "status": 200}),
+    )
+
+    uae_out = saudi_daily_runner.run_gcc_metals_daily_job(mode="uae_close", trigger="scheduled", main_sb=fake_sb)
+    assert uae_out["ok"] is True
+    assert uae_out["job_type"] == "uae_close"
+    assert sync_calls[-1] == {"exchanges": ["DFM", "ADX", "COMMODITIES"], "daily_only": True}
+    assert news_calls[-1]["market"] == "uae"
+    assert disc_calls[-1]["market"] == "uae"
+    assert cache_calls[-1] == ["daily-market-data", "daily-symbols", "daily-news-data", "daily-disclosures"]
+
+    metals_out = saudi_daily_runner.run_gcc_metals_daily_job(mode="metals_close", trigger="scheduled", main_sb=fake_sb)
+    assert metals_out["ok"] is True
+    assert metals_out["job_type"] == "metals_close"
+    assert sync_calls[-1] == {"exchanges": ["COMMODITIES"], "daily_only": True}
+    assert len(news_calls) == 1
+    assert len(disc_calls) == 1
+    assert cache_calls[-1] == ["daily-market-data", "daily-symbols"]
+
+    # Failure path: when all data steps fail, status must be failed and cache invalidation must NOT run
+    cache_calls.clear()
+    monkeypatch.setattr("api.gcc_metals_sync.run_gcc_metals_sync", lambda **_kw: {"ok": False, "error": "provider_down"})
+    monkeypatch.setattr("api.gcc_news_sync.sync_gcc_market_news", lambda **_kw: {"ok": False, "error": "rss_down"})
+    monkeypatch.setattr("api.gcc_disclosures_sync.run_gcc_disclosures_sync", lambda **_kw: {"ok": False, "error": "disc_down"})
+    fail_out = saudi_daily_runner.run_gcc_metals_daily_job(mode="uae_close", trigger="scheduled", main_sb=fake_sb)
+    assert fail_out["ok"] is False
+    assert fail_out["status"] == "failed"
+    assert cache_calls == []
