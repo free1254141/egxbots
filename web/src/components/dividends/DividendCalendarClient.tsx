@@ -1,12 +1,22 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Calendar, Coins, Search, Calculator, Sparkles, Clock, CheckCircle2, ArrowUpRight } from "lucide-react";
 import StockLogo from "@/components/StockLogo";
+import { EgyptFlag, SaudiFlag, UaeFlag, QatarFlag } from "@/components/MarketFlag";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket, MARKET_CHANGE_EVENT, type MarketMode } from "@/contexts/MarketContext";
 import { getStockHref } from "@/lib/stock-href";
 import type { DividendMarketKey, DividendsCalendarPayload } from "@/lib/market/dividends-server";
+
+function MarketFlagIcon({ market, className = "w-4 h-3 rounded-[2px] shrink-0" }: { market: DividendMarketKey; className?: string }) {
+  if (market === "tasi") return <SaudiFlag className={className} />;
+  if (market === "qatar") return <QatarFlag className={className} />;
+  if (market === "uae") return <UaeFlag className={className} />;
+  return <EgyptFlag className={className} />;
+}
 
 const MARKET_META: Record<
   DividendMarketKey,
@@ -68,10 +78,24 @@ export default function DividendCalendarClient({
 }: {
   initialData: DividendsCalendarPayload;
 }) {
+  const router = useRouter();
   const { language } = useLanguage();
+  const { setMarket } = useMarket();
   const isAr = language === "ar";
   const market = initialData.market;
   const meta = MARKET_META[market];
+
+  // When user actively switches market in the top Header dropdown, navigate to that market's dividend calendar
+  useEffect(() => {
+    const onMarketChange = (e: Event) => {
+      const next = (e as CustomEvent<MarketMode>)?.detail;
+      if (next && next !== market && MARKET_META[next]) {
+        router.push(MARKET_META[next].href);
+      }
+    };
+    window.addEventListener(MARKET_CHANGE_EVENT, onMarketChange);
+    return () => window.removeEventListener(MARKET_CHANGE_EVENT, onMarketChange);
+  }, [market, router]);
 
   const [filter, setFilter] = useState<"upcoming" | "all" | "paid">(
     initialData.summary.upcomingCount + initialData.summary.pendingPayCount > 0 ? "upcoming" : "all"
@@ -150,8 +174,9 @@ export default function DividendCalendarClient({
               <Coins className="w-3.5 h-3.5" />
               <span>{isAr ? "تقويم توزيعات الكوبونات النقدية" : "Cash Dividend Calendar"}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white">
-              {meta.flag} {isAr ? `مواعيد توزيع كوبونات ${meta.labelAr}` : `${meta.labelEn} Dividend Calendar`}
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white flex items-center gap-2.5 flex-wrap">
+              <MarketFlagIcon market={market} className="w-7 h-5 rounded-sm shrink-0 shadow-sm" />
+              <span>{isAr ? `مواعيد توزيع كوبونات ${meta.labelAr}` : `${meta.labelEn} Dividend Calendar`}</span>
             </h1>
             <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 max-w-3xl leading-relaxed">
               {isAr
@@ -178,13 +203,15 @@ export default function DividendCalendarClient({
               <Link
                 key={mk}
                 href={m.href}
-                className={`px-3.5 py-2 text-xs font-black border-2 transition-all ${
+                onClick={() => setMarket(mk)}
+                className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs font-black border-2 transition-all ${
                   active
                     ? "bg-[#FFE600] text-black border-black shadow-[2px_2px_0_0_#000]"
                     : "bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700 hover:border-black dark:hover:border-white"
                 }`}
               >
-                {m.flag} {isAr ? m.shortAr : m.shortEn}
+                <MarketFlagIcon market={mk} />
+                <span>{isAr ? m.shortAr : m.shortEn}</span>
               </Link>
             );
           })}
