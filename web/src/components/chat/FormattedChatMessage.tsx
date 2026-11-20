@@ -1951,7 +1951,7 @@ export function FormattedChatMessage({
                         <MiniPriceChartSvg
                             key={sym}
                             symbol={sym}
-                            currency={/^\d{4}$/.test(sym) ? "ر.س" : "ج.م"}
+                            currency={chartVal.currency || (/^\d{4}$/.test(sym) ? "ر.س" : "ج.م")}
                             chartData={chartVal}
                         />
                     ))}

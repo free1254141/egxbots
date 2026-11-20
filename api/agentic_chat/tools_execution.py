@@ -1358,6 +1358,7 @@ def _build_ui_chart_payload(
     ema_50: Optional[float] = None,
     support_1: Optional[float] = None,
     resistance_1: Optional[float] = None,
+    currency: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build compact 30-session price/volume series for client-side SVG rendering (stripped before LLM prompt)."""
     if not rows_desc:
@@ -1378,12 +1379,15 @@ def _build_ui_chart_payload(
         })
     if len(pts) < 3:
         return None
-    return {
+    payload: Dict[str, Any] = {
         "series": pts,
         "ema50": ema_50,
         "support1": support_1,
         "resistance1": resistance_1,
     }
+    if currency:
+        payload["currency"] = currency
+    return payload
 
 
 def _distinct_secondary_levels(
@@ -2206,6 +2210,7 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                 _safe_price(latest_tech.get("ema_50")),
                 support_1,
                 resistance_1,
+                currency="ج.م",
             )
             if ui_chart:
                 egx_item["_ui_chart"] = ui_chart
@@ -2290,58 +2295,72 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     pass
 
             if equity_syms:
-                try:
-                    res_st = (
-                        sb_sa.from_("stocks")
-                        .select("symbol,name,name_ar,sector,industry,currency")
-                        .eq("exchange", exch_code)
-                        .in_("symbol", equity_syms)
-                        .limit(len(equity_syms))
-                        .execute()
-                    )
-                    for r in (res_st.data or []):
-                        if r.get("symbol"):
-                            sa_meta_map[r["symbol"]] = r
-                except Exception:
-                    pass
-
                 sa_fund_map: Dict[str, Dict[str, Any]] = {}
-                try:
-                    res_sf = (
-                        sb_sa.from_("stock_fundamentals")
-                        .select("symbol,data,fund_score")
-                        .eq("exchange", exch_code)
-                        .in_("symbol", equity_syms)
-                        .limit(len(equity_syms))
-                        .execute()
-                    )
-                    for r in (res_sf.data or []):
-                        if r.get("symbol"):
-                            sa_fund_map[r["symbol"]] = r
-                except Exception:
-                    pass
-
                 sa_ti_map: Dict[str, Dict[str, Any]] = {}
-                try:
-                    ti_cols, order_col = _saudi_ti_select_and_order(sb_sa)
-                    res_sti = (
-                        sb_sa.from_("stock_technical_indicators")
-                        .select(ti_cols)
-                        .eq("exchange", exch_code)
-                        .in_("symbol", equity_syms)
-                        .order(order_col, desc=True)
-                        .limit(len(equity_syms) * 2)
-                        .execute()
-                    )
-                    for r in (res_sti.data or []):
-                        s_sym = r.get("symbol")
-                        if s_sym and s_sym not in sa_ti_map:
-                            sa_ti_map[s_sym] = r
-                except Exception:
-                    pass
-
                 mkt_rec_by_sym: Dict[str, Dict[str, Any]] = {}
-                if allow_recs:
+                sa_ohlcv_map: Dict[str, List[Dict[str, Any]]] = {}
+
+                def _q_st() -> Dict[str, Dict[str, Any]]:
+                    out_m: Dict[str, Dict[str, Any]] = {}
+                    try:
+                        res_st = (
+                            sb_sa.from_("stocks")
+                            .select("symbol,name,name_ar,sector,industry,currency")
+                            .eq("exchange", exch_code)
+                            .in_("symbol", equity_syms)
+                            .limit(len(equity_syms))
+                            .execute()
+                        )
+                        for r in (res_st.data or []):
+                            if r.get("symbol"):
+                                out_m[r["symbol"]] = r
+                    except Exception:
+                        pass
+                    return out_m
+
+                def _q_sf() -> Dict[str, Dict[str, Any]]:
+                    out_m: Dict[str, Dict[str, Any]] = {}
+                    try:
+                        res_sf = (
+                            sb_sa.from_("stock_fundamentals")
+                            .select("symbol,data,fund_score")
+                            .eq("exchange", exch_code)
+                            .in_("symbol", equity_syms)
+                            .limit(len(equity_syms))
+                            .execute()
+                        )
+                        for r in (res_sf.data or []):
+                            if r.get("symbol"):
+                                out_m[r["symbol"]] = r
+                    except Exception:
+                        pass
+                    return out_m
+
+                def _q_ti() -> Dict[str, Dict[str, Any]]:
+                    out_m: Dict[str, Dict[str, Any]] = {}
+                    try:
+                        ti_cols, order_col = _saudi_ti_select_and_order(sb_sa)
+                        res_sti = (
+                            sb_sa.from_("stock_technical_indicators")
+                            .select(ti_cols)
+                            .eq("exchange", exch_code)
+                            .in_("symbol", equity_syms)
+                            .order(order_col, desc=True)
+                            .limit(len(equity_syms) * 2)
+                            .execute()
+                        )
+                        for r in (res_sti.data or []):
+                            s_sym = r.get("symbol")
+                            if s_sym and s_sym not in out_m:
+                                out_m[s_sym] = r
+                    except Exception:
+                        pass
+                    return out_m
+
+                def _q_rec() -> Dict[str, Dict[str, Any]]:
+                    out_m: Dict[str, Dict[str, Any]] = {}
+                    if not allow_recs:
+                        return out_m
                     try:
                         res_mrec = (
                             sb_sa.from_("scan_results")
@@ -2356,12 +2375,30 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         for row in (res_mrec.data or []):
                             if isinstance(row, dict) and row.get("symbol"):
                                 s_k = str(row["symbol"]).upper()
-                                if s_k not in mkt_rec_by_sym:
-                                    mkt_rec_by_sym[s_k] = row
+                                if s_k not in out_m:
+                                    out_m[s_k] = row
                     except Exception:
                         pass
+                    return out_m
 
-                sa_ohlcv_map = _fetch_saudi_ohlcv_for_symbols(sb_sa, equity_syms, exchange=exch_code)
+                def _q_ohlcv() -> Dict[str, List[Dict[str, Any]]]:
+                    try:
+                        return _fetch_saudi_ohlcv_for_symbols(sb_sa, equity_syms, exchange=exch_code)
+                    except Exception:
+                        return {}
+
+                from concurrent.futures import ThreadPoolExecutor as _TPE
+                with _TPE(max_workers=5) as _pool:
+                    f_st = _pool.submit(_q_st)
+                    f_sf = _pool.submit(_q_sf)
+                    f_ti = _pool.submit(_q_ti)
+                    f_rec = _pool.submit(_q_rec)
+                    f_oh = _pool.submit(_q_ohlcv)
+                    sa_meta_map = f_st.result()
+                    sa_fund_map = f_sf.result()
+                    sa_ti_map = f_ti.result()
+                    mkt_rec_by_sym = f_rec.result()
+                    sa_ohlcv_map = f_oh.result()
 
                 for sym in equity_syms:
                     meta = sa_meta_map.get(sym, {})
@@ -2517,6 +2554,7 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         ema_50,
                         support_1,
                         resistance_1,
+                        currency=cfg.currency_ar,
                     )
                     if ui_chart_sa:
                         sa_item["_ui_chart"] = ui_chart_sa

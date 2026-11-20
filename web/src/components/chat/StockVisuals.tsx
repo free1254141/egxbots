@@ -17,6 +17,7 @@ export interface StockChartSeries {
     ema50?: number | null;
     support1?: number | null;
     resistance1?: number | null;
+    currency?: string | null;
 }
 
 interface PriceLadderProps {

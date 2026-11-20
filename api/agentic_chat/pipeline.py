@@ -1773,6 +1773,16 @@ async def _run_agentic_chat_stream_impl(
                 for s in stocks_with_symbol[:4]
                 if s.get("symbol")
             ]
+            def _fmt_king_ai_pct(val: Any) -> str:
+                if val is None or val == "" or val == "—":
+                    return "—"
+                try:
+                    num = float(val)
+                except (TypeError, ValueError):
+                    return str(val)
+                pct = num * 100.0 if 0.0 <= num <= 1.0 else num
+                return f"{round(pct, 1)}%"
+
             headers = ["المعيار"] + [f"{(s.get('name_ar') or s.get('symbol')).split(',')[0].strip()} ({s.get('symbol')})" for s in stocks_with_symbol]
             rows_list = [
                 ["السعر الحالي"] + [f"{s.get('close', '—')} {_row_currency(s)}" if s.get('close') is not None else "—" for s in stocks_with_symbol],
@@ -1781,7 +1791,7 @@ async def _run_agentic_chat_stream_impl(
                 ["التقييم الفني"] + [str(s.get('verdict', '—')) for s in stocks_with_symbol],
                 ["الدعم الأول"] + [f"{s.get('support_1', '—')} {_row_currency(s)}" if s.get('support_1') is not None else "—" for s in stocks_with_symbol],
                 ["المقاومة الأولى"] + [f"{s.get('resistance_1', '—')} {_row_currency(s)}" if s.get('resistance_1') is not None else "—" for s in stocks_with_symbol],
-                ["مؤشر King AI"] + [str(s.get('king_ai_score', '—')) for s in stocks_with_symbol],
+                ["مؤشر King AI"] + [_fmt_king_ai_pct(s.get('king_ai_score')) for s in stocks_with_symbol],
                 ["التوافق الشرعي"] + [_row_sharia_label(s) for s in stocks_with_symbol],
             ]
             comp_tbl: Dict[str, Any] = {
