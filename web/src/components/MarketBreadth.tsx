@@ -1,6 +1,8 @@
 "use client";
 
 import React from "react";
+import { useMarket } from "@/contexts/MarketContext";
+import { getStockHref } from "@/lib/stock-href";
 import {
     Activity,
     TrendingUp,
@@ -14,6 +16,13 @@ import {
     Sparkles,
 } from "lucide-react";
 
+const CURRENCY_LABELS_AR: Record<string, string> = {
+    EGP: "ج.م",
+    SAR: "ر.س",
+    AED: "د.إ",
+    QAR: "ر.ق",
+};
+
 export interface LiquiditySectorItem {
     sector: string;
     sector_ar: string;
@@ -25,6 +34,7 @@ export interface LiquiditySectorItem {
     advancing: number;
     declining: number;
     top_stock_symbol: string;
+    top_stock_exchange?: string;
     top_stock_name: string;
     top_stock_turnover_million_egp: number;
     top_stock_change_pct: number;
@@ -32,6 +42,7 @@ export interface LiquiditySectorItem {
 
 export interface LiquidityStockItem {
     symbol: string;
+    exchange?: string;
     name: string;
     sector: string;
     sector_ar: string;
@@ -45,6 +56,7 @@ export interface LiquidityStockItem {
 }
 
 export interface DailyLiquidityData {
+    currency?: string;
     date: string;
     total_turnover_egp: number;
     total_turnover_million_egp: number;
@@ -77,6 +89,7 @@ export interface DailyLiquidityData {
 }
 
 export interface BreadthData {
+    currency?: string;
     health_score: number;
     health_label: string;
     advancing: number;
@@ -217,8 +230,12 @@ export function MarketBreadthStrip({ data, isAr }: { data: BreadthData | null; i
 
 /* ── Daily Market Liquidity Update Card ───────────────────── */
 export function DailyLiquidityUpdateCard({ data, isAr }: { data: BreadthData | null; isAr: boolean }) {
+    const { market: ctxMarket, currencyCode: ctxCurrencyCode } = useMarket();
     const liq = data?.liquidity;
     if (!liq) return null;
+    const activeMarket = (data as { market?: string } | null)?.market || ctxMarket;
+    const currCode = (liq.currency || data?.currency || ctxCurrencyCode || "EGP").toUpperCase();
+    const currAr = CURRENCY_LABELS_AR[currCode] || currCode;
 
     const verdictStyles: Record<string, { badgeCls: string; dotCls: string }> = {
         inflow: {
@@ -307,10 +324,10 @@ export function DailyLiquidityUpdateCard({ data, isAr }: { data: BreadthData | n
                     </div>
                     <div className="text-xl font-mono font-black text-zinc-950 dark:text-white">
                         {liq.total_turnover_billion_egp.toFixed(2)}{" "}
-                        <span className="text-xs font-bold text-zinc-500">{isAr ? "مليار ج.م" : "B EGP"}</span>
+                        <span className="text-xs font-bold text-zinc-500">{isAr ? `مليار ${currAr}` : `B ${currCode}`}</span>
                     </div>
                     <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-zinc-500">
-                        <span>{liq.total_turnover_million_egp.toLocaleString("en-US")}M EGP</span>
+                        <span>{liq.total_turnover_million_egp.toLocaleString("en-US")}M {currCode}</span>
                         <span className={`font-black ${liq.turnover_vs_20d_pct >= 100 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
                             {liq.turnover_vs_20d_pct.toFixed(1)}% {isAr ? "من متوسط 20ي" : "of 20d avg"}
                         </span>
@@ -426,7 +443,7 @@ export function DailyLiquidityUpdateCard({ data, isAr }: { data: BreadthData | n
                                             </div>
                                             <div className="text-[10px] font-mono text-zinc-500 truncate">
                                                 {isAr ? "القائد:" : "Leader:"}{" "}
-                                                <a href={`/stocks/${sec.top_stock_symbol.toLowerCase()}`} className="font-bold text-indigo-500 hover:underline">
+                                                <a href={getStockHref(sec.top_stock_symbol, { market: activeMarket, exchange: sec.top_stock_exchange })} className="font-bold text-indigo-500 hover:underline">
                                                     {sec.top_stock_symbol}
                                                 </a>{" "}
                                                 ({sec.top_stock_turnover_million_egp.toFixed(0)}M) · CMF {sec.weighted_cmf_20 >= 0 ? "+" : ""}{sec.weighted_cmf_20.toFixed(2)}
@@ -471,7 +488,7 @@ export function DailyLiquidityUpdateCard({ data, isAr }: { data: BreadthData | n
                             return (
                                 <a
                                     key={st.symbol}
-                                    href={`/stocks/${st.symbol.toLowerCase()}`}
+                                    href={getStockHref(st.symbol, { market: activeMarket, exchange: st.exchange })}
                                     className={`flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors ${isAr ? "flex-row-reverse text-right" : "flex-row text-left"}`}
                                 >
                                     <div className={`flex items-center gap-2 min-w-0 flex-1 ${isAr ? "flex-row-reverse" : "flex-row"}`}>
@@ -482,7 +499,7 @@ export function DailyLiquidityUpdateCard({ data, isAr }: { data: BreadthData | n
                                                 <span className="text-[10px] font-semibold text-zinc-500 truncate">{st.name}</span>
                                             </div>
                                             <div className="text-[9px] font-mono text-zinc-500">
-                                                {st.close.toFixed(2)} EGP · R.Vol {st.r_vol.toFixed(1)}x · CMF {st.cmf_20 >= 0 ? "+" : ""}{st.cmf_20.toFixed(2)}
+                                                {st.close.toFixed(2)} {currCode} · R.Vol {st.r_vol.toFixed(1)}x · CMF {st.cmf_20 >= 0 ? "+" : ""}{st.cmf_20.toFixed(2)}
                                             </div>
                                         </div>
                                     </div>
@@ -512,6 +529,7 @@ export function DailyLiquidityUpdateCard({ data, isAr }: { data: BreadthData | n
 /* ── Top Movers ───────────────────────────────────────────── */
 interface Mover {
     symbol: string;
+    exchange?: string;
     name: string;
     change_pct: number;
     close: number;
@@ -520,6 +538,7 @@ interface Mover {
 }
 
 export function TopMovers({ gainers = [], losers = [], isAr }: { gainers?: Mover[]; losers?: Mover[]; isAr: boolean }) {
+    const { market: ctxMarket } = useMarket();
     const safeGainers = Array.isArray(gainers) ? gainers : [];
     const safeLosers = Array.isArray(losers) ? losers : [];
     if (!safeGainers.length && !safeLosers.length) return null;
@@ -544,7 +563,7 @@ export function TopMovers({ gainers = [], losers = [], isAr }: { gainers?: Mover
                     {items.map((m, i) => (
                         <a
                             key={m.symbol}
-                            href={`/stocks/${m.symbol.toLowerCase()}`}
+                            href={getStockHref(m.symbol, { market: ctxMarket, exchange: m.exchange })}
                             className={`flex items-center px-4 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors ${isAr ? "flex-row-reverse text-right" : "text-left"}`}
                         >
                             <span className="text-[10px] font-mono font-black text-zinc-500 w-5">{i + 1}</span>

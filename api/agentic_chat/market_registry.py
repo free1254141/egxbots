@@ -254,9 +254,22 @@ def ui_market_label(market: Optional[str]) -> str:
     return get_market_config(market).ui_code
 
 
+EGX_USD_SYMBOLS = frozenset({
+    "FAITA", "EGBE", "EKHO", "MOIL", "NAHO", "NDRL", "SAIB", "GPPL", "TRTO",
+})
+
+
 def currency_for_market(market: Optional[str]) -> str:
     cfg = get_market_config(market)
     return cfg.currency_ar or cfg.currency_code or ""
+
+
+def currency_for_symbol(symbol: Optional[str], market: Optional[str] = "EGX") -> str:
+    """Return exact display currency for a ticker (handling USD-denominated EGX stocks like FAITA, EGBE, MOIL)."""
+    clean = str(symbol or "").strip().upper().split(".")[0]
+    if clean and normalize_exchange_code(market) == "EGX" and clean in EGX_USD_SYMBOLS:
+        return "$"
+    return currency_for_market(market)
 
 
 def get_market_now(market: Optional[str] = "EGX", now_ts: Optional[float] = None) -> dt.datetime:

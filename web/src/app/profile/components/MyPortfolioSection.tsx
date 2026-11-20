@@ -14,6 +14,7 @@ import PortfolioPerformanceDashboard from "./PortfolioPerformanceDashboard";
 import PortfolioOverview from "./PortfolioOverview";
 import PortfolioTransactions from "./PortfolioTransactions";
 import PortfolioRebalancerModal from "./PortfolioRebalancerModal";
+import PortfolioDividendsCard from "@/components/dividends/PortfolioDividendsCard";
 import { usePortfolioReport } from "./usePortfolioReport";
 import styles from "./MyPortfolioSection.module.css";
 
@@ -605,6 +606,8 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                     </table>
                 </div>
             )}
+
+            <PortfolioDividendsCard positions={snapshot?.positions || []} />
 
             <p className="text-[10px] text-zinc-500 font-bold text-center uppercase tracking-wider">
                 {isAr

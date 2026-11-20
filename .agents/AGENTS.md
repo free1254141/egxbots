@@ -50,6 +50,7 @@ All agents (Planners, Developers, QA Reviewers, Subagents, and AI tools) must st
 
 6. **Hugging Face Deployment Rule (Python Backend Only)**:
    - When deploying or syncing updates to the Hugging Face Space (`weeasdwee/AI_BOT`), **ONLY push updated Python files (`.py`)** and backend configuration files (e.g. `api/`, `jobs/`, `scripts/`, `requirements*.txt`, `daily_job_config.json`, `Dockerfile`).
+   - **Mandatory HF Sync Manifest (`scripts/sync_to_hf_space.py`):** `FILES_TO_SYNC` MUST ALWAYS include **all daily operations/scheduler/pipeline/disclosures/GCC modules** (highest priority), **all AI chatbot modules (`api/agentic_chat/*`)**, and **every newly created or imported Python backend module**. Whenever adding a new `.py` runtime file in `api/`, `jobs/`, or `scripts/`, add it immediately to `scripts/sync_to_hf_space.py`.
    - **NEVER** push frontend Next.js files (`web/`), UI components, static images, icons, Android APKs, docs, or non-Python packages to Hugging Face. The Space only runs the Python bot/FastAPI backend.
 
 7. **DNS & Vercel Direct Resolution Guard**:

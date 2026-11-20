@@ -352,19 +352,29 @@ def _upload_storage_json(sb: Client, path: str, payload: Any) -> None:
     )
 
 
-def _merge_with_existing_storage_bars(sb: Client, path: str, new_bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _merge_with_existing_storage_bars_checked(
+    sb: Client,
+    path: str,
+    new_bars: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], bool]:
     merged: Dict[str, Dict[str, Any]] = {}
+    old_map: Dict[str, Dict[str, Any]] = {}
     try:
         raw = sb.storage.from_(STORAGE_BUCKET).download(path)
         old_bars = json.loads(gzip.decompress(raw))
         if isinstance(old_bars, list):
             for b in old_bars:
                 if isinstance(b, dict) and b.get("date"):
-                    merged[str(b["date"])[:10]] = b
+                    d_key = str(b["date"])[:10]
+                    merged[d_key] = b
+                    old_map[d_key] = b
     except Exception:
         pass
+
+    changed = not bool(old_map)
     for b in new_bars:
-        merged[str(b["date"])[:10]] = {
+        d_key = str(b["date"])[:10]
+        rec = {
             "symbol": b["symbol"],
             "exchange": b["exchange"],
             "date": b["date"],
@@ -374,7 +384,22 @@ def _merge_with_existing_storage_bars(sb: Client, path: str, new_bars: List[Dict
             "close": b["close"],
             "volume": b["volume"],
         }
-    return [merged[d] for d in sorted(merged.keys())]
+        prev = old_map.get(d_key)
+        if prev is None or (
+            prev.get("close") != rec["close"]
+            or prev.get("volume") != rec["volume"]
+            or prev.get("high") != rec["high"]
+            or prev.get("low") != rec["low"]
+            or prev.get("open") != rec["open"]
+        ):
+            changed = True
+        merged[d_key] = rec
+    return [merged[d] for d in sorted(merged.keys())], changed
+
+
+def _merge_with_existing_storage_bars(sb: Client, path: str, new_bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    bars, _ = _merge_with_existing_storage_bars_checked(sb, path, new_bars)
+    return bars
 
 
 def _sync_recent_stock_prices(
@@ -603,40 +628,63 @@ def run_gcc_metals_sync(
         bars_map.update(tv_map)
 
     summary: Dict[str, Any] = {}
+    recent_db_limit = 15 if daily_only else DB_RECENT_DAYS_LIMIT
+    storage_tl = threading.local()
+
+    def _get_worker_sb() -> Client:
+        client = getattr(storage_tl, "sb", None)
+        if client is None:
+            client = _get_saudi_supabase()
+            storage_tl.sb = client
+        return client
+
+    def _process_symbol(exch: str, it: InstrumentDef) -> Tuple[str, List[Dict[str, Any]], bool]:
+        sym = it[0]
+        bars = bars_map.get((sym, exch), [])
+        if not bars:
+            return sym, [], False
+        worker_sb = _get_worker_sb()
+        sym_path = f"prices/{exch}/symbols/{sym}.json.gz"
+        if daily_only:
+            full_sym_bars, changed = _merge_with_existing_storage_bars_checked(worker_sb, sym_path, bars)
+            if changed:
+                _upload_storage_json_gz(worker_sb, sym_path, full_sym_bars)
+        else:
+            full_sym_bars = [
+                {
+                    "symbol": sym,
+                    "exchange": exch,
+                    "date": b["date"],
+                    "open": b["open"],
+                    "high": b["high"],
+                    "low": b["low"],
+                    "close": b["close"],
+                    "volume": b["volume"],
+                }
+                for b in bars
+            ]
+            _upload_storage_json_gz(worker_sb, sym_path, full_sym_bars)
+            changed = True
+        return sym, full_sym_bars, changed
+
     for exch in sorted(target_exchanges):
         exch_items = [it for it in items if it[1] == exch]
         exch_bars: Dict[str, List[Dict[str, Any]]] = {}
         all_archive_rows: List[Dict[str, Any]] = []
         symbol_files_uploaded = 0
 
-        for it in exch_items:
-            sym = it[0]
-            bars = bars_map.get((sym, exch), [])
-            if not bars:
-                continue
-            sym_path = f"prices/{exch}/symbols/{sym}.json.gz"
-            if daily_only:
-                full_sym_bars = _merge_with_existing_storage_bars(sb, sym_path, bars)
-            else:
-                full_sym_bars = [
-                    {
-                        "symbol": sym,
-                        "exchange": exch,
-                        "date": b["date"],
-                        "open": b["open"],
-                        "high": b["high"],
-                        "low": b["low"],
-                        "close": b["close"],
-                        "volume": b["volume"],
-                    }
-                    for b in bars
-                ]
-            _upload_storage_json_gz(sb, sym_path, full_sym_bars)
-            symbol_files_uploaded += 1
-            exch_bars[sym] = full_sym_bars
-            all_archive_rows.extend(full_sym_bars)
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futs = [pool.submit(_process_symbol, exch, it) for it in exch_items]
+            for fut in as_completed(futs):
+                sym, full_sym_bars, changed = fut.result()
+                if not full_sym_bars:
+                    continue
+                if changed:
+                    symbol_files_uploaded += 1
+                exch_bars[sym] = full_sym_bars
+                all_archive_rows.extend(full_sym_bars)
 
-        if all_archive_rows:
+        if all_archive_rows and (symbol_files_uploaded > 0 or not daily_only):
             _upload_storage_json_gz(sb, f"prices/{exch}/stock_prices.json.gz", all_archive_rows)
             all_dates = [r["date"] for r in all_archive_rows]
             _upload_storage_json(
@@ -654,7 +702,7 @@ def run_gcc_metals_sync(
                 },
             )
 
-        db_price_rows = _sync_recent_stock_prices(sb, exch, stock_id_map, exch_bars)
+        db_price_rows = _sync_recent_stock_prices(sb, exch, stock_id_map, exch_bars, recent_limit=recent_db_limit)
         ind_count = _compute_and_upsert_indicators(sb, exch, exch_bars)
         idx_count = _sync_market_index(sb, exch, exch_bars)
         summary[exch] = {

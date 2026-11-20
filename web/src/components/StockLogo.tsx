@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { hasLocalStockLogo } from "@/lib/stock-logo-manifest";
+import { getRemoteStockLogoUrl, hasLocalStockLogo } from "@/lib/stock-logo-manifest";
 
 interface StockLogoProps {
     symbol: string;
@@ -10,7 +10,7 @@ interface StockLogoProps {
     className?: string;
 }
 
-export default function StockLogo({
+function StockLogoInner({
     symbol,
     logoUrl,
     size = "md",
@@ -39,11 +39,13 @@ export default function StockLogo({
     const colorIndex = symbol.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
     const bgColor = colors[colorIndex];
 
-    // Source selection logic
-    const upper = symbol.toUpperCase();
+    // Source selection logic: 1) bundled local SVG, 2) explicit prop URL, 3) 4-market CDN manifest
+    const upper = (symbol || "").trim().toUpperCase().split(".")[0];
     const candidates: string[] = [];
     if (hasLocalStockLogo(upper)) candidates.push(`/logos/${upper}.svg`);
-    if (logoUrl) candidates.push(logoUrl);
+    if (logoUrl && !candidates.includes(logoUrl)) candidates.push(logoUrl);
+    const manifestUrl = getRemoteStockLogoUrl(upper);
+    if (manifestUrl && !candidates.includes(manifestUrl)) candidates.push(manifestUrl);
     const src = candidates.find((c) => !failedSrcs.includes(c));
 
     const handleError = () => {
@@ -63,9 +65,15 @@ export default function StockLogo({
             <img
                 src={src}
                 alt={symbol}
+                loading="lazy"
+                decoding="async"
+                referrerPolicy="no-referrer"
                 className="w-full h-full object-contain p-1"
                 onError={handleError}
             />
         </div>
     );
 }
+
+const StockLogo = React.memo(StockLogoInner);
+export default StockLogo;

@@ -32,3 +32,11 @@ test('uppercase symbol metadata short-circuits without database reads before can
     expect(meta.alternates?.canonical).toBe('https://egxbots.com/stocks/abuk');
     expect(getPublicMarketClient).not.toHaveBeenCalled();
 });
+test('getStockHref disambiguates ADIB/TAQA in UAE context without breaking EGX or Saudi routes', () => {
+    const { getStockHref } = require('@/lib/stock-href');
+    expect(getStockHref('ADIB', { market: 'uae', exchange: 'ADX' })).toBe('/stocks/adib.adx');
+    expect(getStockHref('TAQA', { market: 'uae' })).toBe('/stocks/taqa.adx');
+    expect(getStockHref('ADIB', { market: 'egx', exchange: 'EGX' })).toBe('/stocks/adib');
+    expect(getStockHref('ADNOCLS', { market: 'uae', exchange: 'ADX' })).toBe('/stocks/adnocls');
+    expect(getStockHref('2222.SR', { market: 'tasi' })).toBe('/stocks/2222');
+});

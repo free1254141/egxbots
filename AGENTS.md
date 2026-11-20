@@ -60,6 +60,10 @@ These instructions apply to the entire repository, including AI assistants, revi
 ## 🚀 Hugging Face Deployment Rule (Python Backend Only)
 
 - When deploying or syncing updates to the Hugging Face Space (`weeasdwee/AI_BOT`), **ONLY push updated Python files (`.py`)** and backend configuration files (e.g. `api/`, `jobs/`, `scripts/`, `requirements*.txt`, `daily_job_config.json`, `Dockerfile`).
+- **Mandatory HF Sync Manifest (`scripts/sync_to_hf_space.py`):** `FILES_TO_SYNC` MUST ALWAYS include:
+  1. **All Daily Operations & Scheduling modules (Top Priority):** every EGX, Saudi, UAE/Qatar/Metals daily runner, price/news/disclosure sync, indicators/ML/systems, traps, Telegram dispatch, and scheduler module (`api/daily_*`, `api/saudi_*`, `api/gcc_*`, `jobs/daily_disclosures_sync.py`, `scripts/disclosures/sync_egx_disclosures.py`, `daily_job_config.json`, etc.).
+  2. **All AI Chatbot modules:** the entire `api/agentic_chat/` package (`pipeline.py`, `market_registry.py`, `tools_execution.py`, `prompts.py`, etc.).
+  3. **Every newly created or imported Python backend file:** whenever creating or importing a new `.py` backend module in `api/`, `jobs/`, or `scripts/` used at HF runtime, immediately add it to `scripts/sync_to_hf_space.py` (`FILES_TO_SYNC`) and verify zero missing runtime imports before syncing.
 - **NEVER** push frontend Next.js files (`web/`), UI assets/images, Android APKs, docs, or non-Python packages to Hugging Face. The HF Space runs the Python backend & bots only.
 
 ## AI Chat Architecture (Agentic Function Calling)

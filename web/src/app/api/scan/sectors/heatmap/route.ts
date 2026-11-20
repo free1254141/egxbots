@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   resolveRequestMarket,
   getMarketExchange,
+  getMarketExchanges,
   getMarketSupabaseClient,
 } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, withDailyTag } from "@/lib/cache/daily";
@@ -33,11 +34,19 @@ const pickFundamentalText = (payload: any, keys: string[]): string | null => {
   return null;
 };
 
+const MARKET_CURRENCY: Record<string, string> = {
+  egx: "EGP",
+  tasi: "SAR",
+  uae: "AED",
+  qatar: "QAR",
+};
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const market = resolveRequestMarket(req);
   const exchange = getMarketExchange(market);
-  const currency = market === "tasi" ? "SAR" : "EGP";
+  const exchanges = getMarketExchanges(market);
+  const currency = MARKET_CURRENCY[market] || "EGP";
   const explicitMarketParam =
     url.searchParams.has("market") ||
     url.searchParams.has("country") ||
@@ -53,14 +62,29 @@ export async function GET(req: NextRequest) {
     const { data: dateRows, error: dateError } = await supabase
       .from("market_heatmap")
       .select("captured_at")
-      .eq("exchange", exchange)
+      .in("exchange", exchanges)
       .order("captured_at", { ascending: false })
       .limit(12000);
     if (dateError) throw dateError;
 
-    const availableDates: string[] = Array.from(new Set<string>(
+    const heatmapDates: string[] = Array.from(new Set<string>(
       (dateRows || []).map((row: any) => String(row.captured_at || "").slice(0, 10)).filter(Boolean),
     )).sort().reverse();
+
+    let availableDates = heatmapDates;
+    let useIndicatorFallback = availableDates.length === 0;
+    if (useIndicatorFallback) {
+      const { data: indDateRows } = await supabase
+        .from("stock_technical_indicators")
+        .select("date")
+        .in("exchange", exchanges)
+        .order("date", { ascending: false })
+        .limit(3000);
+      availableDates = Array.from(new Set<string>(
+        (indDateRows || []).map((row: any) => String(row.date || "").slice(0, 10)).filter(Boolean),
+      )).sort().reverse().slice(0, 60);
+    }
+
     if (!availableDates.length) {
       return NextResponse.json(
         { rows: [], available_dates: [], market, exchange, currency },
@@ -76,22 +100,53 @@ export async function GET(req: NextRequest) {
     const fromDate = start <= end ? start : end;
     const toDate = start <= end ? end : start;
 
-    const { data: capturedRows, error: rowsError } = await supabase
-      .from("market_heatmap")
-      .select("symbol,exchange,sector,change_pct,cmf_20,volume,cap,captured_at")
-      .eq("exchange", exchange)
-      .gte("captured_at", `${fromDate}T00:00:00Z`)
-      .lte("captured_at", `${toDate}T23:59:59.999Z`)
-      .order("captured_at", { ascending: true })
-      .limit(10000);
-    if (rowsError) throw rowsError;
-
     const deduped = new Map<string, any>();
-    for (const row of capturedRows || []) {
-      const day = String(row.captured_at || "").slice(0, 10);
-      const key = `${day}|${row.symbol}`;
-      const existing = deduped.get(key);
-      if (!existing || String(row.captured_at) > String(existing.captured_at)) deduped.set(key, row);
+    if (!useIndicatorFallback) {
+      const { data: capturedRows, error: rowsError } = await supabase
+        .from("market_heatmap")
+        .select("symbol,exchange,sector,change_pct,cmf_20,volume,cap,captured_at")
+        .in("exchange", exchanges)
+        .gte("captured_at", `${fromDate}T00:00:00Z`)
+        .lte("captured_at", `${toDate}T23:59:59.999Z`)
+        .order("captured_at", { ascending: true })
+        .limit(10000);
+      if (rowsError) throw rowsError;
+      if (!capturedRows?.length) {
+        useIndicatorFallback = true;
+      } else {
+        for (const row of capturedRows) {
+          const day = String(row.captured_at || "").slice(0, 10);
+          const key = `${day}|${row.symbol}`;
+          const existing = deduped.get(key);
+          if (!existing || String(row.captured_at) > String(existing.captured_at)) deduped.set(key, row);
+        }
+      }
+    }
+
+    if (useIndicatorFallback) {
+      let { data: indRows, error: indErr } = await supabase
+        .from("stock_technical_indicators")
+        .select("symbol,exchange,date,close,volume,change_pct,cmf_20")
+        .in("exchange", exchanges)
+        .gte("date", fromDate)
+        .lte("date", toDate)
+        .order("date", { ascending: true })
+        .limit(10000);
+      if (indErr) {
+        ({ data: indRows } = await supabase
+          .from("stock_technical_indicators")
+          .select("symbol,exchange,date,close,volume,change_pct")
+          .in("exchange", exchanges)
+          .gte("date", fromDate)
+          .lte("date", toDate)
+          .order("date", { ascending: true })
+          .limit(10000));
+      }
+      for (const row of indRows || []) {
+        const day = String(row.date || "").slice(0, 10);
+        if (!row.symbol || !day) continue;
+        deduped.set(`${day}|${row.symbol}`, row);
+      }
     }
 
     const symbols = Array.from(new Set(Array.from(deduped.values()).map((row) => row.symbol).filter(Boolean)));
@@ -103,13 +158,13 @@ export async function GET(req: NextRequest) {
       let { data, error: fundErr } = await supabase
         .from("stock_fundamentals")
         .select("symbol,name,name_ar,data")
-        .eq("exchange", exchange)
+        .in("exchange", exchanges)
         .in("symbol", chunk);
       if (fundErr) {
         ({ data } = await supabase
           .from("stock_fundamentals")
           .select("symbol,data")
-          .eq("exchange", exchange)
+          .in("exchange", exchanges)
           .in("symbol", chunk));
       }
       for (const row of data || []) {
@@ -124,13 +179,13 @@ export async function GET(req: NextRequest) {
         let { data: stockRows, error: stockErr } = await supabase
           .from("stocks")
           .select("symbol,name,name_ar,sector")
-          .eq("exchange", exchange)
+          .in("exchange", exchanges)
           .in("symbol", chunk);
         if (stockErr) {
           ({ data: stockRows } = await supabase
             .from("stocks")
             .select("symbol,name,sector")
-            .eq("exchange", exchange)
+            .in("exchange", exchanges)
             .in("symbol", chunk));
         }
         for (const s of stockRows || []) {
@@ -144,6 +199,9 @@ export async function GET(req: NextRequest) {
     const rows = Array.from(deduped.values()).map((row) => {
       const volume = Number(row.volume || 0);
       const tradedValue = Number(row.cap || 0);
+      const closeVal = useIndicatorFallback
+        ? Number(row.close || 0)
+        : (volume > 0 ? tradedValue / volume : 0);
       const fundRecord = fundamentals.get(row.symbol);
       const data = fundRecord?.data || {};
       const stockMeta = stocksMeta.get(row.symbol);
@@ -158,15 +216,15 @@ export async function GET(req: NextRequest) {
         stockMeta?.name ||
         null;
       const resolvedName =
-        market === "tasi"
+        market !== "egx"
           ? nameAr || nameEn || row.symbol
           : nameEn || nameAr || row.symbol;
       return {
         symbol: row.symbol,
         exchange: row.exchange || exchange,
         currency,
-        date: String(row.captured_at).slice(0, 10),
-        close: volume > 0 ? tradedValue / volume : 0,
+        date: String(row.captured_at || row.date).slice(0, 10),
+        close: closeVal,
         volume,
         change_pct: Number(row.change_pct || 0),
         cmf_20: Number(row.cmf_20 || 0),
@@ -178,7 +236,7 @@ export async function GET(req: NextRequest) {
         name: resolvedName,
         ...(nameAr ? { name_ar: nameAr } : {}),
       };
-    });
+    }).filter((r) => !useIndicatorFallback || (r.close > 0 && r.volume > 0));
 
     return NextResponse.json(
       {

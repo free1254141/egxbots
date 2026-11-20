@@ -26,6 +26,7 @@ VIP_CHAT_ID = "-1003906516349"
 LINK_PRICING = "https://egxbots.com/pricing?plan=pro"
 LINK_TECHNICAL = "https://egxbots.com/scanner/technical"
 LINK_FAIR_VALUE = "https://egxbots.com/fair-value"
+LINK_DIVIDENDS = "https://egxbots.com/dividends"
 LINK_DISCLOSURES = "https://egxbots.com/disclosures"
 LINK_SIMILARITY = "https://egxbots.com/scanner/backtests?tab=similarity"
 
@@ -82,7 +83,117 @@ def _f(v: Any, nd: int = 2) -> str:
         return "-"
 
 
-def build_stats(perf: Dict[str, Any], traps: Dict[str, Any], disclosures: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def _load_upcoming_dividends_with_financials(client, limit: int = 8) -> List[Dict[str, Any]]:
+    """Load upcoming/pending EGX dividends from market_cache and attach deterministic financial health."""
+    try:
+        rows = (
+            client.table("market_cache")
+            .select("payload")
+            .eq("cache_key", "dividends_calendar_egx")
+            .order("computed_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        payload = (rows[0].get("payload") if rows else {}) or {}
+        all_divs = [
+            d for d in (payload.get("dividends") or [])
+            if isinstance(d, dict) and d.get("status") in ("upcoming", "pending_pay")
+        ]
+        if not all_divs:
+            return []
+        picked = all_divs[:limit]
+        syms = [str(d.get("symbol") or "").upper() for d in picked if d.get("symbol")]
+        fund_map: Dict[str, Dict[str, Any]] = {}
+        if syms:
+            f_rows = (
+                client.table("stock_fundamentals")
+                .select("symbol,data,fund_score")
+                .eq("exchange", "EGX")
+                .in_("symbol", syms)
+                .limit(len(syms) + 5)
+                .execute()
+                .data
+                or []
+            )
+            for fr in f_rows:
+                if fr.get("symbol"):
+                    fund_map[str(fr["symbol"]).upper()] = fr
+
+        from api.agentic_chat.tools_execution import _extract_rich_fundamentals
+
+        enriched: List[Dict[str, Any]] = []
+        for d in picked:
+            sym = str(d.get("symbol") or "").upper()
+            fr = fund_map.get(sym) or {}
+            rich = _extract_rich_fundamentals(
+                fr.get("data") or {},
+                fund_score=fr.get("fund_score"),
+                close_price=d.get("close_price"),
+                name=d.get("name_en") or d.get("name_ar") or sym,
+            )
+            diag = rich.get("fundamental_diagnosis") if isinstance(rich.get("fundamental_diagnosis"), dict) else {}
+            enriched.append({
+                **d,
+                "verdict_ar": diag.get("verdict_ar") or "🟡 بيانات مالية قيد الاستكمال",
+                "pe_ratio": rich.get("pe_ratio"),
+                "roe_pct": rich.get("roe_pct"),
+                "net_margin_pct": rich.get("net_margin_pct"),
+                "debt_to_equity": rich.get("debt_to_equity"),
+                "fund_score": rich.get("fund_score"),
+            })
+        return enriched
+    except Exception as e:
+        print(f"[REPORT_DISPATCH] Failed to load upcoming dividends: {e}")
+        return []
+
+
+def _dividends_lines(s: Dict[str, Any], limit: int = 6, detailed: bool = True) -> str:
+    divs = s.get("dividends") or []
+    if not divs:
+        return "• لا توجد توزيعات كوبونات قادمة مسجلة حالياً."
+    lines: List[str] = []
+    for d in divs[:limit]:
+        sym = d.get("symbol") or ""
+        name_ar = d.get("name_ar") or sym
+        amt = float(d.get("amount") or 0)
+        amt_str = f"{amt:.3f}" if amt < 1 else f"{amt:.2f}"
+        curr = d.get("currency_ar") or "ج.م"
+        yld = d.get("yield_pct")
+        yld_txt = f" (عائد <b>{float(yld):.2f}%</b>)" if yld is not None else ""
+        ex_dt = d.get("ex_date") or "-"
+        pay_dt = d.get("pay_date") or "يُعلن قريباً"
+        verdict = str(d.get("verdict_ar") or "🟡 متوازن")
+        short_verdict = verdict.split("—")[0].strip()
+
+        if detailed:
+            metrics_parts: List[str] = []
+            if d.get("pe_ratio") is not None:
+                metrics_parts.append(f"P/E: {float(d['pe_ratio']):.1f}x")
+            if d.get("roe_pct") is not None:
+                metrics_parts.append(f"ROE: {float(d['roe_pct']):.1f}%")
+            if d.get("fund_score") is not None:
+                metrics_parts.append(f"تقييم مالي: {int(round(float(d['fund_score'])))}/100")
+            m_str = f" ({' | '.join(metrics_parts)})" if metrics_parts else ""
+            lines.append(
+                f"• <b>{sym}</b> ({name_ar}): كوبون <b>{amt_str} {curr}</b>{yld_txt}\n"
+                f"  📅 بدون كوبون: <code>{ex_dt}</code> | الصرف: <code>{pay_dt}</code>\n"
+                f"  💼 <i>{verdict}{m_str}</i>"
+            )
+        else:
+            lines.append(
+                f"• <b>{sym}</b> ({name_ar}): <b>{amt_str} {curr}</b>{yld_txt} | Ex: <code>{ex_dt}</code> — {short_verdict}"
+            )
+    return "\n".join(lines)
+
+
+def build_stats(
+    perf: Dict[str, Any],
+    traps: Dict[str, Any],
+    disclosures: Optional[List[Dict[str, Any]]] = None,
+    dividends: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     review = perf.get("review") or {}
     unusual = [u for u in (review.get("unusual") or []) if isinstance(u, dict)]
     winners = [u for u in unusual if float(u.get("retPct") or 0) > 0]
@@ -99,6 +210,7 @@ def build_stats(perf: Dict[str, Any], traps: Dict[str, Any], disclosures: Option
         "springs_stat": perf.get("springs") or {},
         "upthrusts_stat": perf.get("upthrusts") or {},
         "disclosures": disclosures or [],
+        "dividends": dividends or [],
     }
 
 
@@ -211,12 +323,15 @@ def build_vip_html(s: Dict[str, Any]) -> str:
         f"• <b>AUTO:</b> خصم 38% ومضاعف ربحية منخفض.\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n📑 <b>رابعاً: رادار إفصاحات الشركات وتعاملات الداخليين:</b>\n"
         f"{_disclosures_lines(s, 4)}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n💰 <b>خامساً: نشرة الكوبونات القادمة والحالة المالية لكل سهم:</b>\n"
+        f"{_dividends_lines(s, 6, detailed=True)}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n🎯 <b>السجل الموثق (40 جلسة):</b>\n"
         f"• انفجار 3 أيام: <b>{us.get('hitRate3d', '-')}%</b> ({us.get('events', '-')} إشارة)\n"
         f"• دقة Spring: <b>{sp.get('hitRate3d', '-')}%</b> | دقة Upthrust: <b>{up.get('winRate', '-')}%</b>\n\n"
         f"{consensus_block}"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"🔗 <b>روابط الأدوات على المنصة:</b>\n"
+        f"• تقويم الكوبونات (4 أسواق): {LINK_DIVIDENDS}\n"
         f"• رادار الإفصاحات والـ PDF: {LINK_DISCLOSURES}\n"
         f"• الماسح الفني وكاشف المصائد: {LINK_TECHNICAL}\n"
         f"• كاشف القيمة العادلة: {LINK_FAIR_VALUE}\n"
@@ -231,8 +346,10 @@ def build_free_telegram_html(s: Dict[str, Any]) -> str:
         f"📈 <b>نماذج أخرى صعدت من إشارات الرادار:</b>\n{_movers_lines(s, 5)}\n\n"
         f"🪤 <b>مصائد الغد:</b> رصد الكاشف <b>{len(s['bear'])}</b> نموذج ارتداد و<b>{len(s['bull'])}</b> مصيدة قمة.\n\n"
         f"📑 <b>إفصاحات اليوم:</b>\n{_disclosures_lines(s, 3)}\n\n"
+        f"💰 <b>نشرة الكوبونات القريبة والحالة المالية:</b>\n{_dividends_lines(s, 4, detailed=False)}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n{_offer_html()}\n\n"
         f"🔗 <b>استكشف الأدوات مجاناً:</b>\n"
+        f"• تقويم الكوبونات القادمة: {LINK_DIVIDENDS}\n"
         f"• رادار الإفصاحات: {LINK_DISCLOSURES}\n"
         f"• كاشف المصائد: {LINK_TECHNICAL}"
     )
@@ -454,7 +571,8 @@ def run_daily_report_dispatch(client, dry_run: bool = False) -> Dict[str, Any]:
     today = _cairo_today()
     perf, traps = _load_snapshots(client)
     disclosures = _load_disclosures(client, limit=5)
-    s = build_stats(perf, traps, disclosures)
+    dividends = _load_upcoming_dividends_with_financials(client, limit=8)
+    s = build_stats(perf, traps, disclosures, dividends)
     if s["as_of"] != today:
         return {"status": "skipped", "reason": f"snapshot asOf={s['as_of']} != today {today}"}
     if not s["bear"] and not s["movers"]:
@@ -468,7 +586,7 @@ def run_daily_report_dispatch(client, dry_run: bool = False) -> Dict[str, Any]:
         ],
         [
             {"text": "💎 فحص القيمة العادلة ↗", "url": LINK_FAIR_VALUE},
-            {"text": "📈 النماذج المتكررة ↗", "url": LINK_SIMILARITY},
+            {"text": "💰 تقويم الكوبونات ↗", "url": LINK_DIVIDENDS},
         ],
     ]
     from api.payment_common import current_pro_offer_copy
@@ -477,8 +595,8 @@ def run_daily_report_dispatch(client, dry_run: bool = False) -> Dict[str, Any]:
     free_buttons = [
         [{"text": f"⚡ الباقات تبدأ من 100 ج.م (والشاملة {pro_price} ج.م) ↗", "url": LINK_PRICING}],
         [
+            {"text": "💰 تقويم الكوبونات ↗", "url": LINK_DIVIDENDS},
             {"text": "📑 رادار الإفصاحات ↗", "url": LINK_DISCLOSURES},
-            {"text": "🔍 كاشف المصائد ↗", "url": LINK_TECHNICAL},
         ],
     ]
     free_chat = os.getenv("TELEGRAM_FREE_CHAT_ID", "-1002083067817_153").strip()
@@ -506,3 +624,59 @@ def run_daily_report_dispatch(client, dry_run: bool = False) -> Dict[str, Any]:
         except Exception as exc:  # isolate per channel
             result["channels"][channel] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
     return result
+
+
+def send_upcoming_dividends_bulletin(client, dry_run: bool = False) -> Dict[str, Any]:
+    """Send a dedicated Upcoming Cash Dividends + Financial Health bulletin to VIP & Free Telegram channels."""
+    today = _cairo_today()
+    divs = _load_upcoming_dividends_with_financials(client, limit=10)
+    if not divs:
+        return {"ok": False, "reason": "no_upcoming_dividends"}
+
+    s = {"as_of": today, "dividends": divs}
+    vip_html = (
+        f"👑 <b>نشرة VIP | الكوبونات النقدية القريبة والحالة المالية لكل سهم</b> 🇪🇬\n"
+        f"📅 <b>التحديث:</b> {today}\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{_dividends_lines(s, limit=10, detailed=True)}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"💡 <i>تنويه: تخضع توزيعات البورصة المصرية لضريبة توزيعات 5% عند الصرف. "
+        f"تُضاف الكوبونات تلقائياً وتظهر تنبيهاتها في محفظتك على المنصة.</i>\n"
+        f"🔗 تقويم الكوبونات الكامل (مصر + السعودية + قطر + الإمارات): {LINK_DIVIDENDS}\n"
+        f"⚠️ <i>بيانات إحصائية وتحليلية لأغراض البحث والتعليم فقط وليست توصية استثمارية.</i>"
+    )
+    free_html = (
+        f"💰 <b>نشرة الكوبونات النقدية القريبة في البورصة المصرية والحالة المالية</b> 🇪🇬\n"
+        f"📅 <b>التحديث:</b> {today}\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{_dividends_lines(s, limit=8, detailed=True)}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"{_offer_html()}\n\n"
+        f"🔗 <b>تقويم الكوبونات وحاسبة أرباحك مجاناً (4 أسواق):</b> {LINK_DIVIDENDS}\n"
+        f"⚠️ <i>بيانات إحصائية وتحليلية لأغراض البحث والتعليم فقط وليست توصية استثمارية.</i>"
+    )
+    from api.payment_common import current_pro_offer_copy
+    pro_price, _ = current_pro_offer_copy()
+    vip_buttons = [
+        [
+            {"text": "💰 تقويم الكوبونات (4 أسواق) ↗", "url": LINK_DIVIDENDS},
+            {"text": "💼 محفظتي وكوبوناتي ↗", "url": "https://egxbots.com/profile#portfolio"},
+        ]
+    ]
+    free_buttons = [
+        [{"text": "💰 تقويم الكوبونات وحاسبة أرباحك (4 أسواق) ↗", "url": LINK_DIVIDENDS}],
+        [{"text": f"⚡ الباقات تبدأ من 100 ج.م (والشاملة {pro_price} ج.م) ↗", "url": LINK_PRICING}],
+    ]
+    free_chat = os.getenv("TELEGRAM_FREE_CHAT_ID", "-1002083067817_153").strip()
+
+    if dry_run:
+        return {"ok": True, "dry_run": True, "count": len(divs), "vip_preview": vip_html[:400]}
+
+    vip_ok, vip_info = _telegram_send(VIP_CHAT_ID, vip_html, vip_buttons)
+    free_ok, free_info = _telegram_send(free_chat, free_html, free_buttons)
+    return {
+        "ok": bool(vip_ok and free_ok),
+        "count": len(divs),
+        "vip": {"ok": vip_ok, "chat_id": VIP_CHAT_ID, "msg_id": vip_info},
+        "free": {"ok": free_ok, "chat_id": free_chat, "msg_id": free_info},
+    }

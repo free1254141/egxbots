@@ -860,3 +860,100 @@ def test_public_market_cookie_vs_param_cache_headers():
         tech_post = client.post("/api/scan/technical?market=egx", json={"limit": 10})
         assert tech_post.status_code == 200
         assert "private" in (tech_post.headers.get("cache-control") or "").lower()
+
+
+def test_sector_heatmap_and_timeline_gcc_fallback():
+    offload_public._HEATMAP_CACHE.clear()
+    offload_public._TIMELINE_CACHE.clear()
+    db = _FakeSupabase(
+        tables={
+            "market_heatmap": [],
+            "market_cache": [],
+            "stock_fundamentals": [
+                {"symbol": "EMAAR", "exchange": "DFM", "name": "Emaar Properties", "name_ar": "إعمار العقارية", "data": {"sector": "Real Estate"}},
+                {"symbol": "ADNOCDIST", "exchange": "ADX", "name": "ADNOC Distribution", "name_ar": "أدنوك للتوزيع", "data": {"sector": "Energy"}},
+                {"symbol": "QIBK", "exchange": "QSE", "name": "Qatar Islamic Bank", "name_ar": "مصرف قطر الإسلامي", "data": {"sector": "Financial Services"}},
+            ],
+            "stocks": [
+                {"symbol": "EMAAR", "exchange": "DFM", "name": "Emaar Properties", "name_ar": "إعمار العقارية", "sector": "Real Estate", "is_active": True},
+                {"symbol": "ADNOCDIST", "exchange": "ADX", "name": "ADNOC Distribution", "name_ar": "أدنوك للتوزيع", "sector": "Energy", "is_active": True},
+                {"symbol": "QIBK", "exchange": "QSE", "name": "Qatar Islamic Bank", "name_ar": "مصرف قطر الإسلامي", "sector": "Financial Services", "is_active": True},
+            ],
+            "stock_technical_indicators": [
+                {"symbol": "EMAAR", "exchange": "DFM", "date": "2026-11-19", "close": 9.5, "volume": 2000000, "change_pct": 1.8, "cmf_20": 0.14},
+                {"symbol": "ADNOCDIST", "exchange": "ADX", "date": "2026-11-19", "close": 3.7, "volume": 1500000, "change_pct": 0.6, "cmf_20": 0.08},
+                {"symbol": "QIBK", "exchange": "QSE", "date": "2026-11-19", "close": 21.0, "volume": 900000, "change_pct": 1.1, "cmf_20": 0.12},
+            ],
+        }
+    )
+    client = _build_client()
+    with mock.patch("api.routers.offload_public.get_market_supabase", return_value=db), mock.patch(
+        "api.routers.offload_public.get_primary_supabase", return_value=db
+    ):
+        uae_res = client.get("/api/scan/sectors/heatmap?market=uae")
+        assert uae_res.status_code == 200
+        uae_body = uae_res.json()
+        assert uae_body["currency"] == "AED"
+        assert uae_body["exchange"] == "DFM"
+        assert {r["symbol"] for r in uae_body["rows"]} == {"EMAAR", "ADNOCDIST"}
+        assert uae_body["available_dates"] == ["2026-11-19"]
+
+        qatar_res = client.get("/api/scan/sectors/heatmap?market=qatar")
+        assert qatar_res.status_code == 200
+        qatar_body = qatar_res.json()
+        assert qatar_body["currency"] == "QAR"
+        assert qatar_body["exchange"] == "QSE"
+        assert [r["symbol"] for r in qatar_body["rows"]] == ["QIBK"]
+
+        tl_res = client.get("/api/scan/sectors/timeline?market=qatar&months=6")
+        assert tl_res.status_code == 200
+        tl_body = tl_res.json()
+        assert tl_body["country"] == "Qatar"
+        assert tl_body["months"] == ["2026-11"]
+        assert len(tl_body["sectors"]) == 1
+
+
+def test_cross_listed_adib_stock_page_data_isolation():
+    offload_public._PUBLIC_STOCK_PAGE_CACHE.clear()
+    egx_db = _FakeSupabase(
+        tables={
+            "stock_fundamentals": [
+                {"symbol": "ADIB", "exchange": "EGX", "updated_at": "2026-11-19T12:00:00Z", "data": {"name": "ADIB Egypt", "sector": "Banks", "currency": "EGP"}},
+            ],
+            "stock_prices": [
+                {"symbol": "ADIB", "exchange": "EGX", "date": "2026-11-19", "open": 41.0, "high": 42.0, "low": 40.5, "close": 41.8, "volume": 500000},
+            ],
+            "stock_technical_indicators": [],
+            "scan_results": [],
+            "stocks": [{"symbol": "ADIB", "exchange": "EGX", "name": "ADIB Egypt", "name_ar": "مصرف أبوظبي الإسلامي - مصر"}],
+        }
+    )
+    gcc_db = _FakeSupabase(
+        tables={
+            "stocks": [
+                {"symbol": "ADIB", "exchange": "ADX", "country": "UAE", "currency": "AED", "name": "Abu Dhabi Islamic Bank PJSC", "name_ar": "مصرف أبوظبي الإسلامي (أبوظبي)", "sector": "Financials", "is_active": True},
+            ],
+            "stock_prices": [
+                {"symbol": "ADIB", "exchange": "ADX", "date": "2026-11-19", "open": 13.0, "high": 13.5, "low": 12.9, "close": 13.4, "volume": 1200000},
+            ],
+            "stock_technical_indicators": [
+                {"symbol": "ADIB", "exchange": "ADX", "date": "2026-11-19", "close": 13.4, "change_pct": 2.3, "rsi_14": 60.0},
+            ],
+        }
+    )
+    client = _build_client()
+    with mock.patch("api.routers.offload_public.get_market_supabase", side_effect=lambda m: egx_db if m == "egx" else gcc_db), mock.patch(
+        "api.routers.offload_public.get_primary_supabase", return_value=egx_db
+    ):
+        egx_res = client.get("/api/public/stock-page-data?symbol=ADIB&market=egx")
+        assert egx_res.status_code == 200
+        assert egx_res.json()["snapshot"]["fundamentals"]["exchange"] == "EGX"
+        assert egx_res.json()["snapshot"]["latestPrice"]["close"] == 41.8
+
+        adx_res = client.get("/api/public/stock-page-data?symbol=ADIB.ADX")
+        assert adx_res.status_code == 200
+        adx_snap = adx_res.json()["snapshot"]
+        assert adx_snap["fundamentals"]["exchange"] == "ADX"
+        assert adx_snap["fundamentals"]["data"]["currency"] == "AED"
+        assert adx_snap["fundamentals"]["data"]["name_ar"] == "مصرف أبوظبي الإسلامي (أبوظبي)"
+        assert adx_snap["latestPrice"]["close"] == 13.4

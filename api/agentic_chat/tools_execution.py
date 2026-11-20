@@ -279,6 +279,7 @@ def get_active_market_context() -> str:
 
 from api.agentic_chat.market_registry import (
     currency_for_market as _reg_currency_for_market,
+    currency_for_symbol as _reg_currency_for_symbol,
     detect_exchange_from_suffix as _reg_detect_exchange_from_suffix,
     get_market_config as _reg_get_market_config,
     get_supabase_for_exchange as _reg_get_supabase_for_exchange,
@@ -1460,6 +1461,36 @@ def _compute_stock_verdict(
     return "🟡 حيادي للمراقبة"
 
 
+def _normalize_king_ai_score(val: Any) -> Optional[float]:
+    """Normalize King AI score onto a unified 0–100 percentage scale (converting 0–1 decimals like 0.71 -> 71.0)."""
+    num = _safe_float(val, 4)
+    if num is None:
+        return None
+    if 0.0 < num <= 1.0:
+        return round(num * 100.0, 1)
+    return round(num, 1)
+
+
+def _build_fair_value_gap(close: float, fair_value: float) -> Dict[str, Any]:
+    """Return exact, unambiguous valuation gap metrics so the LLM never confuses upside_pct with premium_pct."""
+    upside = round(((fair_value - close) / close) * 100.0, 2) if close > 0 else 0.0
+    price_vs_fv = round(((close - fair_value) / fair_value) * 100.0, 2) if fair_value > 0 else 0.0
+    if upside >= 12.0:
+        gap_ar = f"السهم أقل من قيمته العادلة بفرصة صعود +{upside:.1f}%"
+    elif upside <= -10.0:
+        gap_ar = (
+            f"السعر الحالي أعلى من القيمة العادلة بنسبة +{abs(price_vs_fv):.1f}% "
+            f"(أي القيمة العادلة أقل من السعر الحالي بنحو {abs(upside):.1f}%)"
+        )
+    else:
+        gap_ar = f"يتداول قريباً من قيمته العادلة (فارق {upside:+.1f}%)"
+    return {
+        "upside_pct": upside,
+        "price_vs_fv_pct": price_vs_fv,
+        "valuation_gap_ar": gap_ar,
+    }
+
+
 def _compute_stock_context_metrics(
     close: Optional[float],
     ema_50: Optional[float],
@@ -1469,7 +1500,7 @@ def _compute_stock_context_metrics(
     resistance_1: Optional[float],
     stop_loss: Optional[float],
 ) -> Dict[str, Any]:
-    """Pre-compute exact percentage distances and risk/reward to prevent LLM arithmetic errors."""
+    """Pre-compute exact percentage distances, tactical near-term support/stop, and risk/reward."""
     if not close or close <= 0:
         return {}
     metrics: Dict[str, Any] = {}
@@ -1479,8 +1510,10 @@ def _compute_stock_context_metrics(
         metrics["above_ema200"] = close > ema_200
     if vwap_20:
         metrics["above_vwap"] = close > vwap_20
+    dist_s1_pct: Optional[float] = None
     if support_1:
-        metrics["dist_to_support_pct"] = round(((support_1 - close) / close) * 100.0, 2)
+        dist_s1_pct = round(((support_1 - close) / close) * 100.0, 2)
+        metrics["dist_to_support_pct"] = dist_s1_pct
     if resistance_1:
         metrics["dist_to_resistance_pct"] = round(((resistance_1 - close) / close) * 100.0, 2)
     if resistance_1 and stop_loss and resistance_1 > close > stop_loss:
@@ -1488,6 +1521,27 @@ def _compute_stock_context_metrics(
         reward = resistance_1 - close
         if risk > 0:
             metrics["risk_reward_from_close"] = round(reward / risk, 2)
+
+    # When structural support_1 is far below close (> 12%), compute practical near-term tactical support & stop
+    if dist_s1_pct is not None and dist_s1_pct < -12.0:
+        metrics["support_1_is_distant"] = True
+        near_floors = [
+            lvl
+            for lvl in (vwap_20, ema_50, ema_200)
+            if lvl and (close * 0.88) <= lvl <= (close * 0.985)
+        ]
+        tac_sup = _safe_price(max(near_floors)) if near_floors else _safe_price(close * 0.94)
+        tac_stop = _safe_price(tac_sup * 0.975) if tac_sup else _safe_price(close * 0.92)
+        if tac_sup and tac_stop:
+            metrics["tactical_support"] = tac_sup
+            metrics["tactical_stop_loss"] = tac_stop
+            metrics["dist_to_tactical_support_pct"] = round(((tac_sup - close) / close) * 100.0, 2)
+            metrics["dist_to_tactical_stop_pct"] = round(((tac_stop - close) / close) * 100.0, 2)
+            if resistance_1 and resistance_1 > close > tac_stop:
+                t_risk = close - tac_stop
+                t_reward = resistance_1 - close
+                if t_risk > 0:
+                    metrics["tactical_risk_reward"] = round(t_reward / t_risk, 2)
     return metrics
 
 
@@ -2233,7 +2287,7 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
             change_pct = _safe_float(latest_tech.get("change_pct"))
             sharia = is_sharia_compliant(sym)
 
-            king_score = _safe_float(latest_tech.get("king_ai_score"))
+            king_score = _normalize_king_ai_score(latest_tech.get("king_ai_score"))
             acc_score = _safe_float(wyckoff_info.get("acc_score"))
             rsi = _safe_float(latest_tech.get("rsi_14"))
 
@@ -2279,11 +2333,12 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                 stop_loss=stop_loss,
             )
 
+            sym_currency = _reg_currency_for_symbol(sym, "EGX")
             egx_item: Dict[str, Any] = {
                 "symbol": sym,
                 "market": "EGX",
                 "exchange": "EGX",
-                "currency": "ج.م",
+                "currency": sym_currency,
                 "name_ar": stock_name_ar or sym,
                 "name": stock_name_en,
                 "is_sharia_compliant": sharia,
@@ -2333,12 +2388,15 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                 **ctx_metrics,
                 **fundamentals,
             }
+            up_div = _lookup_upcoming_dividend(sym, "EGX")
+            if up_div:
+                egx_item["upcoming_dividend"] = up_div
             ui_chart = _build_ui_chart_payload(
                 by_sym.get(sym, []) if "by_sym" in locals() else [],
                 _safe_price(latest_tech.get("ema_50")),
                 support_1,
                 resistance_1,
-                currency="ج.م",
+                currency=sym_currency,
             )
             if ui_chart:
                 egx_item["_ui_chart"] = ui_chart
@@ -2589,9 +2647,9 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     stop_loss = calc_ti.get("stop_loss") or (_safe_price(support_1 * 0.98) if support_1 else None)
                     entry_zone = calc_ti.get("entry_zone") or (f"{support_1} – {_safe_price(support_1 * 1.02)}" if support_1 else "غير محدد")
 
-                    king_score = _safe_float(db_ti.get("king_ai_score"))
+                    king_score = _normalize_king_ai_score(db_ti.get("king_ai_score"))
                     if king_score is None:
-                        king_score = calc_ti.get("king_ai_score")
+                        king_score = _normalize_king_ai_score(calc_ti.get("king_ai_score"))
 
                     ti_date = db_ti.get("date") or calc_ti.get("date") or (
                         str(db_ti.get("updated_at"))[:10] if db_ti.get("updated_at") else None
@@ -2677,6 +2735,9 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         ),
                         **ctx_metrics_sa,
                     }
+                    up_div_sa = _lookup_upcoming_dividend(sym, exch_code)
+                    if up_div_sa:
+                        sa_item["upcoming_dividend"] = up_div_sa
                     ui_chart_sa = _build_ui_chart_payload(
                         sa_ohlcv_map.get(sym, []),
                         ema_50,
@@ -3322,7 +3383,7 @@ def _sync_get_recommendations(
             "symbol": sym,
             "market": "EGX",
             "exchange": "EGX",
-            "currency": "ج.م",
+            "currency": _reg_currency_for_symbol(sym, "EGX"),
             "name": clean_name,
             "name_ar": clean_name,
             "signal": r.get("signal", "BUY"),
@@ -3627,7 +3688,7 @@ def _sync_get_technical_scan(
             "symbol": sym,
             "market": "EGX",
             "exchange": "EGX",
-            "currency": "ج.م",
+            "currency": _reg_currency_for_symbol(sym, "EGX"),
             "name": clean_name,
             "name_ar": clean_name,
             "close": close,
@@ -3635,7 +3696,7 @@ def _sync_get_technical_scan(
             "rsi_14": rsi,
             "r_vol": _safe_float(r.get("r_vol")),
             "macd": _safe_float(r.get("macd"), 4),
-            "king_ai_score": _safe_float(r.get("king_ai_score")),
+            "king_ai_score": _normalize_king_ai_score(r.get("king_ai_score")),
             "egx_ai_score": _safe_float(r.get("egx_ai_score")),
             "support_1": s1,
             "resistance_1": r1,
@@ -3929,7 +3990,7 @@ def _sync_get_accumulation_stocks(
             "symbol": sym,
             "market": "EGX",
             "exchange": "EGX",
-            "currency": "ج.م",
+            "currency": _reg_currency_for_symbol(sym, "EGX"),
             "accumulation_score": _safe_float(r.get("acc_score")),
             "distribution_score": _safe_float(r.get("dist_score")),
             "wyckoff_phase": r.get("wyckoff_phase") or "تجميع مؤسسي (Accumulation)",
@@ -4292,7 +4353,8 @@ def _sync_get_fair_value(
             fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
                 close, vwap, ema, fv_fund_sa.get(str(sym).upper()), market=eff_mkt
             )
-            upside = round(((fair_value - close) / close) * 100, 2)
+            gap_info = _build_fair_value_gap(close, fair_value)
+            upside = gap_info["upside_pct"]
             nm = names_map.get(sym, {})
             clean_name = (nm.get("name_ar") or _alias_name_for_symbol(sym, eff_mkt) or nm.get("name") or sym).split(",")[0].strip()
 
@@ -4304,7 +4366,7 @@ def _sync_get_fair_value(
                 "currency": currency,
                 "current_price": close,
                 "fair_value": fair_value,
-                "upside_pct": upside,
+                **gap_info,
                 "status": "undervalued" if upside > 5 else ("overvalued" if upside < -5 else "fair"),
                 "status_ar": "أقل من السعر العادل (رخيص) 🟢" if upside > 5 else ("أعلى من السعر العادل (متضخم) 🔴" if upside < -5 else "في النطاق العادل ⚖️"),
                 "model": fv_model,
@@ -4386,16 +4448,17 @@ def _sync_get_fair_value(
         fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
             close, vwap, ema, fv_fund_egx.get(str(sym).upper()), market="EGX"
         )
-        upside = round(((fair_value - close) / close) * 100, 2)
+        gap_info = _build_fair_value_gap(close, fair_value)
+        upside = gap_info["upside_pct"]
 
         items.append({
             "symbol": sym,
             "market": "EGX",
             "exchange": "EGX",
-            "currency": "ج.م",
+            "currency": _reg_currency_for_symbol(sym, "EGX"),
             "current_price": close,
             "fair_value": fair_value,
-            "upside_pct": upside,
+            **gap_info,
             "status": "undervalued" if upside > 5 else ("overvalued" if upside < -5 else "fair"),
             "status_ar": "أقل من السعر العادل (رخيص) 🟢" if upside > 5 else ("أعلى من السعر العادل (متضخم) 🔴" if upside < -5 else "في النطاق العادل ⚖️"),
             "model": fv_model,
@@ -4425,6 +4488,124 @@ async def execute_get_fair_value(
     market: Optional[str] = None,
 ) -> Dict[str, Any]:
     return await asyncio.to_thread(_sync_get_fair_value, symbols, mode, sharia_only, limit, market)
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_dividends (4-Market Upcoming & Recent Cash Dividend Calendar)
+# ---------------------------------------------------------------------------
+def _div_market_key(market: Optional[str]) -> str:
+    m = str(market or _ACTIVE_MARKET_CTX.get() or "EGX").strip().upper()
+    if m in ("TADAWUL", "TASI", "SA", "SAUDI"):
+        return "tasi"
+    if m in ("QSE", "QE", "QATAR"):
+        return "qatar"
+    if m in ("DFM", "ADX", "UAE"):
+        return "uae"
+    return "egx"
+
+
+def _load_dividends_calendar_cached(market_key: str) -> Dict[str, Any]:
+    ck = f"div_cal:{market_key}"
+    cached = _get_tool_cached(ck)
+    if cached is not None:
+        return cached
+    try:
+        from api.dividends_engine import get_cached_market_dividends
+        data = get_cached_market_dividends(market_key)
+        if isinstance(data, dict) and data.get("dividends"):
+            _set_tool_cached(ck, data)
+            return data
+    except Exception:
+        pass
+    return {"market": market_key, "dividends": [], "summary": {}}
+
+
+def _lookup_upcoming_dividend(symbol: str, market: Optional[str] = "EGX") -> Optional[Dict[str, Any]]:
+    """Fast O(1) cached lookup for a stock's upcoming or pending-pay cash dividend."""
+    if not symbol:
+        return None
+    sym_u = str(symbol).strip().upper().split(".")[0]
+    mkey = _div_market_key(market)
+    cal = _load_dividends_calendar_cached(mkey)
+    for item in cal.get("dividends") or []:
+        if str(item.get("symbol") or "").upper() == sym_u:
+            if item.get("status") in ("upcoming", "pending_pay"):
+                return {
+                    "symbol": sym_u,
+                    "exchange": item.get("exchange"),
+                    "amount": item.get("amount"),
+                    "currency": item.get("currency"),
+                    "currency_ar": item.get("currency_ar"),
+                    "ex_date": item.get("ex_date"),
+                    "record_date": item.get("record_date"),
+                    "pay_date": item.get("pay_date"),
+                    "yield_pct": item.get("yield_pct"),
+                    "days_until_ex": item.get("days_until_ex"),
+                    "status": item.get("status"),
+                }
+            break
+    return None
+
+
+def _sync_get_dividends(
+    symbols: Optional[List[str]] = None,
+    upcoming_only: bool = True,
+    limit: int = 15,
+    market: Optional[str] = None,
+) -> Dict[str, Any]:
+    lim = max(1, min(30, int(limit or 15)))
+    mkey = _div_market_key(market)
+    cal = _load_dividends_calendar_cached(mkey)
+    all_rows = cal.get("dividends") or []
+
+    if symbols:
+        want = {_normalize_symbol(s) for s in symbols if s}
+        matched = [r for r in all_rows if str(r.get("symbol") or "").upper() in want]
+        # Cross-market fallback if user asked about a GCC stock while active market is EGX
+        if not matched:
+            for alt_m in ("tasi", "qatar", "uae", "egx"):
+                if alt_m == mkey:
+                    continue
+                alt_cal = _load_dividends_calendar_cached(alt_m)
+                alt_hits = [r for r in (alt_cal.get("dividends") or []) if str(r.get("symbol") or "").upper() in want]
+                if alt_hits:
+                    matched = alt_hits
+                    mkey = alt_m
+                    cal = alt_cal
+                    break
+        return {
+            "status": "success",
+            "market": mkey.upper(),
+            "updated_at": cal.get("updatedAt"),
+            "dividends": matched[:lim],
+            "calendar_url": "/dividends" if mkey == "egx" else f"/dividends/{mkey}",
+        }
+
+    filtered = (
+        [r for r in all_rows if r.get("status") in ("upcoming", "pending_pay")]
+        if upcoming_only
+        else all_rows
+    )
+    if upcoming_only and not filtered:
+        # Fallback to latest recent payouts so user always sees rich data
+        filtered = all_rows[:lim]
+    return {
+        "status": "success",
+        "market": mkey.upper(),
+        "updated_at": cal.get("updatedAt"),
+        "summary": cal.get("summary") or {},
+        "dividends": filtered[:lim],
+        "calendar_url": "/dividends" if mkey == "egx" else f"/dividends/{mkey}",
+    }
+
+
+async def execute_get_dividends(
+    symbols: Optional[List[str]] = None,
+    upcoming_only: bool = True,
+    limit: int = 15,
+    market: Optional[str] = None,
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(_sync_get_dividends, symbols, upcoming_only, limit, market)
 
 
 # ---------------------------------------------------------------------------
@@ -5118,7 +5299,7 @@ def _build_portfolio_view_payload(
             "macd_histogram": _safe_float(t_row.get("macd_histogram"), 4),
             "support_est": _safe_price(t_row.get("bb_lower")),
             "resistance_est": _safe_price(t_row.get("bb_upper")),
-            "king_ai_score": _safe_float(t_row.get("king_ai_score")),
+            "king_ai_score": _normalize_king_ai_score(t_row.get("king_ai_score")),
             "wyckoff_phase": w_row.get("wyckoff_phase"),
             "acc_score": _safe_float(w_row.get("acc_score")),
             "dist_score": _safe_float(w_row.get("dist_score")),
@@ -5177,6 +5358,36 @@ def _build_portfolio_view_payload(
     }
     if totals_by_market:
         res_payload["totals_by_market"] = totals_by_market
+
+    # Enrich portfolio view with upcoming/pending cash dividends for user's held stocks
+    port_divs: List[Dict[str, Any]] = []
+    for p in enriched:
+        psym = str(p.get("symbol") or "").upper()
+        pqty = _safe_float(p.get("quantity"), 4) or 0.0
+        pmkt = p.get("exchange") or p.get("market") or "EGX"
+        if not psym or pqty <= 0:
+            continue
+        udiv = _lookup_upcoming_dividend(psym, pmkt)
+        if udiv and udiv.get("amount"):
+            gross = round(pqty * float(udiv["amount"]), 2)
+            is_egx_div = str(udiv.get("exchange") or pmkt).upper() == "EGX"
+            net = round(gross * 0.95, 2) if is_egx_div else gross
+            port_divs.append({
+                "symbol": psym,
+                "exchange": udiv.get("exchange") or pmkt,
+                "shares_held": pqty,
+                "coupon_per_share": udiv["amount"],
+                "gross_amount": gross,
+                "net_amount_after_tax": net,
+                "currency": udiv.get("currency_ar") or udiv.get("currency") or p.get("currency") or "ج.م",
+                "ex_date": udiv.get("ex_date"),
+                "record_date": udiv.get("record_date"),
+                "pay_date": udiv.get("pay_date"),
+                "days_until_ex": udiv.get("days_until_ex"),
+                "status": udiv.get("status"),
+            })
+    if port_divs:
+        res_payload["upcoming_dividends"] = port_divs
     return res_payload
 
 
@@ -6836,6 +7047,14 @@ async def dispatch_tool(
                 mode=arguments.get("mode", "screen_undervalued"),
                 sharia_only=arguments.get("sharia_only", False),
                 limit=arguments.get("limit", 10),
+                market=arguments.get("market"),
+            )
+
+        elif tool_name == "get_dividends":
+            return await execute_get_dividends(
+                symbols=arguments.get("symbols"),
+                upcoming_only=arguments.get("upcoming_only", True),
+                limit=arguments.get("limit", 15),
                 market=arguments.get("market"),
             )
 

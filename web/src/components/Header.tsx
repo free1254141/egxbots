@@ -16,6 +16,7 @@ import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from "@/lib/
 import { CANONICAL_STOCK_NAMES } from "@/lib/ai/stock-names";
 import { searchSymbols } from "@/lib/api";
 import PortfolioHeaderChip from "@/components/PortfolioHeaderChip";
+import NotificationBell from "@/components/NotificationBell";
 import QuickProfitGuideModal from "@/components/QuickProfitGuideModal";
 import { EgyptFlag, SaudiFlag, UaeFlag, QatarFlag } from "@/components/MarketFlag";
 
@@ -725,6 +726,7 @@ export default function Header() {
                         {user ? (
                             <>
                                 <PortfolioHeaderChip />
+                                <NotificationBell />
                                 <div className="relative hidden md:block">
                                 <button
                                     onClick={() => setAccountMenuOpen(!accountMenuOpen)}

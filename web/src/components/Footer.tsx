@@ -296,6 +296,10 @@ export default function Footer() {
                 <li><Link href="/reports" className="text-sm text-zinc-500 hover:text-amber-500">تقارير السوق والتجميع · Daily reports</Link></li>
               )}
               <li><Link href="/fair-value" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors">💎 {isAr ? "محدد السعر العادل ومؤشر الرخص" : "Fair Value Screener"}</Link></li>
+              <li><Link href="/dividends" className="text-sm font-bold text-amber-500 hover:text-amber-400 transition-colors">💰 {isAr ? "تقويم كوبونات البورصة المصرية (EGX)" : "EGX Dividend Calendar"}</Link></li>
+              <li><Link href="/dividends/tasi" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors">🇸🇦 {isAr ? "تقويم كوبونات السوق السعودي (TASI)" : "Saudi TASI Dividend Calendar"}</Link></li>
+              <li><Link href="/dividends/qatar" className="text-sm font-bold text-rose-400 hover:text-rose-300 transition-colors">🇶🇦 {isAr ? "تقويم كوبونات بورصة قطر (QSE)" : "Qatar QSE Dividend Calendar"}</Link></li>
+              <li><Link href="/dividends/uae" className="text-sm font-bold text-cyan-400 hover:text-cyan-300 transition-colors">🇦🇪 {isAr ? "تقويم كوبونات الإمارات (DFM & ADX)" : "UAE DFM & ADX Dividend Calendar"}</Link></li>
               <li><Link href="/sharia" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors">⚖️ {isAr ? "حاسبة التوافق الشرعي وتطهير الكوبونات" : "Sharia & Dividend Cleanser"}</Link></li>
               <li><Link href="/profile" className="text-sm font-bold text-indigo-400 hover:text-indigo-300 transition-colors">🔄 {isAr ? "إعادة تدوير المحفظة الذكي (AI)" : "AI Portfolio Rebalancer"}</Link></li>
               <li>

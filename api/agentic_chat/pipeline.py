@@ -1531,7 +1531,7 @@ async def _run_agentic_chat_stream_impl(
                 if (
                     round_count == 1
                     and candidate_cache_key
-                    and re.fullmatch(r"vip_stock_[A-Z0-9]{2,12}", candidate_cache_key)
+                    and re.fullmatch(r"vip_stock_[A-Z0-9]{2,12}(_financials)?", candidate_cache_key)
                     and "get_stock" in called_names
                 ):
                     break
@@ -1679,13 +1679,19 @@ async def _run_agentic_chat_stream_impl(
     total_latency_ms = int((time.time() - start_time) * 1000)
 
     def _row_currency(item: Dict[str, Any]) -> str:
+        from api.agentic_chat.market_registry import currency_for_symbol
+        sym = str(item.get("symbol") or "").strip().upper()
+        mkt = item.get("market") or item.get("exchange")
         c = item.get("currency")
+        if sym and (not mkt or str(mkt).upper() == "EGX"):
+            sym_curr = currency_for_symbol(sym, "EGX")
+            if sym_curr == "$":
+                return "$"
         if c:
             return str(c)
-        mkt = item.get("market") or item.get("exchange")
         if mkt:
-            return currency_for_market(mkt)
-        if re.fullmatch(r"\d{4}", str(item.get("symbol") or "").strip()):
+            return currency_for_symbol(sym, mkt)
+        if re.fullmatch(r"\d{4}", sym):
             return "ر.س"
         return "ج.م"
 
@@ -1755,6 +1761,16 @@ async def _run_agentic_chat_stream_impl(
             for item in stocks_with_symbol
             if item.get("symbol") and isinstance(item.get("_ui_chart"), dict)
         }
+        def _fmt_king_ai_pct(val: Any) -> str:
+            if val is None or val == "" or val == "—":
+                return "—"
+            try:
+                num = float(val)
+            except (TypeError, ValueError):
+                return str(val)
+            pct = num * 100.0 if 0.0 <= num <= 1.0 else num
+            return f"{round(pct, 1)}%"
+
         if len(stocks_with_symbol) >= 2:
             visuals_data["comparison"] = [
                 {
@@ -1773,16 +1789,6 @@ async def _run_agentic_chat_stream_impl(
                 for s in stocks_with_symbol[:4]
                 if s.get("symbol")
             ]
-            def _fmt_king_ai_pct(val: Any) -> str:
-                if val is None or val == "" or val == "—":
-                    return "—"
-                try:
-                    num = float(val)
-                except (TypeError, ValueError):
-                    return str(val)
-                pct = num * 100.0 if 0.0 <= num <= 1.0 else num
-                return f"{round(pct, 1)}%"
-
             headers = ["المعيار"] + [f"{(s.get('name_ar') or s.get('symbol')).split(',')[0].strip()} ({s.get('symbol')})" for s in stocks_with_symbol]
             rows_list = [
                 ["السعر الحالي"] + [f"{s.get('close', '—')} {_row_currency(s)}" if s.get('close') is not None else "—" for s in stocks_with_symbol],
@@ -1816,7 +1822,7 @@ async def _run_agentic_chat_stream_impl(
             verdict_str = s.get('verdict') or "—"
             s1_str = f"{s.get('support_1', '—')} {curr}" if s.get('support_1') is not None else "—"
             r1_str = f"{s.get('resistance_1', '—')} {curr}" if s.get('resistance_1') is not None else "—"
-            king_str = str(s.get('king_ai_score', '—'))
+            king_str = _fmt_king_ai_pct(s.get('king_ai_score'))
             sharia_str = _row_sharia_label(s)
             single_tbl: Dict[str, Any] = {
                 "id": f"table_{int(time.time())}",

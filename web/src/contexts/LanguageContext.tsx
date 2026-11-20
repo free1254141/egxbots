@@ -65,9 +65,9 @@ const translations: Record<string, Record<Language, string>> = {
     "market.regime.panic.title": { en: "Panic / High Volatility Downside 🚨", ar: "حالة ذعر وهبوط حاد (Panic Regime) 🚨" },
     "market.regime.panic.desc": { en: "The system automatically suspends buy suggestions to protect portfolios during sharp market panic phases.", ar: "يقوم نظام البوت بتعليق اقتراحات الشراء تلقائياً لحماية المحفظة من الانعكاسات الحادة للسوق." },
     "market.regime.trending_up.title": { en: "Strong Bullish Trend 🚀", ar: "اتجاه صاعد قوي (Trending Up) 🚀" },
-    "market.regime.trending_up.desc": { en: "EGX is experiencing strong buying inflows. The trading system increases model confidence filters for breakouts.", ar: "البورصة المصرية تشهد تدفقات شرائية قوية. البوت يرفع درجات الثقة ويعزز صفقات الاختراق." },
+    "market.regime.trending_up.desc": { en: "The market is experiencing strong buying inflows. The trading system increases model confidence filters for breakouts.", ar: "يشهد السوق تدفقات شرائية قوية. يرفع النظام درجات الثقة ويعزز إشارات الاختراق الفني." },
     "market.regime.trending_down.title": { en: "Bearish Trend 📉", ar: "اتجاه هابط (Trending Down) 📉" },
-    "market.regime.trending_down.desc": { en: "Market liquidity is declining. Recommend scaling down trade sizes and targeting only exceptional strength stocks.", ar: "سيولة السوق متراجعة. ينصح بتقليل كميات التداول والتركيز فقط على الأسهم ذات القوة النسبية الاستثنائية." },
+    "market.regime.trending_down.desc": { en: "Market liquidity is declining. Recommend scaling down trade sizes and targeting only exceptional strength stocks.", ar: "سيولة السوق متراجعة. ينصح بتقليل أحجام التداول والتركيز فقط على الأسهم ذات القوة النسبية الاستثنائية." },
     "market.regime.sideways.title": { en: "Sideways / Rangebound ⚖️", ar: "تذبذب عرضي / تجميع (Sideways / Accumulation) ⚖️" },
     "market.regime.sideways.desc": { en: "Market is balanced. Focus on buying key support and selling resistance zones until a clear breakout occurs.", ar: "حركة السوق متوازنة. نركز على استراتيجيات الشراء من الدعم والبيع عند المقاومة حتى حدوث اختراق واضح." },
     "market.regime.fallback.title": { en: "Sideways Market", ar: "وضع تذبذب عرضي" },
@@ -75,7 +75,7 @@ const translations: Record<string, Record<Language, string>> = {
     
     // Smart Money Heatmap Translations
     "market.heatmap.title": { en: "Smart Money Heatmap", ar: "خريطة السيولة الذكية (Smart Money Heatmap)" },
-    "market.heatmap.subtitle": { en: "Tracks where the institutional liquidity is moving across EGX market sectors.", ar: "تتبع أين تتدفق السيولة المؤسسية الكبرى في قطاعات البورصة المصرية." },
+    "market.heatmap.subtitle": { en: "Tracks where institutional liquidity is flowing across market sectors.", ar: "تتبع أين تتدفق السيولة المؤسسية الكبرى في قطاعات السوق المختلفة." },
     "market.heatmap.sector": { en: "Sector", ar: "القطاع" },
     "market.heatmap.share": { en: "Market Share", ar: "نسبة الاستحواذ" },
     "market.heatmap.flow": { en: "Money Flow", ar: "حجم السيولة المتداولة" },

@@ -3821,10 +3821,12 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
 
         # 4.5 Refresh Market Status so Step 5 gate uses today's data, not yesterday's cache
         print("\n>>> STEP 4.5: Refreshing Market Status cache before recommendation gate...")
+        gate_refreshed_market_status = False
         if _stage_needed('refresh_market_status_for_gate'):
             _start_step("refresh_market_status_for_gate", "Refreshing market status for buy gate")
             try:
                 ok_gate_refresh, msg_gate_refresh = _refresh_market_status_cache()
+                gate_refreshed_market_status = bool(ok_gate_refresh)
                 _record_step("refresh_market_status_for_gate", ok_gate_refresh, (msg_gate_refresh or "")[:200], 0)
             except Exception as e:
                 _record_step("refresh_market_status_for_gate", False, str(e)[:200], 0)
@@ -3929,13 +3931,16 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         # 8. Refresh Market Status (EGX30, EGX100, USD/EGP indices) from EODHD
         print("\n>>> STEP 8: Prefetching and refreshing Market Status cache from EODHD...")
         if _stage_needed('refresh_market_status'):
-            _start_step("refresh_market_status", "Refreshing Market Status cache from EODHD")
-            try:
-                ok, msg = _refresh_market_status_cache()
-                _record_step("refresh_market_status", ok, msg, 0)
-            except Exception as e:
-                _record_step("refresh_market_status", False, str(e)[:200], 0)
-                print(f"[MARKET_STATUS] Error: {e}")
+            if gate_refreshed_market_status:
+                _record_step("refresh_market_status", True, "Reused fresh market status from Step 4.5", 0)
+            else:
+                _start_step("refresh_market_status", "Refreshing Market Status cache from EODHD")
+                try:
+                    ok, msg = _refresh_market_status_cache()
+                    _record_step("refresh_market_status", ok, msg, 0)
+                except Exception as e:
+                    _record_step("refresh_market_status", False, str(e)[:200], 0)
+                    print(f"[MARKET_STATUS] Error: {e}")
 
         # 9.1 Rebase the immutable history archive infrequently. The scanner
         # already combines this archive with a 45-day live Supabase tail, so a
@@ -4108,6 +4113,23 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             except Exception as dispatch_error:
                 _record_step('daily_report_dispatch', False, str(dispatch_error)[:500], 0)
                 print(f"[REPORT_DISPATCH] Failed: {dispatch_error}")
+        # Sync 4-market upcoming dividend calendars + notify portfolio holders & credit pay-date cash.
+        if phase == "close" and not dry_run and _stage_needed('dividends_sync'):
+            _start_step('dividends_sync', 'Sync 4-market dividend calendars and process portfolio coupon alerts/credits')
+            try:
+                from api.dividends_engine import sync_all_markets_dividends, process_portfolio_dividends
+                div_sync_res = await asyncio.to_thread(sync_all_markets_dividends, True)
+                div_port_res = await asyncio.to_thread(process_portfolio_dividends, False)
+                _record_step(
+                    'dividends_sync',
+                    True,
+                    json.dumps({"sync": div_sync_res, "portfolio": div_port_res}, ensure_ascii=False)[:500],
+                    sum(v.get("upcomingCount", 0) for v in div_sync_res.values() if isinstance(v, dict)),
+                )
+                print(f"[DIVIDENDS_SYNC] sync={div_sync_res} portfolio={div_port_res}")
+            except Exception as div_error:
+                _record_step('dividends_sync', False, str(div_error)[:500], 0)
+                print(f"[DIVIDENDS_SYNC] Failed: {div_error}")
         print(f"\n--- Daily Bot Run Job Completed: {dt.datetime.now()} ---")
         return {"status": "completed", "job_run_id": job_run_id, **summarise_daily_steps(steps_log)}
 

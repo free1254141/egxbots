@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { Activity, AlertTriangle, Award, BarChart3, Briefcase, Clock, Compass, Eye, EyeOff, Flame, HelpCircle, Scale, ShieldCheck, Target, TrendingUp } from "lucide-react";
 import type { ChatTable } from "@/contexts/ChatContext";
+import StockLogo from "@/components/StockLogo";
 
 export type ChatVisualsPayload = NonNullable<ChatTable["visuals"]>;
 
@@ -404,6 +405,9 @@ export function MiniPriceChartSvg({
         >
             <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] sm:text-xs">
                 <div className="flex items-center gap-2 font-bold">
+                    {symbol && (
+                        <StockLogo symbol={symbol} size="sm" className="h-5 w-5 rounded-md text-[9px]" />
+                    )}
                     <span className="text-zinc-600 dark:text-zinc-300">{pts.length} جلسة:</span>
                     <span dir="ltr" className="font-mono text-zinc-900 dark:text-white">
                         {activePt.d} — {fmtCoord(activePt.c)} {currency}

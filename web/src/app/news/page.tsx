@@ -15,10 +15,13 @@ import {
     Newspaper,
     AlertCircle,
     ArrowUpDown,
-    ExternalLink
+    ExternalLink,
+    LayoutGrid,
+    List
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
+import { getStockHref } from "@/lib/stock-href";
 import StockLogo from "@/components/StockLogo";
 import NewsStats from "@/components/NewsStats";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
@@ -54,8 +57,9 @@ export default function NewsPage() {
     const [monthFilter, setMonthFilter] = useState("");
     const [selectedSector, setSelectedSector] = useState<string>("");
     const [period, setPeriod] = useState<string>("15d"); // shared with the stats charts
+    const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
     const [page, setPage] = useState(1);
-    const limit = 10;
+    const limit = 12;
 
     // Fetch news data
     const fetchNews = useCallback(async (signal: AbortSignal) => {
@@ -372,21 +376,52 @@ export default function NewsPage() {
                     </div>
                 </div>
 
-                {/* Sort */}
-                <div className="lg:col-span-2 flex items-center gap-2">
-                    <span className="text-xs font-black uppercase tracking-wider whitespace-nowrap text-black dark:text-white">
-                        <ArrowUpDown className="w-3.5 h-3.5" />
-                    </span>
-                    <select
-                        value={sortBy}
-                        onChange={(e) => handleSortChange(e.target.value)}
-                        className="h-11 w-full rounded-none px-2 text-xs font-black border-4 border-black dark:border-white bg-white dark:bg-zinc-900 text-black dark:text-white outline-none cursor-pointer focus:bg-[#FFE600] focus:text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]"
-                    >
-                        <option value="newest">{isAr ? "الأحدث" : "Newest"}</option>
-                        <option value="oldest">{isAr ? "الأقدم" : "Oldest"}</option>
-                        <option value="highest_sent">{isAr ? "الأعلى" : "Highest"}</option>
-                        <option value="lowest_sent">{isAr ? "الأدنى" : "Lowest"}</option>
-                    </select>
+                {/* Sort & View Mode */}
+                <div className="lg:col-span-12 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-[180px]">
+                        <span className="text-xs font-black uppercase tracking-wider whitespace-nowrap text-black dark:text-white">
+                            <ArrowUpDown className="w-3.5 h-3.5" />
+                        </span>
+                        <select
+                            value={sortBy}
+                            onChange={(e) => handleSortChange(e.target.value)}
+                            className="h-10 w-full rounded-none px-3 text-xs font-black border-4 border-black dark:border-white bg-white dark:bg-zinc-900 text-black dark:text-white outline-none cursor-pointer focus:bg-[#FFE600] focus:text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]"
+                        >
+                            <option value="newest">{isAr ? "الأحدث" : "Newest"}</option>
+                            <option value="oldest">{isAr ? "الأقدم" : "Oldest"}</option>
+                            <option value="highest_sent">{isAr ? "الأعلى" : "Highest"}</option>
+                            <option value="lowest_sent">{isAr ? "الأدنى" : "Lowest"}</option>
+                        </select>
+                    </div>
+
+                    <div className="flex items-center gap-1.5" role="group" aria-label={isAr ? "طريقة عرض الأخبار" : "News layout view"}>
+                        <button
+                            type="button"
+                            onClick={() => setViewMode("grid")}
+                            aria-pressed={viewMode === "grid"}
+                            className={`inline-flex items-center gap-1.5 h-10 px-3 text-xs font-black rounded-none border-3 border-black dark:border-white transition-none cursor-pointer ${
+                                viewMode === "grid"
+                                    ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
+                                    : "bg-white text-black dark:bg-zinc-900 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                            }`}
+                        >
+                            <LayoutGrid className="w-3.5 h-3.5" />
+                            <span>{isAr ? "شبكة" : "Grid"}</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setViewMode("list")}
+                            aria-pressed={viewMode === "list"}
+                            className={`inline-flex items-center gap-1.5 h-10 px-3 text-xs font-black rounded-none border-3 border-black dark:border-white transition-none cursor-pointer ${
+                                viewMode === "list"
+                                    ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]"
+                                    : "bg-white text-black dark:bg-zinc-900 dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                            }`}
+                        >
+                            <List className="w-3.5 h-3.5" />
+                            <span>{isAr ? "قائمة" : "List"}</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -400,12 +435,14 @@ export default function NewsPage() {
                     </span>
                 </div>
             ) : news.length > 0 ? (
-                <div className="flex flex-col gap-6">
+                <>
+                <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6" : "flex flex-col gap-6"}>
                     {news.map((item) => (
                         <div
                             key={item.id}
-                            className="p-5 md:p-6 rounded-none border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.5)] transition-all hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_0px_rgba(255,255,255,0.6)]"
+                            className={`flex flex-col justify-between p-5 ${viewMode === "grid" ? "h-full" : "md:p-6"} rounded-none border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.5)] transition-all hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_0px_rgba(255,255,255,0.6)]`}
                         >
+                            <div>
                             {/* Card Top Row */}
                             <div className="flex flex-wrap justify-between items-center gap-3 mb-4 pb-3 border-b-2 border-black/10 dark:border-white/10">
                                 <div className="flex items-center gap-3">
@@ -413,7 +450,8 @@ export default function NewsPage() {
                                     <div className="flex items-center gap-2">
                                         <Link
                                             prefetch={false}
-                                            href={`/stocks/${item.symbol.toLowerCase()}`}
+                                            dir="ltr"
+                                            href={getStockHref(item.symbol, { market, exchange: item.exchange })}
                                             className="px-2.5 py-1 text-xs font-black uppercase tracking-wider bg-black text-white dark:bg-white dark:text-black border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black hover:border-black transition-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                                         >
                                             {item.symbol}.{(() => {
@@ -461,8 +499,9 @@ export default function NewsPage() {
                             {item.sources?.length > 0 && (
                                 <p className="text-xs mb-3 text-zinc-500">{isAr ? "المصادر المسجلة: " : "Recorded sources: "}{item.sources.join(" · ")}</p>
                             )}
+                            </div>
                             {/* Stored sentiment assessment */}
-                            <div className="p-4 bg-yellow-50 dark:bg-yellow-950/20 border-3 border-dashed border-yellow-500/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div className={`mt-auto p-3.5 ${viewMode === "grid" ? "flex-col items-stretch gap-3" : "md:p-4 flex-col md:flex-row md:items-center justify-between gap-4"} bg-yellow-50 dark:bg-yellow-950/20 border-3 border-dashed border-yellow-500/50 flex`}>
                                 <div className="flex items-start gap-2.5">
                                     <Brain className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
                                     <div className="flex flex-col">
@@ -477,7 +516,7 @@ export default function NewsPage() {
                                 <div className="shrink-0 flex items-center">
                                     <Link
                                         prefetch={false}
-                                        href={`/stocks/${item.symbol.toLowerCase()}`}
+                                        href={getStockHref(item.symbol, { market, exchange: item.exchange })}
                                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black bg-white dark:bg-zinc-800 border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                                     >
                                         {isAr ? "تقرير السهم الفني" : "Technical Report"}
@@ -487,9 +526,10 @@ export default function NewsPage() {
                             </div>
                         </div>
                     ))}
+                </div>
 
-                    {/* Pagination */}
-                    <div className="flex justify-between items-center mt-6 p-4 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
+                {/* Pagination */}
+                <div className="flex justify-between items-center mt-6 p-4 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
                         <button
                             disabled={page === 1}
                             onClick={() => setPage(page - 1)}
@@ -509,8 +549,8 @@ export default function NewsPage() {
                             {isAr ? "التالي" : "Next"}
                             <ChevronRight className="w-4 h-4" />
                         </button>
-                    </div>
                 </div>
+                </>
             ) : (
                 /* No results state */
                 <div className="flex flex-col items-center justify-center py-20 gap-3 border-4 border-dashed border-black/20 dark:border-white/20 bg-zinc-50 dark:bg-zinc-900/20 text-zinc-500">

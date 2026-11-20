@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { GccMarketStockRow } from "@/lib/seo/stock-directory";
+import { getStockHref } from "@/lib/stock-href";
 
 interface FaqItem {
   q: string;
@@ -43,7 +44,7 @@ export default function MarketDirectoryPage({
             "@type": "ListItem",
             position: idx + 1,
             name: `${it.nameAr || it.name} (${it.symbol})`,
-            url: `https://egxbots.com/stocks/${it.symbol.toLowerCase()}`,
+            url: `https://egxbots.com${getStockHref(it.symbol, { exchange: it.exchange })}`,
           })),
         },
       },
@@ -130,7 +131,7 @@ export default function MarketDirectoryPage({
             return (
               <Link
                 key={`${item.exchange}-${item.symbol}`}
-                href={`/stocks/${item.symbol.toLowerCase()}`}
+                href={getStockHref(item.symbol, { exchange: item.exchange })}
                 className="block p-4 border-2 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.25)] hover:bg-[#FFE600]/15 transition-colors"
               >
                 <div className="flex items-start justify-between gap-2 mb-2">

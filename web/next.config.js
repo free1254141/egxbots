@@ -81,6 +81,7 @@ const nextConfig = {
           // Public / SEO / Scanner / Market offload (0ms Vercel Fluid Active CPU)
           { source: '/api/public/:path*', destination: `${BACKEND_URL}/api/public/:path*` },
           { source: '/api/market/fair-value', destination: `${BACKEND_URL}/api/market/fair-value` },
+          { source: '/api/market/dividends', destination: `${BACKEND_URL}/api/market/dividends` },
           { source: '/api/market/breadth', destination: `${BACKEND_URL}/api/market/breadth` },
           { source: '/api/market/scan-settings', destination: `${BACKEND_URL}/api/market/scan-settings` },
           { source: '/api/market/macro-correlation/:path*', destination: `${BACKEND_URL}/api/market/macro-correlation/:path*` },
@@ -313,7 +314,7 @@ compress: true,
       },
       {
         // Public market overview and directories
-        source: '/(fair-value|sharia|disclosures|scanner/technical)',
+        source: '/(fair-value|sharia|disclosures|dividends|scanner/technical)',
         headers: [
           {
             key: 'Cache-Control',

@@ -3,7 +3,15 @@
 import React from "react";
 import SignalExplanation from "./SignalExplanation";
 import Link from "next/link";
+import { useMarket } from "@/contexts/MarketContext";
 import { Cpu, ArrowUpRight, ArrowDownRight, Sparkles, Target, ShieldAlert, Activity, Lock, Zap, ShieldCheck } from "lucide-react";
+
+const CURRENCY_LABELS_AR: Record<string, string> = {
+    EGP: "ج.م",
+    SAR: "ر.س",
+    AED: "د.إ",
+    QAR: "ر.ق",
+};
 
 interface AISignal {
     symbol: string;
@@ -35,6 +43,21 @@ export function ActiveAISignals({
     isPro = true,
     totalOpen = 0,
 }: ActiveAISignalsProps) {
+    const { isSaudi, isUae, isQatar } = useMarket();
+    const marketNameAr = isSaudi
+        ? "السوق السعودي (تاسي)"
+        : isUae
+        ? "أسواق الإمارات (DFM & ADX)"
+        : isQatar
+        ? "بورصة قطر (QSE)"
+        : "البورصة المصرية";
+    const marketNameEn = isSaudi
+        ? "Saudi Tadawul (TASI)"
+        : isUae
+        ? "UAE (DFM & ADX)"
+        : isQatar
+        ? "Qatar (QSE)"
+        : "EGX";
     // 1. Gated View for Free / Non-PRO users
     if (!isPro) {
         const openCount = totalOpen > 0 ? totalOpen : (signals?.length || 7);
@@ -81,8 +104,8 @@ export function ActiveAISignals({
                                 </h4>
                                 <p className="text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed">
                                     {isAr
-                                        ? "احصل على وصول فوري لجميع إشارات وتوصيات الذكاء الاصطناعي النشطة في البورصة المصرية فور صدورها، مع مستويات الدخول الدقيقة، الأهداف الفنية، وقف الخسارة، ونسبة دقة النموذج."
-                                        : "Unlock real-time access to active EGX trading recommendations with precise entry points, staged price targets, strict stop losses, and AI model precision."}
+                                        ? `احصل على وصول فوري لجميع إشارات وتوصيات الذكاء الاصطناعي النشطة في ${marketNameAr} فور صدورها، مع مستويات الدخول الدقيقة، الأهداف الفنية، وقف الخسارة، ونسبة دقة النموذج.`
+                                        : `Unlock real-time access to active ${marketNameEn} trading recommendations with precise entry points, staged price targets, strict stop losses, and AI model precision.`}
                                 </p>
                             </div>
 
@@ -302,6 +325,7 @@ export function DailyAnalysisSummary({
     advancing: number; 
     declining: number; 
     liquidity?: {
+        currency?: string;
         total_turnover_billion_egp?: number;
         total_turnover_million_egp?: number;
         turnover_vs_20d_pct?: number;
@@ -312,6 +336,9 @@ export function DailyAnalysisSummary({
     } | null;
     isAr: boolean;
 }) {
+    const { currencyCode: ctxCurrencyCode } = useMarket();
+    const currCode = (liquidity?.currency || ctxCurrencyCode || "EGP").toUpperCase();
+    const currAr = CURRENCY_LABELS_AR[currCode] || currCode;
     const verdict = healthScore >= 70 
         ? (isAr ? "إيجابي وقوي" : "Strong Bullish") 
         : healthScore < 45 
@@ -345,7 +372,7 @@ export function DailyAnalysisSummary({
                             <div>
                                 {isAr ? "سيولة الجلسة:" : "Session Turnover:"}{" "}
                                 <span className="text-indigo-600 dark:text-indigo-400 font-bold font-mono">
-                                    {liquidity.total_turnover_billion_egp.toFixed(2)} {isAr ? "مليار ج.م" : "B EGP"}
+                                    {liquidity.total_turnover_billion_egp.toFixed(2)} {isAr ? `مليار ${currAr}` : `B ${currCode}`}
                                 </span>
                                 {liquidity.flow_verdict_ar && (
                                     <span className="ms-1 text-zinc-700 dark:text-zinc-300 font-semibold">

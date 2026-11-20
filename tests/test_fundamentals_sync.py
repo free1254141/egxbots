@@ -268,3 +268,67 @@ def test_fundamental_diagnosis_archetypes_bank_value_trap_loss_and_expensive():
     assert ac.build_analysis_cache_key("حلل سهم فوري ماليا", market="EGX") == "vip_stock_FWRY_financials"
     assert ac.build_analysis_cache_key("التحليل الاساسي لسهم 2222", market="TADAWUL") == "vip_stock_2222_financials"
 
+
+def test_usd_egx_currency_king_ai_tactical_levels_and_fair_value_gap():
+    from api.agentic_chat.market_registry import currency_for_symbol
+    from api.agentic_chat.tools_execution import (
+        _build_fair_value_gap,
+        _compute_stock_context_metrics,
+        _normalize_king_ai_score,
+    )
+
+    # 1. USD-denominated EGX tickers vs EGP tickers vs GCC
+    assert currency_for_symbol("FAITA", "EGX") == "$"
+    assert currency_for_symbol("EGBE", "EGX") == "$"
+    assert currency_for_symbol("MOIL", "EGX") == "$"
+    assert currency_for_symbol("FAIT", "EGX") == "ج.م"
+    assert currency_for_symbol("COMI", "EGX") == "ج.م"
+    assert currency_for_symbol("2222", "TADAWUL") == "ر.س"
+    assert currency_for_symbol("QNBK", "QSE") == "ر.ق"
+
+    # 2. King AI normalization (0..1 decimal -> 0..100 scale, 0..100 preserved)
+    assert _normalize_king_ai_score(0.71) == 71.0
+    assert _normalize_king_ai_score(0.49) == 49.0
+    assert _normalize_king_ai_score(84.0) == 84.0
+    assert _normalize_king_ai_score(None) is None
+
+    # 3. Unambiguous Fair Value gap math (NIPH: 306.20 vs FV 168.41 -> +81.8% above FV, FV is -45% below price)
+    gap = _build_fair_value_gap(306.20, 168.41)
+    assert gap["upside_pct"] == -45.0
+    assert gap["price_vs_fv_pct"] == 81.82
+    assert "+81.8%" in gap["valuation_gap_ar"]
+    assert "45.0%" in gap["valuation_gap_ar"]
+
+    # 4. Tactical support & stop when structural support_1 is distant (-33%, e.g. NIPH)
+    m = _compute_stock_context_metrics(
+        close=306.20,
+        ema_50=297.39,
+        ema_200=229.97,
+        vwap_20=292.09,
+        support_1=205.00,
+        resistance_1=365.50,
+        stop_loss=200.90,
+    )
+    assert m["support_1_is_distant"] is True
+    assert m["tactical_support"] == 297.39  # nearest dynamic floor (EMA50)
+    assert m["tactical_stop_loss"] < 297.39
+    assert m["tactical_risk_reward"] > 2.0  # practical R:R vs distant 0.56
+
+
+def test_dividends_engine_date_status_and_chat_tool_schema():
+    from api.dividends_engine import _estimate_record_and_pay_dates
+    from api.agentic_chat.tools_schema import AGENTIC_TOOLS_SCHEMA
+    import datetime as dt
+
+    tool_names = {t["function"]["name"] for t in AGENTIC_TOOLS_SCHEMA if t.get("type") == "function"}
+    assert "get_dividends" in tool_names
+
+    tomorrow = (dt.date.today() + dt.timedelta(days=2)).isoformat()
+    sample = {"ex_date": tomorrow, "record_date": None, "pay_date": None}
+    _estimate_record_and_pay_dates(sample)
+    assert sample["status"] == "upcoming"
+    assert sample["record_date"] is not None
+    assert sample["days_until_ex"] is not None
+
+
+

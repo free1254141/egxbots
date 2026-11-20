@@ -61,10 +61,18 @@ export async function generateStaticParams() {
   if (gccResult.status === "fulfilled" && Array.isArray(gccResult.value)) {
     for (const stock of gccResult.value) {
       if (stock.symbol) {
-        symbolSet.add(stock.symbol.toLowerCase());
+        const lowerSym = stock.symbol.toLowerCase();
+        const ex = String((stock as { exchange?: string }).exchange || "").toLowerCase();
+        if (ex && symbolSet.has(lowerSym)) {
+          symbolSet.add(`${lowerSym}.${ex}`);
+        } else {
+          symbolSet.add(lowerSym);
+        }
       }
     }
   }
+  symbolSet.add("adib.adx");
+  symbolSet.add("taqa.adx");
 
   // Ensure 100% catalog coverage even if live directory query failed or was incomplete
   for (const s of ALL_FALLBACK_EGX_SYMBOLS) {
@@ -90,8 +98,19 @@ interface PageProps {
 function resolveSymbolAndMarket(rawSymbol: string): {
   cleanSymbol: string;
   marketMode: MarketMode;
+  explicitExchange?: "DFM" | "ADX" | "QSE" | "COMMODITIES";
 } {
   const upper = rawSymbol.toUpperCase();
+  const gccMatch = upper.match(/^([A-Z0-9._-]+)\.(DFM|ADX|QSE|COMMODITIES)$/i);
+  if (gccMatch) {
+    const ex = gccMatch[2].toUpperCase() as "DFM" | "ADX" | "QSE" | "COMMODITIES";
+    const mode: MarketMode = ex === "QSE" ? "qatar" : "uae";
+    return {
+      cleanSymbol: gccMatch[1],
+      marketMode: mode,
+      explicitExchange: ex,
+    };
+  }
   const stripped = upper.replace(/\.(SR|SA|TADAWUL)$/i, "");
   const saudi = isSaudiSymbol(upper) || /^\d{4}$/.test(stripped);
   return {
@@ -110,11 +129,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       },
     };
   }
-  const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(raw);
+  const { cleanSymbol: symbol, marketMode, explicitExchange } = resolveSymbolAndMarket(raw);
+  const canonicalSlug = explicitExchange
+    ? `${symbol.toLowerCase()}.${explicitExchange.toLowerCase()}`
+    : symbol.toLowerCase();
   const isSaudi = marketMode === "tasi";
   const { snapshot } = typeof getPublicStockPageBundle === "function"
-    ? await getPublicStockPageBundle(symbol, marketMode)
-    : { snapshot: await getPublicStockSnapshot(symbol, marketMode) };
+    ? await getPublicStockPageBundle(symbol, marketMode, explicitExchange)
+    : { snapshot: await getPublicStockSnapshot(symbol, marketMode, explicitExchange) };
   if (!snapshot.fundamentals && !snapshot.latestPrice) notFound();
   const fundRow = snapshot.fundamentals;
   const fund = fundRow?.data || {};
@@ -206,13 +228,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       actualExchange,
     ],
     alternates: {
-      canonical: `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
+      canonical: `https://egxbots.com/stocks/${canonicalSlug}`,
     },
     openGraph: {
       title,
       description,
       type: "website",
-      url: `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
+      url: `https://egxbots.com/stocks/${canonicalSlug}`,
       images: [
         {
           url: "https://egxbots.com/opengraph-image.png",
@@ -233,17 +255,20 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function StockDetailPage({ params }: PageProps) {
   const rawSymbol = (await params).symbol;
-  const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(rawSymbol);
+  const { cleanSymbol: symbol, marketMode, explicitExchange } = resolveSymbolAndMarket(rawSymbol);
+  const canonicalSlug = explicitExchange
+    ? `${symbol.toLowerCase()}.${explicitExchange.toLowerCase()}`
+    : symbol.toLowerCase();
   const isSaudi = marketMode === "tasi";
 
   // Enforce lowercase canonical URL: redirect uppercase or suffixed visits
   if (rawSymbol !== rawSymbol.toLowerCase() || (isSaudi && rawSymbol.toLowerCase() !== symbol.toLowerCase())) {
-    redirect(`/stocks/${symbol.toLowerCase()}`);
+    redirect(`/stocks/${canonicalSlug}`);
   }
 
   const bundle = typeof getPublicStockPageBundle === "function"
-    ? await getPublicStockPageBundle(symbol, marketMode)
-    : { snapshot: await getPublicStockSnapshot(symbol, marketMode), related: null };
+    ? await getPublicStockPageBundle(symbol, marketMode, explicitExchange)
+    : { snapshot: await getPublicStockSnapshot(symbol, marketMode, explicitExchange), related: null };
   const snapshot = bundle.snapshot;
   const { fundamentals: fundRow, latestPrice, latestTech, historicalPrices, latestScan } = snapshot;
   if (!fundRow && !latestPrice) notFound();
@@ -311,14 +336,14 @@ export default async function StockDetailPage({ params }: PageProps) {
             "name": isGccPage ? gccDirectoryNameAr : isSaudi ? "دليل الأسهم السعودية" : "دليل الأسهم المصرية",
             "item": isGccPage ? `https://egxbots.com${gccDirectoryHref}` : isSaudi ? "https://egxbots.com/stocks?market=tasi" : "https://egxbots.com/stocks"
           },
-          { "@type": "ListItem", "position": 3, "name": `سهم ${nameAr} (${symbol})`, "item": `https://egxbots.com/stocks/${symbol.toLowerCase()}` }
+          { "@type": "ListItem", "position": 3, "name": `سهم ${nameAr} (${symbol})`, "item": `https://egxbots.com/stocks/${canonicalSlug}` }
         ]
       },
       {
         "@type": "WebPage",
         "name": `سعر وتحليل سهم ${nameAr} (${symbol}) في ${marketLabelAr}`,
         "alternateName": `${nameEn} (${symbol}) Stock Analysis`,
-        "url": `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
+        "url": `https://egxbots.com/stocks/${canonicalSlug}`,
         ...(priceDate ? { dateModified: priceDate } : {}),
         "description": `بيانات فنية وسعر إغلاق سهم ${nameAr} (${symbol} - ${nameEn}) في ${marketLabelAr} مع تقييمات الذكاء الاصطناعي ومستويات الدعم والمقاومة.`,
         "publisher": { "@type": "Organization", "name": "EGX BOTS", "url": "https://egxbots.com" }
@@ -379,10 +404,10 @@ export default async function StockDetailPage({ params }: PageProps) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredDataGraph).replace(/</g, '\\u003c') }}
       />
       <StockDetailClient
-        key={symbol}
+        key={canonicalSlug}
         symbol={symbol}
         exchange={exchange}
-        market={marketMode === "tasi" ? "tasi" : "egx"}
+        market={isGccPage ? (snapshotExchange === "QSE" ? "qatar" : "uae") : isSaudi ? "tasi" : "egx"}
         fundamentals={fundRow}
         latestPrice={latestPrice}
         latestTech={latestTech}

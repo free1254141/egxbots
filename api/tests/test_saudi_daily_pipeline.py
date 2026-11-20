@@ -1022,3 +1022,85 @@ def test_run_gcc_metals_daily_job_modes(monkeypatch):
     assert fail_out["ok"] is False
     assert fail_out["status"] == "failed"
     assert cache_calls == []
+
+
+def test_gcc_metals_storage_delta_skip():
+    import gzip
+    import json
+    from api import gcc_metals_sync as gms
+
+    existing_bar = {
+        "symbol": "XAUUSD",
+        "exchange": "COMMODITIES",
+        "date": "2026-11-19",
+        "open": 3600.0,
+        "high": 3630.0,
+        "low": 3590.0,
+        "close": 3622.6,
+        "volume": 1000,
+    }
+    gz_bytes = gzip.compress(json.dumps([existing_bar]).encode("utf-8"))
+
+    class _FakeBucket:
+        def download(self, _path):
+            return gz_bytes
+
+    class _FakeStorage:
+        def from_(self, _bucket):
+            return _FakeBucket()
+
+    class _FakeSb:
+        storage = _FakeStorage()
+
+    # Identical bar -> changed=False (upload skipped)
+    bars_same, changed_same = gms._merge_with_existing_storage_bars_checked(
+        _FakeSb(), "prices/COMMODITIES/symbols/XAUUSD.json.gz", [dict(existing_bar)]
+    )
+    assert changed_same is False
+    assert len(bars_same) == 1
+
+    # Updated close -> changed=True (upload triggered)
+    updated_bar = {**existing_bar, "close": 3625.0}
+    bars_diff, changed_diff = gms._merge_with_existing_storage_bars_checked(
+        _FakeSb(), "prices/COMMODITIES/symbols/XAUUSD.json.gz", [updated_bar]
+    )
+    assert changed_diff is True
+    assert bars_diff[-1]["close"] == 3625.0
+
+
+def test_saudi_runner_dag_runs_disclosures_before_vip_and_joins_gcc(monkeypatch):
+    import threading
+    import time
+    from api import saudi_daily_runner
+
+    events = []
+    ev_lock = threading.Lock()
+
+    def _log(name):
+        with ev_lock:
+            events.append(name)
+
+    fake_sb = _FakeSaudiSupabase(
+        {
+            "market_cache": [{"cache_key": "market_status_Saudi Arabia", "country": "Saudi Arabia", "payload": {"regime": "bear"}}],
+            "stock_technical_indicators": [{"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-19", "close": 92.5, "change_pct": 1.2}],
+        }
+    )
+    monkeypatch.setattr("api.saudi_price_sync.sync_saudi_daily_prices", lambda **_kw: (_log("price") or {"success": True, "synced": 264, "total": 264, "latest_date": "2026-11-19"}))
+    monkeypatch.setattr("scripts.saudi_pipeline_bootstrap.main", lambda **_kw: (time.sleep(0.05) or _log("bootstrap") or 0))
+    monkeypatch.setattr("scripts.saudi_backtest_and_systems.main", lambda *_a, **_kw: (_log("systems") or {"short_swings": {"as_of_date": "2026-11-19"}}))
+    monkeypatch.setattr("api.saudi_news_sync.run_saudi_news_sync", lambda **_kw: (_log("sa_news") or {"ok": True, "rows_saved": 1, "total_headlines": 2}))
+    monkeypatch.setattr("api.saudi_disclosures_sync.run_saudi_disclosures_sync", lambda **_kw: (_log("sa_disc") or {"ok": True, "saved": 1, "fetched": 2}))
+    monkeypatch.setattr("api.gcc_metals_sync.run_gcc_metals_sync", lambda **_kw: (time.sleep(0.05) or _log("gcc_metals") or {"ok": True, "summary": {"DFM": {"symbols_synced": 33}}}))
+    monkeypatch.setattr("api.gcc_news_sync.sync_gcc_market_news", lambda **_kw: (_log("gcc_news") or {"ok": True, "synced_rows": 1, "matched_symbols": 1}))
+    monkeypatch.setattr("api.gcc_disclosures_sync.run_gcc_disclosures_sync", lambda **_kw: (_log("gcc_disc") or {"ok": True, "results": {"uae": {"inserted": 1}}}))
+    monkeypatch.setattr("api.cache_invalidation.invalidate_cache_tags", lambda tags: (_log("cache") or {"invalidated": list(tags), "skipped": False, "status": 200}))
+    monkeypatch.setattr(saudi_telegram_dispatch, "dispatch_saudi_short_swings_vip", lambda *_a, **_kw: {"entries_sent": 0, "exits_sent": 0, "updates_sent": 0, "errors": []})
+    monkeypatch.setattr(saudi_telegram_dispatch, "dispatch_saudi_open_recommendations", lambda **_kw: {"ok": True, "skipped": True})
+    monkeypatch.setattr(saudi_telegram_dispatch, "dispatch_saudi_market_outlook_vip", lambda **_kw: {"ok": True, "message_id": 1})
+    monkeypatch.setattr(saudi_telegram_dispatch, "dispatch_saudi_daily_vip_report", lambda **_kw: (_log("vip_report") or {"ok": True, "message_id": 2}))
+
+    out = saudi_daily_runner.run_saudi_daily_job(phase="close", trigger="manual", dry_run=True, main_sb=fake_sb, saudi_sb=fake_sb)
+    assert out["ok"] is True
+    assert events.index("sa_disc") < events.index("vip_report")
+    assert events.index("gcc_disc") < events.index("cache")

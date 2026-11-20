@@ -5,6 +5,7 @@ import { parseMarkdownTable, exportTableToExcel } from "@/lib/excelExport";
 import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, Briefcase, Loader2, Crown, Lock, AlertCircle, Volume2, VolumeX, FileText } from "lucide-react";
 import { toast } from "sonner";
 import StockCard, { StockData } from "./StockCard";
+import StockLogo from "@/components/StockLogo";
 import {
     ChatVisualsPayload,
     ComparisonMirrorCard,
@@ -1220,14 +1221,25 @@ function ExportableTable({ headers, rows }: { headers?: string[]; rows?: string[
                 <table className="w-full text-right border-collapse text-xs">
                     <thead>
                         <tr className="bg-zinc-100/90 dark:bg-black text-zinc-900 dark:text-white border-b border-zinc-200 dark:border-white/20">
-                            {safeHeaders.map((h, i) => (
-                                <th
-                                    key={i}
-                                    className="px-3 py-2.5 text-[11px] sm:text-xs font-extrabold whitespace-nowrap text-zinc-700 dark:text-zinc-200 border-l border-zinc-200/80 dark:border-white/15 last:border-l-0"
-                                >
-                                    {h.replace(/\*\*/g, "").trim()}
-                                </th>
-                            ))}
+                            {safeHeaders.map((h, i) => {
+                                const cleanH = h.replace(/\*\*/g, "").trim();
+                                const headerSym = i > 0 ? extractHeaderStockSymbol(cleanH) : null;
+                                return (
+                                    <th
+                                        key={i}
+                                        className="px-3 py-2.5 text-[11px] sm:text-xs font-extrabold whitespace-nowrap text-zinc-700 dark:text-zinc-200 border-l border-zinc-200/80 dark:border-white/15 last:border-l-0"
+                                    >
+                                        {headerSym ? (
+                                            <span className="inline-flex items-center gap-1.5">
+                                                <StockLogo symbol={headerSym.symbol} size="sm" className="h-5 w-5 rounded-md text-[9px]" />
+                                                <span>{cleanH}</span>
+                                            </span>
+                                        ) : (
+                                            cleanH
+                                        )}
+                                    </th>
+                                );
+                            })}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200/70 dark:divide-white/10">
@@ -1236,14 +1248,27 @@ function ExportableTable({ headers, rows }: { headers?: string[]; rows?: string[
                                 key={rIdx}
                                 className="even:bg-zinc-50/60 dark:even:bg-zinc-950/70 hover:bg-amber-500/5 dark:hover:bg-zinc-900/60 transition-colors"
                             >
-                                {(Array.isArray(row) ? row : []).map((cell, cIdx) => (
-                                    <td
-                                        key={cIdx}
-                                        className="px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap border-l border-zinc-200/60 dark:border-white/10 last:border-l-0"
-                                    >
-                                        {renderTableCell(cell)}
-                                    </td>
-                                ))}
+                                {(Array.isArray(row) ? row : []).map((cell, cIdx) => {
+                                    const hdr = (safeHeaders[cIdx] || "").trim();
+                                    const isCodeCol = cIdx <= 1 && /^(?:الكود|الرمز|السهم|symbol|ticker)$/i.test(hdr);
+                                    const rawCode = String(cell || "").replace(/[\*`]/g, "").trim().toUpperCase();
+                                    const symMatch = isCodeCol ? rawCode.match(/^([A-Z]{2,10}|\d{4})(?:\.[A-Z]{2})?$/) : null;
+                                    return (
+                                        <td
+                                            key={cIdx}
+                                            className="px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap border-l border-zinc-200/60 dark:border-white/10 last:border-l-0"
+                                        >
+                                            {symMatch ? (
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <StockLogo symbol={symMatch[1]} size="sm" className="h-5 w-5 rounded-md text-[9px]" />
+                                                    {renderTableCell(cell)}
+                                                </span>
+                                            ) : (
+                                                renderTableCell(cell)
+                                            )}
+                                        </td>
+                                    );
+                                })}
                             </tr>
                         ))}
                     </tbody>
@@ -2111,14 +2136,35 @@ export function FormattedChatMessage({
                     </div>
             )}
 
-            {showScheduleModal && (
-                <ScheduleAutomationModal
-                    isOpen={showScheduleModal}
-                    onClose={() => setShowScheduleModal(false)}
-                    initialPrompt={userQuery || (content.length > 200 ? content.slice(0, 200) : content)}
-                    initialTitle={userQuery ? `متابعة: ${userQuery.slice(0, 30)}` : undefined}
-                />
-            )}
+            {showScheduleModal && (() => {
+                // Enrich ambiguous follow-up prompts (e.g. "طب انا اشتريت على ١ جنيه") with the
+                // stock ticker discussed in the assistant reply so daily runs always know the stock.
+                const rawQuery = (userQuery || "").trim();
+                const contentSymMatch =
+                    content.match(/\(([A-Z]{2,10}|\d{4})\)/) ||
+                    content.match(/EGX:([A-Z]{2,10})/);
+                const replySym = contentSymMatch ? contentSymMatch[1].toUpperCase() : "";
+                const queryHasSym =
+                    !replySym ||
+                    rawQuery.toUpperCase().includes(replySym) ||
+                    /(?:السوق|التوصيات|التجميع|المؤشر|السيولة|محفظت|أقوى الأسهم|افضل الأسهم|النهارده)/.test(rawQuery);
+                const enrichedPrompt = rawQuery
+                    ? (replySym && !queryHasSym ? `بخصوص سهم ${replySym}: ${rawQuery}` : rawQuery)
+                    : (content.length > 200 ? content.slice(0, 200) : content);
+                const enrichedTitle = rawQuery
+                    ? (replySym && !queryHasSym
+                        ? `متابعة ${replySym}: ${rawQuery.slice(0, 22)}`
+                        : `متابعة: ${rawQuery.slice(0, 30)}`)
+                    : undefined;
+                return (
+                    <ScheduleAutomationModal
+                        isOpen={showScheduleModal}
+                        onClose={() => setShowScheduleModal(false)}
+                        initialPrompt={enrichedPrompt}
+                        initialTitle={enrichedTitle}
+                    />
+                );
+            })()}
         </div>
     );
 }

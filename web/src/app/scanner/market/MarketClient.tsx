@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { buildHeatmapSnapshotFromRows } from "@/lib/heatmapSnapshot";
+import { getStockHref } from "@/lib/stock-href";
 import {
     Loader2, RefreshCw, Landmark,
     ArrowUpRight, ArrowDownRight, AlertTriangle, AlertCircle,
@@ -583,13 +584,14 @@ const SearchableSymbolSelect = ({ symbols, value, onChange, isAr, t }: {
     );
 };
 
-const SectorDrillModal = ({ sector, isAr, t, onClose, currencyCode = "EGP", isSaudi = false }: {
+const SectorDrillModal = ({ sector, isAr, t, onClose, currencyCode = "EGP", isSaudi = false, market = "egx" }: {
     sector: any;
     isAr: boolean;
     t: (k: string) => string;
     onClose: () => void;
     currencyCode?: string;
     isSaudi?: boolean;
+    market?: string;
 }) => {
     const [mounted, setMounted] = useState(false);
     useEffect(() => setMounted(true), []);
@@ -686,7 +688,7 @@ const SectorDrillModal = ({ sector, isAr, t, onClose, currencyCode = "EGP", isSa
                                         className={`hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors ${isAr ? "text-right" : "text-left"}`}
                                     >
                                         <td className={`px-4 py-3 font-black text-indigo-500 hover:underline ${isAr ? "text-right" : "text-left"}`}>
-                                            <Link prefetch={false} href={`/stocks/${st.symbol.toLowerCase()}`}>{st.symbol}</Link>
+                                            <Link prefetch={false} href={getStockHref(st.symbol, { market, exchange: st.exchange })}>{st.symbol}</Link>
                                         </td>
                                         <td className={`px-4 py-3 text-zinc-500 dark:text-zinc-400 font-semibold truncate max-w-xs ${isAr ? "text-right" : "text-left"}`}>{st.name}</td>
                                         <td className="px-4 py-3 font-mono font-bold">{(st.close ?? 0).toFixed(2)} <span className="text-[9px] text-zinc-500">{currencyCode}</span></td>
@@ -1181,6 +1183,45 @@ export default function MarketClient() {
     const activeMarketRef = useRef(market);
     activeMarketRef.current = market;
     const isAr = language === "ar";
+    const marketPageTitle = isSaudi
+        ? (isAr ? "تحليل السوق السعودي (تاسي TASI)" : "Saudi Tadawul (TASI) Market Analysis")
+        : isUae
+        ? (isAr ? "تحليل أسواق الإمارات (دبي DFM وأبوظبي ADX)" : "UAE (DFM & ADX) Market Analysis")
+        : isQatar
+        ? (isAr ? "تحليل بورصة قطر (QSE)" : "Qatar Stock Exchange (QSE) Market Analysis")
+        : t("market.title");
+    const marketPageSubtitle = isSaudi
+        ? (isAr
+            ? "تحليل حركة المؤشر العام تاسي (TASI)، اتساع السوق، والسيولة المؤسسية بالريال السعودي."
+            : "Analyzing TASI index trend, market breadth, and institutional liquidity in SAR.")
+        : isUae
+        ? (isAr
+            ? "تحليل حركة مؤشري دبي وأبوظبي (DFM & ADX)، السيولة القطاعية بالدرهم الإماراتي، وحركة الذهب والفضة."
+            : "Analyzing Dubai & Abu Dhabi (DFM & ADX) trends, sector liquidity in AED, and global precious metals.")
+        : isQatar
+        ? (isAr
+            ? "تحليل حركة مؤشر بورصة قطر (QSE)، السيولة القطاعية بالريال القطري، وحركة الذهب والفضة."
+            : "Analyzing Qatar Stock Exchange (QSE) trend, sector liquidity in QAR, and global precious metals.")
+        : t("market.subtitle");
+
+    useEffect(() => {
+        const titleAr = isSaudi
+            ? "تحليل السوق السعودي (تاسي TASI)"
+            : isUae
+            ? "تحليل أسواق الإمارات (DFM & ADX)"
+            : isQatar
+            ? "تحليل بورصة قطر (QSE)"
+            : "تحليل البورصة المصرية (EGX30 & EGX100)";
+        const titleEn = isSaudi
+            ? "Saudi Tadawul (TASI) Market Analysis"
+            : isUae
+            ? "UAE (DFM & ADX) Market Analysis"
+            : isQatar
+            ? "Qatar (QSE) Market Analysis"
+            : "EGX Market Analysis";
+        document.title = `${isAr ? titleAr : titleEn} | EGX BOTS`;
+    }, [isAr, isSaudi, isUae, isQatar]);
+
     const defaultTabForMarket = (m: string): "egx30" | "egx100" | "usdegp" | "tasi" | "dfm" | "adx" | "qse" =>
         m === "tasi" ? "tasi" : m === "uae" ? "dfm" : m === "qatar" ? "qse" : "egx30";
 
@@ -1603,8 +1644,8 @@ export default function MarketClient() {
             <div className="market-shell app-page-shell mx-auto max-w-[1600px] w-full px-4 py-8 md:px-6 md:py-12 mt-2" dir={isAr ? "rtl" : "ltr"}>
                 <BrandedPageHeader
                     eyebrow={isAr ? "تحليل السوق" : "MARKET ANALYSIS"}
-                    title={t("market.title")}
-                    description={t("market.subtitle")}
+                    title={marketPageTitle}
+                    description={marketPageSubtitle}
                     compact
                 />
                 <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4" role="status">
@@ -1629,8 +1670,8 @@ export default function MarketClient() {
                 <BrandedPageHeader
                     dir={isAr ? "rtl" : "ltr"}
                     eyebrow={isAr ? "تحليل السوق" : "MARKET ANALYSIS"}
-                    title={t("market.title")}
-                    description={t("market.subtitle")}
+                    title={marketPageTitle}
+                    description={marketPageSubtitle}
                     compact
                 />
                 <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-16 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.15)] flex flex-col items-center justify-center gap-6 text-center">
@@ -1736,8 +1777,8 @@ export default function MarketClient() {
         >
             <BrandedPageHeader
                 eyebrow={isAr ? "تحليل السوق" : "MARKET ANALYSIS"}
-                title={t("market.title")}
-                description={t("market.subtitle")}
+                title={marketPageTitle}
+                description={marketPageSubtitle}
                 compact
                 action={
                     <div className="flex flex-wrap items-center gap-3">
@@ -2248,7 +2289,7 @@ export default function MarketClient() {
                 ) : heatmapError || !heatmapData ? (
                     <div className="flex flex-col items-center justify-center min-h-[250px] text-center border-2 border-dashed border-zinc-300 dark:border-zinc-800 gap-3">
                         <AlertTriangle className="w-8 h-8 text-rose-500" />
-                        <p className="text-xs text-zinc-500 font-semibold">{heatmapError || "No heatmap data found."}</p>
+                        <p className="text-xs text-zinc-500 font-semibold">{heatmapError || (isAr ? "لا توجد بيانات متاحة لخريطة السيولة حالياً." : "No heatmap data found.")}</p>
                         <button
                             onClick={() => void fetchHeatmapData()}
                             className="px-4 py-2 bg-black dark:bg-white text-[#FFDC58] dark:text-black font-black text-xs uppercase border-2 border-black dark:border-white shadow-[2px_2px_0px_rgba(0,0,0,0.4)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all hover:bg-zinc-800 dark:hover:bg-zinc-200"
@@ -2360,6 +2401,7 @@ export default function MarketClient() {
                     t={t}
                     currencyCode={currencyCode}
                     isSaudi={market !== "egx"}
+                    market={market}
                     onClose={() => setDrillOpen(false)}
                 />
             )}

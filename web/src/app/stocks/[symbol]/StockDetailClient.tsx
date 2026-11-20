@@ -30,6 +30,8 @@ import { formatMarketUpdate } from "@/lib/market-update-time";
 import { computeSingleStockFairValue } from "@/lib/market/fair-value";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
 import { SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from "@/lib/saudi-stocks";
+import { getStockHref } from "@/lib/stock-href";
+import StockDividendCard from "@/components/dividends/StockDividendCard";
 
 interface HistoricalPrice {
   date: string;
@@ -43,7 +45,7 @@ interface HistoricalPrice {
 interface StockDetailClientProps {
   symbol: string;
   exchange: string;
-  market?: "egx" | "tasi";
+  market?: "egx" | "tasi" | "uae" | "qatar";
   fundamentals: any;
   latestPrice: any;
   latestTech: any;
@@ -215,11 +217,18 @@ export default function StockDetailClient({
 
   useEffect(() => {
     setLivePageData(null);
-    if (isGccStock) return; // HF has no snapshot for UAE/Qatar/metals; ISR data is already complete
     const controller = new AbortController();
-    const targetMarket = isSaudiStock ? "tasi" : "egx";
+    const targetMarket =
+      resolvedExchange === "QSE"
+        ? "qatar"
+        : resolvedExchange === "DFM" || resolvedExchange === "ADX" || resolvedExchange === "COMMODITIES"
+        ? "uae"
+        : isSaudiStock
+        ? "tasi"
+        : "egx";
+    const exParam = isGccStock ? `&exchange=${encodeURIComponent(resolvedExchange)}` : "";
     fetch(
-      `/api/public/stock-page-data?symbol=${encodeURIComponent(cleanSymbol)}&market=${targetMarket}`,
+      `/api/public/stock-page-data?symbol=${encodeURIComponent(cleanSymbol)}&market=${targetMarket}${exParam}`,
       { signal: controller.signal }
     )
       .then((res) => (res.ok ? res.json() : null))
@@ -511,7 +520,11 @@ export default function StockDetailClient({
   // Watchlist toggle handler
   const handleWatchlistToggle = useCallback(() => {
     if (!user) {
-      router.push(`/login?redirect=/stocks/${cleanSymbol.toLowerCase()}`);
+      const targetHref = getStockHref(cleanSymbol, {
+        market: isGccStock ? (resolvedExchange === "QSE" ? "qatar" : "uae") : isSaudiStock ? "tasi" : "egx",
+        exchange: resolvedExchange,
+      });
+      router.push(`/login?redirect=${encodeURIComponent(targetHref)}`);
       return;
     }
     const alreadySaved = isSaved(symbol);
@@ -1265,7 +1278,9 @@ export default function StockDetailClient({
               <Link
                 prefetch={false}
                 key={stock.symbol}
-                href={`/stocks/${stock.symbol.toLowerCase()}`}
+                href={getStockHref(stock.symbol, {
+                  market: isGccStock ? (resolvedExchange === "QSE" ? "qatar" : "uae") : isSaudiStock ? "tasi" : "egx",
+                })}
                 className="p-3 border-2 border-black bg-[var(--app-surface-strong)] hover:bg-yellow-400 dark:hover:bg-yellow-500 hover:text-black font-mono transition-all text-center flex flex-col justify-center items-center gap-1 cursor-pointer active:translate-x-[2px] active:translate-y-[2px]"
               >
                 <span className="font-extrabold text-base tracking-wide">{stock.symbol}</span>
@@ -1281,6 +1296,12 @@ export default function StockDetailClient({
           })}
         </div>
       </div>
+
+      {/* Cash Dividend Schedule & Calculator (All 4 Markets) */}
+      <StockDividendCard
+        symbol={symbol}
+        market={market || (isSaudiStock ? "tasi" : "egx")}
+      />
 
       {/* SEO & Quantitative FAQ Summary (Responds to Light/Dark Mode & AR/EN) */}
       <div dir={language === "ar" ? "rtl" : "ltr"} className="app-panel p-6 sm:p-8 bg-white dark:bg-zinc-900 rounded-none border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_#000] dark:shadow-[4px_4px_0px_0px_#fff]">

@@ -27,12 +27,14 @@ export type PublicStockPageBundle = {
 
 async function fetchSnapshotBundleFromHf(
     symbol: string,
-    market: MarketMode
+    market: MarketMode,
+    preferredExchange?: string,
 ): Promise<PublicStockPageBundle | null> {
+    const exParam = preferredExchange ? `&exchange=${encodeURIComponent(preferredExchange)}` : '';
     const payload = await fetchHfPublicJson<{
         snapshot?: PublicStockSnapshotData;
         related?: { basis?: 'sector' | 'directory'; stocks?: Array<{ symbol: string; name: string }> };
-    }>(`/api/public/stock-page-data?symbol=${encodeURIComponent(symbol)}&market=${market}`, 604800);
+    }>(`/api/public/stock-page-data?symbol=${encodeURIComponent(symbol)}&market=${market}${exParam}`, 604800);
     if (!payload?.snapshot || (!payload.snapshot.fundamentals && !payload.snapshot.latestPrice)) return null;
     return {
         snapshot: payload.snapshot,
@@ -78,34 +80,37 @@ const getPublicEgxStockSnapshot = cache(unstable_cache(async (symbol: string): P
 
 const GCC_METALS_EXCHANGES = ['DFM', 'ADX', 'QSE', 'COMMODITIES'] as const;
 
-async function getPublicGccMetalsStockSnapshot(symbol: string): Promise<PublicStockSnapshotData | null> {
+async function getPublicGccMetalsStockSnapshot(symbol: string, preferredExchange?: string): Promise<PublicStockSnapshotData | null> {
     const cleanSymbol = symbol.toUpperCase().trim();
+    const targetExchanges = preferredExchange
+        ? [preferredExchange.toUpperCase()]
+        : [...GCC_METALS_EXCHANGES];
     const client = getMarketSupabaseClient('tasi');
     const [stockRes, priceRes, techRes, histRes] = await Promise.all([
         client
             .from('stocks')
             .select('symbol,exchange,country,currency,name,name_ar,sector,updated_at')
-            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .in('exchange', targetExchanges)
             .eq('symbol', cleanSymbol)
             .limit(1),
         client
             .from('stock_prices')
             .select('symbol,exchange,date,open,high,low,close,volume,updated_at')
-            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .in('exchange', targetExchanges)
             .eq('symbol', cleanSymbol)
             .order('date', { ascending: false })
             .limit(1),
         client
             .from('stock_technical_indicators')
             .select('symbol,exchange,date,close,change_pct,adx_14,rsi_14,macd,macd_signal,ema_50,ema_200,sma_50,sma_200,calculated_at')
-            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .in('exchange', targetExchanges)
             .eq('symbol', cleanSymbol)
             .order('date', { ascending: false })
             .limit(1),
         client
             .from('stock_prices')
             .select('date,open,high,low,close,volume')
-            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .in('exchange', targetExchanges)
             .eq('symbol', cleanSymbol)
             .order('date', { ascending: false })
             .limit(30),
@@ -217,22 +222,39 @@ const getPublicTasiStockSnapshot = cache(unstable_cache(async (symbol: string): 
     };
 }, ['public-tasi-stock-snapshot-v2'], { revalidate: 604800 }));
 
-const getCachedStockPageBundle = cache(unstable_cache(async (symbol: string, market: MarketMode): Promise<PublicStockPageBundle> => {
-    const hf = await fetchSnapshotBundleFromHf(symbol, market);
+const EMPTY_SNAPSHOT: PublicStockSnapshotData = {
+    fundamentals: null,
+    latestPrice: null,
+    latestTech: null,
+    latestScan: null,
+    historicalPrices: [],
+};
+
+const getCachedStockPageBundle = cache(unstable_cache(async (symbol: string, market: MarketMode, preferredExchange = ''): Promise<PublicStockPageBundle> => {
+    const cleanEx = preferredExchange.trim().toUpperCase() || undefined;
+    const hf = await fetchSnapshotBundleFromHf(symbol, market, cleanEx);
     if (hf?.snapshot) return hf;
+    if (market === 'uae' || market === 'qatar' || (cleanEx && (GCC_METALS_EXCHANGES as readonly string[]).includes(cleanEx))) {
+        const gccSnap = await getPublicGccMetalsStockSnapshot(symbol, cleanEx).catch(() => null);
+        return { snapshot: gccSnap ?? EMPTY_SNAPSHOT, related: null };
+    }
     const snapshot = market === 'tasi'
         ? await getPublicTasiStockSnapshot(symbol)
         : await getPublicEgxStockSnapshot(symbol);
     return { snapshot, related: null };
-}, ['public-stock-page-bundle-v3'], { revalidate: 604800 }));
+}, ['public-stock-page-bundle-v4'], { revalidate: 604800 }));
 
-export async function getPublicStockSnapshot(symbol: string, market: MarketMode = 'egx') {
+export async function getPublicStockSnapshot(symbol: string, market: MarketMode = 'egx', preferredExchange?: string) {
+    if (preferredExchange || market === 'uae' || market === 'qatar') {
+        const gccSnap = await getPublicGccMetalsStockSnapshot(symbol, preferredExchange).catch(() => null);
+        if (gccSnap) return gccSnap;
+    }
     if (market === 'tasi') {
         return getPublicTasiStockSnapshot(symbol);
     }
     return getPublicEgxStockSnapshot(symbol);
 }
 
-export async function getPublicStockPageBundle(symbol: string, market: MarketMode = 'egx'): Promise<PublicStockPageBundle> {
-    return getCachedStockPageBundle(symbol, market);
+export async function getPublicStockPageBundle(symbol: string, market: MarketMode = 'egx', preferredExchange?: string): Promise<PublicStockPageBundle> {
+    return getCachedStockPageBundle(symbol, market, preferredExchange || '');
 }

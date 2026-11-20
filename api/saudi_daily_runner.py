@@ -18,7 +18,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -356,284 +358,298 @@ def run_saudi_daily_job(
     market_status_payload: Dict[str, Any] = {}
     ind_rows: List[Dict[str, Any]] = []
     latest_date = dt.datetime.now(RIYADH_TZ).date().isoformat()
+    state_lock = threading.RLock()
 
-    if norm_phase in {"morning", "midday"}:
-        # 2a. Intraday Indicators + Market Status + Short Swings
-        if not (_step_done("saudi_intraday_refresh") and _step_done("saudi_short_swings")):
+    def _safe_record_step(step_name: str, status: str, count: int = 0, details: str = "") -> None:
+        with state_lock:
+            _record_step(steps_log, step_name, status, count=count, details=details)
+
+    def _safe_add_error(msg: str) -> None:
+        with state_lock:
+            errors.append(msg)
+
+    def _run_saudi_news_and_disclosures() -> None:
+        if not _step_done("saudi_news_sync"):
             try:
-                snap = _run_intraday_snapshot_and_short_swings(saudi_sb, phase=norm_phase)
-                latest_date = str(snap.get("latest_date") or latest_date)
-                swings_payload = snap.get("swings_payload") or {}
-                market_status_payload = snap.get("market_status") or {}
-                _record_step(
-                    steps_log,
-                    "saudi_intraday_refresh",
-                    "success",
-                    count=int(snap.get("indicators_count") or 0),
-                    details=f"latest_date={latest_date}",
-                )
-                _record_step(
-                    steps_log,
-                    "saudi_short_swings",
-                    "success",
-                    count=len(swings_payload.get("active_trades") or []),
-                    details=f"new_entries={len(swings_payload.get('new_entries') or [])}, new_exits={len(swings_payload.get('new_exits') or [])}",
+                from api.saudi_news_sync import run_saudi_news_sync
+                news_res = run_saudi_news_sync(max_symbols=70, days_back=15)
+                _safe_record_step(
+                    "saudi_news_sync",
+                    "success" if news_res.get("ok") else "failed",
+                    count=int(news_res.get("rows_saved") or 0),
+                    details=f"headlines={news_res.get('total_headlines')}",
                 )
             except Exception as exc:
-                _record_step(steps_log, "saudi_intraday_refresh", "failed", details=str(exc))
-                errors.append(f"saudi_intraday_refresh: {exc}")
-    else:
-        # 2b. Close: Full Pipeline Bootstrap (reuse trained KING_TASI & model_TADAWUL models)
-        if not _step_done("saudi_pipeline_bootstrap"):
-            try:
-                from scripts.saudi_pipeline_bootstrap import main as run_saudi_bootstrap
-                rc = run_saudi_bootstrap(reuse_models=True)
-                _record_step(
-                    steps_log,
-                    "saudi_pipeline_bootstrap",
-                    "success" if rc == 0 else "failed",
-                    count=total_symbols,
-                    details="reuse_models=True",
-                )
-                if rc != 0:
-                    errors.append(f"saudi_pipeline_bootstrap exited {rc}")
-            except Exception as exc:
-                _record_step(steps_log, "saudi_pipeline_bootstrap", "failed", details=str(exc))
-                errors.append(f"saudi_pipeline_bootstrap: {exc}")
+                _safe_record_step("saudi_news_sync", "failed", details=str(exc))
+                _safe_add_error(f"saudi_news_sync: {exc}")
 
+        if not _step_done("saudi_disclosures_sync"):
+            try:
+                from api.saudi_disclosures_sync import run_saudi_disclosures_sync
+                disc_res = run_saudi_disclosures_sync(days_back=30)
+                _safe_record_step(
+                    "saudi_disclosures_sync",
+                    "success" if disc_res.get("ok") else "failed",
+                    count=int(disc_res.get("saved") or 0),
+                    details=f"fetched={disc_res.get('fetched')}",
+                )
+            except Exception as exc:
+                _safe_record_step("saudi_disclosures_sync", "failed", details=str(exc))
+                _safe_add_error(f"saudi_disclosures_sync: {exc}")
+
+    def _run_gcc_daily_bundle() -> None:
+        if not _step_done("gcc_metals_sync"):
+            try:
+                from api.gcc_metals_sync import run_gcc_metals_sync
+                gcc_res = run_gcc_metals_sync(daily_only=True)
+                gcc_summary = gcc_res.get("summary") or {}
+                synced_total = sum(int((v or {}).get("symbols_synced") or 0) for v in gcc_summary.values())
+                _safe_record_step(
+                    "gcc_metals_sync",
+                    "success" if gcc_res.get("ok") else "failed",
+                    count=synced_total,
+                    details=",".join(f"{k}:{v.get('symbols_synced', 0)}" for k, v in gcc_summary.items()),
+                )
+            except Exception as exc:
+                _safe_record_step("gcc_metals_sync", "failed", details=str(exc))
+                _safe_add_error(f"gcc_metals_sync: {exc}")
+
+        if not _step_done("gcc_news_sync"):
+            try:
+                from api.gcc_news_sync import sync_gcc_market_news
+                gcc_news_res = sync_gcc_market_news(market="all", max_symbols=50, days_back=15)
+                _safe_record_step(
+                    "gcc_news_sync",
+                    "success" if gcc_news_res.get("ok") else "failed",
+                    count=int(gcc_news_res.get("synced_rows") or 0),
+                    details=f"matched={gcc_news_res.get('matched_symbols')}",
+                )
+            except Exception as exc:
+                _safe_record_step("gcc_news_sync", "failed", details=str(exc))
+                _safe_add_error(f"gcc_news_sync: {exc}")
+
+        if not _step_done("gcc_disclosures_sync"):
+            try:
+                from api.gcc_disclosures_sync import run_gcc_disclosures_sync
+                gcc_disc_res = run_gcc_disclosures_sync(market="all", days_back=30)
+                gcc_disc_results = gcc_disc_res.get("results") or {}
+                inserted_total = sum(int((v or {}).get("inserted") or 0) for v in gcc_disc_results.values())
+                _safe_record_step(
+                    "gcc_disclosures_sync",
+                    "success" if gcc_disc_res.get("ok") else "failed",
+                    count=inserted_total,
+                    details=",".join(f"{k}:{(v or {}).get('inserted', 0)}" for k, v in gcc_disc_results.items()),
+                )
+            except Exception as exc:
+                _safe_record_step("gcc_disclosures_sync", "failed", details=str(exc))
+                _safe_add_error(f"gcc_disclosures_sync: {exc}")
+
+    with ThreadPoolExecutor(max_workers=2) as io_pool:
+        saudi_news_future = io_pool.submit(_run_saudi_news_and_disclosures)
+        gcc_future = io_pool.submit(_run_gcc_daily_bundle)
+
+        if norm_phase in {"morning", "midday"}:
+            # 2a. Intraday Indicators + Market Status + Short Swings
+            if not (_step_done("saudi_intraday_refresh") and _step_done("saudi_short_swings")):
+                try:
+                    snap = _run_intraday_snapshot_and_short_swings(saudi_sb, phase=norm_phase)
+                    latest_date = str(snap.get("latest_date") or latest_date)
+                    swings_payload = snap.get("swings_payload") or {}
+                    market_status_payload = snap.get("market_status") or {}
+                    _safe_record_step(
+                        "saudi_intraday_refresh",
+                        "success",
+                        count=int(snap.get("indicators_count") or 0),
+                        details=f"latest_date={latest_date}",
+                    )
+                    _safe_record_step(
+                        "saudi_short_swings",
+                        "success",
+                        count=len(swings_payload.get("active_trades") or []),
+                        details=f"new_entries={len(swings_payload.get('new_entries') or [])}, new_exits={len(swings_payload.get('new_exits') or [])}",
+                    )
+                except Exception as exc:
+                    _safe_record_step("saudi_intraday_refresh", "failed", details=str(exc))
+                    _safe_add_error(f"saudi_intraday_refresh: {exc}")
+        else:
+            # 2b. Close: Full Pipeline Bootstrap (reuse trained KING_TASI & model_TADAWUL models)
+            if not _step_done("saudi_pipeline_bootstrap"):
+                try:
+                    from scripts.saudi_pipeline_bootstrap import main as run_saudi_bootstrap
+                    rc = run_saudi_bootstrap(reuse_models=True)
+                    _safe_record_step(
+                        "saudi_pipeline_bootstrap",
+                        "success" if rc == 0 else "failed",
+                        count=total_symbols,
+                        details="reuse_models=True",
+                    )
+                    if rc != 0:
+                        _safe_add_error(f"saudi_pipeline_bootstrap exited {rc}")
+                except Exception as exc:
+                    _safe_record_step("saudi_pipeline_bootstrap", "failed", details=str(exc))
+                    _safe_add_error(f"saudi_pipeline_bootstrap: {exc}")
+
+                with state_lock:
+                    _persist_job_run(main_sb, job_run_id, job_type, "running", started_at, steps_log, total_symbols, trigger)
+
+            # 3b. Close: Backtests + Short Swings + Fast Scanner Systems
+            if not _step_done("saudi_systems_backtests"):
+                try:
+                    from scripts.saudi_backtest_and_systems import main as run_saudi_systems
+                    sys_res = run_saudi_systems([])
+                    swings_payload = sys_res.get("short_swings") or {}
+                    latest_date = str(swings_payload.get("as_of_date") or latest_date)[:10]
+                    _safe_record_step(
+                        "saudi_systems_backtests",
+                        "success",
+                        count=len(swings_payload.get("active_trades") or []),
+                        details=f"as_of={latest_date}",
+                    )
+                except Exception as exc:
+                    _safe_record_step("saudi_systems_backtests", "failed", details=str(exc))
+                    _safe_add_error(f"saudi_systems_backtests: {exc}")
+            elif not _step_done("saudi_telegram_vip") and saudi_sb is not None:
+                try:
+                    sw_res = (
+                        saudi_sb.table("market_cache")
+                        .select("payload")
+                        .eq("cache_key", "saudi_short_swings_v1")
+                        .eq("country", SAUDI_COUNTRY)
+                        .limit(1)
+                        .execute()
+                    )
+                    sw_rows = getattr(sw_res, "data", None) or []
+                    swings_payload = (sw_rows[0] if sw_rows else {}).get("payload") or {}
+                    latest_date = str(swings_payload.get("as_of_date") or swings_payload.get("as_of") or latest_date)[:10]
+                except Exception:
+                    pass
+
+        # Ensure Saudi disclosures & news finish before VIP daily report reads egx_disclosures
+        saudi_news_future.result()
+
+        with state_lock:
             _persist_job_run(main_sb, job_run_id, job_type, "running", started_at, steps_log, total_symbols, trigger)
 
-        # 3b. Close: Backtests + Short Swings + Fast Scanner Systems
-        if not _step_done("saudi_systems_backtests"):
+        # 4. VIP-ONLY Telegram Dispatch (Strictly NO Free channel for Saudi)
+        if not _step_done("saudi_telegram_vip"):
             try:
-                from scripts.saudi_backtest_and_systems import main as run_saudi_systems
-                sys_res = run_saudi_systems([])
-                swings_payload = sys_res.get("short_swings") or {}
-                latest_date = str(swings_payload.get("as_of_date") or latest_date)[:10]
-                _record_step(
-                    steps_log,
-                    "saudi_systems_backtests",
-                    "success",
-                    count=len(swings_payload.get("active_trades") or []),
-                    details=f"as_of={latest_date}",
+                from api.saudi_telegram_dispatch import (
+                    dispatch_saudi_daily_vip_report,
+                    dispatch_saudi_market_outlook_vip,
+                    dispatch_saudi_open_recommendations,
+                    dispatch_saudi_short_swings_vip,
                 )
-            except Exception as exc:
-                _record_step(steps_log, "saudi_systems_backtests", "failed", details=str(exc))
-                errors.append(f"saudi_systems_backtests: {exc}")
-        elif not _step_done("saudi_telegram_vip") and saudi_sb is not None:
-            try:
-                sw_res = (
-                    saudi_sb.table("market_cache")
-                    .select("payload")
-                    .eq("cache_key", "saudi_short_swings_v1")
-                    .eq("country", SAUDI_COUNTRY)
-                    .maybe_single()
-                    .execute()
-                )
-                swings_payload = (getattr(sw_res, "data", None) or {}).get("payload") or {}
-                latest_date = str(swings_payload.get("as_of_date") or swings_payload.get("as_of") or latest_date)[:10]
-            except Exception:
-                pass
 
-    _persist_job_run(main_sb, job_run_id, job_type, "running", started_at, steps_log, total_symbols, trigger)
-
-    # 4. VIP-ONLY Telegram Dispatch (Strictly NO Free channel for Saudi)
-    if not _step_done("saudi_telegram_vip"):
-        try:
-            from api.saudi_telegram_dispatch import (
-                dispatch_saudi_daily_vip_report,
-                dispatch_saudi_market_outlook_vip,
-                dispatch_saudi_open_recommendations,
-                dispatch_saudi_short_swings_vip,
-            )
-
-            tg_details: List[str] = []
-            tg_errors: List[str] = []
-            tg_count = 0
-            if swings_payload:
-                try:
-                    sw_tg = dispatch_saudi_short_swings_vip(swings_payload, phase=norm_phase, sb=saudi_sb, dry_run=dry_run)
-                    tg_count += (
-                        int(sw_tg.get("entries_sent") or 0)
-                        + int(sw_tg.get("exits_sent") or 0)
-                        + int(sw_tg.get("updates_sent") or 0)
-                    )
-                    tg_details.append(
-                        f"swings_vip(entries={sw_tg.get('entries_sent')}, exits={sw_tg.get('exits_sent')}, updates={sw_tg.get('updates_sent', 0)})"
-                    )
-                    if not sw_tg.get("ok"):
-                        tg_errors.append(f"saudi_short_swings_vip: {sw_tg.get('errors')}")
-                except Exception as sw_exc:
-                    tg_errors.append(f"saudi_short_swings_vip: {sw_exc}")
-
-            if norm_phase == "close":
-                rec_count = 0
-                try:
-                    rec_tg = dispatch_saudi_open_recommendations(dedup_date=latest_date, sb=saudi_sb, dry_run=dry_run)
-                    rec_count = int(rec_tg.get("sent_count") or 0)
-                    if rec_tg.get("ok") and not rec_tg.get("skipped"):
-                        tg_count += 1
-                    elif not rec_tg.get("ok"):
-                        tg_errors.append(f"recs_vip: {rec_tg.get('error')}")
-                    tg_details.append(f"recs_vip(ok={rec_tg.get('ok')}, skipped={bool(rec_tg.get('skipped'))})")
-                except Exception as rec_exc:
-                    tg_errors.append(f"recs_vip: {rec_exc}")
-
-                # Read market_status & latest indicators from SAUDI_SUPABASE if not already in memory
-                try:
-                    if not market_status_payload:
-                        ms_res = (
-                            saudi_sb.table("market_cache")
-                            .select("payload")
-                            .eq("cache_key", f"market_status_{SAUDI_COUNTRY}")
-                            .eq("country", SAUDI_COUNTRY)
-                            .maybe_single()
-                            .execute()
+                tg_details: List[str] = []
+                tg_errors: List[str] = []
+                tg_count = 0
+                if swings_payload:
+                    try:
+                        sw_tg = dispatch_saudi_short_swings_vip(swings_payload, phase=norm_phase, sb=saudi_sb, dry_run=dry_run)
+                        tg_count += (
+                            int(sw_tg.get("entries_sent") or 0)
+                            + int(sw_tg.get("exits_sent") or 0)
+                            + int(sw_tg.get("updates_sent") or 0)
                         )
-                        market_status_payload = (getattr(ms_res, "data", None) or {}).get("payload") or {}
-                    if not ind_rows:
-                        ind_res = (
-                            saudi_sb.table("stock_technical_indicators")
-                            .select("symbol,close,change_pct")
-                            .eq("exchange", "TADAWUL")
-                            .eq("date", latest_date)
-                            .limit(300)
-                            .execute()
+                        tg_details.append(
+                            f"swings_vip(entries={sw_tg.get('entries_sent')}, exits={sw_tg.get('exits_sent')}, updates={sw_tg.get('updates_sent', 0)})"
                         )
-                        ind_rows = list(ind_res.data or [])
+                        if not sw_tg.get("ok"):
+                            tg_errors.append(f"saudi_short_swings_vip: {sw_tg.get('errors')}")
+                    except Exception as sw_exc:
+                        tg_errors.append(f"saudi_short_swings_vip: {sw_exc}")
+
+                if norm_phase == "close":
+                    rec_count = 0
+                    try:
+                        rec_tg = dispatch_saudi_open_recommendations(dedup_date=latest_date, sb=saudi_sb, dry_run=dry_run)
+                        rec_count = int(rec_tg.get("sent_count") or 0)
+                        if rec_tg.get("ok") and not rec_tg.get("skipped"):
+                            tg_count += 1
+                        elif not rec_tg.get("ok"):
+                            tg_errors.append(f"recs_vip: {rec_tg.get('error')}")
+                        tg_details.append(f"recs_vip(ok={rec_tg.get('ok')}, skipped={bool(rec_tg.get('skipped'))})")
+                    except Exception as rec_exc:
+                        tg_errors.append(f"recs_vip: {rec_exc}")
+
+                    # Read market_status & latest indicators from SAUDI_SUPABASE if not already in memory
+                    try:
+                        if not market_status_payload:
+                            ms_res = (
+                                saudi_sb.table("market_cache")
+                                .select("payload")
+                                .eq("cache_key", f"market_status_{SAUDI_COUNTRY}")
+                                .eq("country", SAUDI_COUNTRY)
+                                .limit(1)
+                                .execute()
+                            )
+                            ms_rows = getattr(ms_res, "data", None) or []
+                            market_status_payload = (ms_rows[0] if ms_rows else {}).get("payload") or {}
                         if not ind_rows:
                             ind_res = (
                                 saudi_sb.table("stock_technical_indicators")
                                 .select("symbol,close,change_pct")
                                 .eq("exchange", "TADAWUL")
+                                .eq("date", latest_date)
                                 .limit(300)
                                 .execute()
                             )
                             ind_rows = list(ind_res.data or [])
+                            if not ind_rows:
+                                ind_res = (
+                                    saudi_sb.table("stock_technical_indicators")
+                                    .select("symbol,close,change_pct")
+                                    .eq("exchange", "TADAWUL")
+                                    .limit(300)
+                                    .execute()
+                                )
+                                ind_rows = list(ind_res.data or [])
 
-                    outlook_tg = dispatch_saudi_market_outlook_vip(
-                        market_status=market_status_payload,
-                        ind_rows=ind_rows,
-                        recommendations_count=rec_count,
-                        market_date=latest_date,
-                        sb=saudi_sb,
-                        dry_run=dry_run,
-                    )
-                    if outlook_tg.get("ok") and not outlook_tg.get("skipped"):
-                        tg_count += 1
-                    elif not outlook_tg.get("ok"):
-                        tg_errors.append(f"outlook_vip: {outlook_tg.get('error')}")
-                    tg_details.append(f"outlook_vip(ok={outlook_tg.get('ok')}, skipped={bool(outlook_tg.get('skipped'))})")
-                except Exception as out_exc:
-                    tg_errors.append(f"outlook_vip: {out_exc}")
-                try:
-                    vip_report_tg = dispatch_saudi_daily_vip_report(
-                        market_date=latest_date,
-                        ind_rows=ind_rows,
-                        sb=saudi_sb,
-                        dry_run=dry_run,
-                    )
-                    if vip_report_tg.get("ok") and not vip_report_tg.get("skipped"):
-                        tg_count += 1
-                    elif not vip_report_tg.get("ok"):
-                        tg_errors.append(f"report_vip: {vip_report_tg.get('error')}")
-                    tg_details.append(f"report_vip(ok={vip_report_tg.get('ok')}, skipped={bool(vip_report_tg.get('skipped'))})")
-                except Exception as rep_exc:
-                    tg_errors.append(f"report_vip: {rep_exc}")
+                        outlook_tg = dispatch_saudi_market_outlook_vip(
+                            market_status=market_status_payload,
+                            ind_rows=ind_rows,
+                            recommendations_count=rec_count,
+                            market_date=latest_date,
+                            sb=saudi_sb,
+                            dry_run=dry_run,
+                        )
+                        if outlook_tg.get("ok") and not outlook_tg.get("skipped"):
+                            tg_count += 1
+                        elif not outlook_tg.get("ok"):
+                            tg_errors.append(f"outlook_vip: {outlook_tg.get('error')}")
+                        tg_details.append(f"outlook_vip(ok={outlook_tg.get('ok')}, skipped={bool(outlook_tg.get('skipped'))})")
+                    except Exception as out_exc:
+                        tg_errors.append(f"outlook_vip: {out_exc}")
+                    try:
+                        vip_report_tg = dispatch_saudi_daily_vip_report(
+                            market_date=latest_date,
+                            ind_rows=ind_rows,
+                            sb=saudi_sb,
+                            dry_run=dry_run,
+                        )
+                        if vip_report_tg.get("ok") and not vip_report_tg.get("skipped"):
+                            tg_count += 1
+                        elif not vip_report_tg.get("ok"):
+                            tg_errors.append(f"report_vip: {vip_report_tg.get('error')}")
+                        tg_details.append(f"report_vip(ok={vip_report_tg.get('ok')}, skipped={bool(vip_report_tg.get('skipped'))})")
+                    except Exception as rep_exc:
+                        tg_errors.append(f"report_vip: {rep_exc}")
 
-            if tg_errors:
-                errors.extend(tg_errors)
-            _record_step(
-                steps_log,
-                "saudi_telegram_vip",
-                "failed" if tg_errors and tg_count == 0 else "success",
-                count=tg_count,
-                details="; ".join(tg_details + tg_errors) or "no_vip_messages_needed",
-            )
-        except Exception as exc:
-            _record_step(steps_log, "saudi_telegram_vip", "failed", details=str(exc))
-            errors.append(f"saudi_telegram_vip: {exc}")
+                if tg_errors:
+                    for tg_err in tg_errors:
+                        _safe_add_error(tg_err)
+                _safe_record_step(
+                    "saudi_telegram_vip",
+                    "failed" if tg_errors and tg_count == 0 else "success",
+                    count=tg_count,
+                    details="; ".join(tg_details + tg_errors) or "no_vip_messages_needed",
+                )
+            except Exception as exc:
+                _safe_record_step("saudi_telegram_vip", "failed", details=str(exc))
+                _safe_add_error(f"saudi_telegram_vip: {exc}")
 
-    # 5. News & Disclosures
-    if not _step_done("saudi_news_sync"):
-        try:
-            from api.saudi_news_sync import run_saudi_news_sync
-            news_res = run_saudi_news_sync(max_symbols=70, days_back=15)
-            _record_step(
-                steps_log,
-                "saudi_news_sync",
-                "success" if news_res.get("ok") else "failed",
-                count=int(news_res.get("rows_saved") or 0),
-                details=f"headlines={news_res.get('total_headlines')}",
-            )
-        except Exception as exc:
-            _record_step(steps_log, "saudi_news_sync", "failed", details=str(exc))
-            errors.append(f"saudi_news_sync: {exc}")
-
-    if not _step_done("saudi_disclosures_sync"):
-        try:
-            from api.saudi_disclosures_sync import run_saudi_disclosures_sync
-            disc_res = run_saudi_disclosures_sync(days_back=30)
-            _record_step(
-                steps_log,
-                "saudi_disclosures_sync",
-                "success" if disc_res.get("ok") else "failed",
-                count=int(disc_res.get("saved") or 0),
-                details=f"fetched={disc_res.get('fetched')}",
-            )
-        except Exception as exc:
-            _record_step(steps_log, "saudi_disclosures_sync", "failed", details=str(exc))
-            errors.append(f"saudi_disclosures_sync: {exc}")
-
-    # 5b. Daily incremental sync for UAE (DFM & ADX), Qatar (QSE), and Gold & Silver (COMMODITIES)
-    if not _step_done("gcc_metals_sync"):
-        try:
-            from api.gcc_metals_sync import run_gcc_metals_sync
-            gcc_res = run_gcc_metals_sync(daily_only=True)
-            gcc_summary = gcc_res.get("summary") or {}
-            synced_total = sum(int((v or {}).get("symbols_synced") or 0) for v in gcc_summary.values())
-            _record_step(
-                steps_log,
-                "gcc_metals_sync",
-                "success" if gcc_res.get("ok") else "failed",
-                count=synced_total,
-                details=",".join(f"{k}:{v.get('symbols_synced', 0)}" for k, v in gcc_summary.items()),
-            )
-        except Exception as exc:
-            _record_step(steps_log, "gcc_metals_sync", "failed", details=str(exc))
-            errors.append(f"gcc_metals_sync: {exc}")
-
-    if not _step_done("gcc_news_sync"):
-        try:
-            from api.gcc_news_sync import sync_gcc_market_news
-            gcc_news_res = sync_gcc_market_news(market="all", max_symbols=50, days_back=15)
-            _record_step(
-                steps_log,
-                "gcc_news_sync",
-                "success" if gcc_news_res.get("ok") else "failed",
-                count=int(gcc_news_res.get("synced_rows") or 0),
-                details=f"matched={gcc_news_res.get('matched_symbols')}",
-            )
-        except Exception as exc:
-            _record_step(steps_log, "gcc_news_sync", "failed", details=str(exc))
-            errors.append(f"gcc_news_sync: {exc}")
-
-    if not _step_done("gcc_disclosures_sync"):
-        try:
-            from api.gcc_disclosures_sync import run_gcc_disclosures_sync
-            gcc_disc_res = run_gcc_disclosures_sync(market="all", days_back=30)
-            gcc_disc_results = gcc_disc_res.get("results") or {}
-            inserted_total = sum(int((v or {}).get("inserted") or 0) for v in gcc_disc_results.values())
-            _record_step(
-                steps_log,
-                "gcc_disclosures_sync",
-                "success" if gcc_disc_res.get("ok") else "failed",
-                count=inserted_total,
-                details=",".join(f"{k}:{(v or {}).get('inserted', 0)}" for k, v in gcc_disc_results.items()),
-            )
-        except Exception as exc:
-            _record_step(steps_log, "gcc_disclosures_sync", "failed", details=str(exc))
-            errors.append(f"gcc_disclosures_sync: {exc}")
+        # Join GCC/Metals parallel lane before cache revalidation
+        gcc_future.result()
 
     # 6. Cache Revalidation
     if not _step_done("cache_revalidation"):

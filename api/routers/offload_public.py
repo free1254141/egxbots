@@ -542,9 +542,135 @@ def _select_related_links(directory: List[Dict[str, Any]], symbol: str, sector: 
     }
 
 
-def _load_stock_page_data(symbol: str, market: str) -> Dict[str, Any]:
+def _load_gcc_stock_page_data(clean_sym: str, exchanges: List[str]) -> Dict[str, Any]:
+    sb = get_market_supabase("uae")
+    if sb is None:
+        return {
+            "snapshot": {"fundamentals": None, "latestPrice": None, "latestTech": None, "latestScan": None, "historicalPrices": []},
+            "related": {"basis": "directory", "stocks": []},
+        }
+
+    def _read_gcc_meta():
+        try:
+            res = (
+                sb.table("stocks")
+                .select("symbol,exchange,country,currency,name,name_ar,sector,updated_at")
+                .in_("exchange", exchanges)
+                .eq("symbol", clean_sym)
+                .limit(1)
+                .execute()
+            )
+            return getattr(res, "data", None) or []
+        except Exception:
+            return []
+
+    def _read_gcc_peers():
+        try:
+            res = (
+                sb.table("stocks")
+                .select("symbol,exchange,name,name_ar,sector")
+                .in_("exchange", exchanges)
+                .eq("is_active", True)
+                .limit(120)
+                .execute()
+            )
+            return getattr(res, "data", None) or []
+        except Exception:
+            return []
+
+    def _read_gcc_table(table: str, fields: str, order_col: str, limit: int):
+        try:
+            res = (
+                sb.table(table)
+                .select(fields)
+                .in_("exchange", exchanges)
+                .eq("symbol", clean_sym)
+                .order(order_col, desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return getattr(res, "data", None) or []
+        except Exception:
+            return []
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        f_meta = pool.submit(_read_gcc_meta)
+        f_price = pool.submit(_read_gcc_table, "stock_prices", "symbol,exchange,date,open,high,low,close,volume,updated_at", "date", 1)
+        f_tech = pool.submit(
+            _read_gcc_table,
+            "stock_technical_indicators",
+            "symbol,exchange,date,close,change_pct,adx_14,rsi_14,macd,macd_signal,ema_50,ema_200,sma_50,sma_200,calculated_at",
+            "date",
+            1,
+        )
+        f_hist = pool.submit(_read_gcc_table, "stock_prices", "date,open,high,low,close,volume", "date", 30)
+        f_peers = pool.submit(_read_gcc_peers)
+        meta_rows = f_meta.result()
+        price_rows = f_price.result()
+        tech_rows = f_tech.result()
+        hist_rows = f_hist.result()
+        peer_rows = f_peers.result()
+
+    stock_row = meta_rows[0] if meta_rows else None
+    latest_price = price_rows[0] if price_rows else None
+    latest_tech = tech_rows[0] if tech_rows else None
+    if not stock_row and not latest_price:
+        return {
+            "snapshot": {"fundamentals": None, "latestPrice": None, "latestTech": None, "latestScan": None, "historicalPrices": []},
+            "related": {"basis": "directory", "stocks": []},
+        }
+
+    resolved_ex = str((stock_row or {}).get("exchange") or (latest_price or {}).get("exchange") or exchanges[0]).upper()
+    country = (stock_row or {}).get("country") or ("Qatar" if resolved_ex == "QSE" else "Global" if resolved_ex == "COMMODITIES" else "UAE")
+    currency = (stock_row or {}).get("currency") or ("QAR" if resolved_ex == "QSE" else "USD" if resolved_ex == "COMMODITIES" else "AED")
+    name_en = str((stock_row or {}).get("name") or clean_sym)
+    name_ar = str((stock_row or {}).get("name_ar") or clean_sym)
+    sector = str((stock_row or {}).get("sector") or "")
+    fundamentals = {
+        "symbol": clean_sym,
+        "exchange": resolved_ex,
+        "updated_at": (stock_row or {}).get("updated_at") or (latest_price or {}).get("updated_at"),
+        "data": {
+            "country": country,
+            "currency": currency,
+            "exchange": resolved_ex,
+            "name": name_en,
+            "Name": name_en,
+            "name_ar": name_ar,
+            "sector": sector,
+        },
+    }
+    peer_group = {"QSE"} if resolved_ex == "QSE" else ({"DFM", "ADX"} if resolved_ex in ("DFM", "ADX") else {resolved_ex})
+    directory = [
+        {"symbol": str(r.get("symbol") or "").upper(), "name": str(r.get("name_ar") or r.get("name") or r.get("symbol") or ""), "sector": str(r.get("sector") or "")}
+        for r in peer_rows
+        if r.get("symbol") and (not r.get("exchange") or str(r.get("exchange")).upper() in peer_group)
+    ]
+    return {
+        "snapshot": {
+            "fundamentals": fundamentals,
+            "latestPrice": latest_price,
+            "latestTech": latest_tech,
+            "latestScan": None,
+            "historicalPrices": list(reversed(hist_rows)),
+        },
+        "related": _select_related_links(directory, clean_sym, sector),
+    }
+
+
+def _load_stock_page_data(symbol: str, market: str, explicit_exchange: Optional[str] = None) -> Dict[str, Any]:
+    raw_upper = symbol.strip().upper()
+    gcc_match = re.match(r"^([A-Z0-9._-]+)\.(DFM|ADX|QSE|COMMODITIES)$", raw_upper)
+    if gcc_match:
+        return _load_gcc_stock_page_data(gcc_match.group(1), [gcc_match.group(2)])
+
+    clean_sym = re.sub(r"\.(SR|SA|TADAWUL)$", "", raw_upper)
+    if explicit_exchange in ("DFM", "ADX", "QSE", "COMMODITIES"):
+        return _load_gcc_stock_page_data(clean_sym, [explicit_exchange])
+    if market in ("uae", "qatar"):
+        return _load_gcc_stock_page_data(clean_sym, get_market_exchanges(market))
+
     is_saudi = market == "tasi"
-    clean_sym = re.sub(r"\.(SR|SA|TADAWUL)$", "", symbol.upper())
     sb = get_market_supabase("tasi" if is_saudi else "egx")
     exchange = "TADAWUL" if is_saudi else "EGX"
     candidates = list(dict.fromkeys([clean_sym, f"{clean_sym}.SR"])) if is_saudi else [clean_sym]
@@ -618,6 +744,11 @@ def _load_stock_page_data(symbol: str, market: str) -> Dict[str, Any]:
     latest_scan = scan_rows[0] if scan_rows else None
     stock_meta = meta_rows[0] if meta_rows else None
 
+    if not is_saudi and not raw_fund and not latest_price:
+        gcc_res = _load_gcc_stock_page_data(clean_sym, ["DFM", "ADX", "QSE", "COMMODITIES"])
+        if gcc_res["snapshot"]["fundamentals"] or gcc_res["snapshot"]["latestPrice"]:
+            return gcc_res
+
     fundamentals = raw_fund
     if is_saudi and (raw_fund or stock_meta or latest_price):
         raw_data = dict(raw_fund.get("data") or {}) if raw_fund and isinstance(raw_fund.get("data"), dict) else {}
@@ -663,17 +794,32 @@ def _load_stock_page_data(symbol: str, market: str) -> Dict[str, Any]:
 async def api_public_stock_page_data(
     symbol: str = Query(default=""),
     market: str = Query(default=""),
+    exchange: str = Query(default=""),
 ):
     clean = symbol.strip().upper()
-    stripped = re.sub(r"\.(SR|SA|TADAWUL)$", "", clean)
     if not clean or not _SYMBOL_PARAM_RE.match(clean):
         return JSONResponse({"error": "Invalid symbol"}, status_code=400)
-    resolved = "tasi" if (market.strip().lower() == "tasi" or is_saudi_symbol(clean) or bool(re.match(r"^\d{4}$", stripped))) else "egx"
-    cache_key = f"{resolved}:{stripped if resolved == 'tasi' else clean}"
+    ex_hint = exchange.strip().upper()
+    if ex_hint and ex_hint not in ("EGX", "TADAWUL", "DFM", "ADX", "QSE", "COMMODITIES"):
+        return JSONResponse({"error": "Invalid exchange"}, status_code=400)
+    gcc_match = re.match(r"^([A-Z0-9._-]+)\.(DFM|ADX|QSE|COMMODITIES)$", clean)
+    if gcc_match and not ex_hint:
+        ex_hint = gcc_match.group(2)
+    stripped = re.sub(r"\.(SR|SA|TADAWUL|DFM|ADX|QSE|COMMODITIES)$", "", clean)
+    m_hint = market.strip().lower()
+    if ex_hint == "QSE" or m_hint in ("qatar", "qse", "qa"):
+        resolved = "qatar"
+    elif ex_hint in ("DFM", "ADX", "COMMODITIES") or m_hint in ("uae", "dfm", "adx", "ae"):
+        resolved = "uae"
+    elif m_hint == "tasi" or is_saudi_symbol(clean) or bool(re.match(r"^\d{4}$", stripped)):
+        resolved = "tasi"
+    else:
+        resolved = "egx"
+    cache_key = f"{resolved}:{ex_hint}:{stripped if resolved in ('tasi', 'uae', 'qatar') else clean}"
     found, cached = _PUBLIC_STOCK_PAGE_CACHE.get(cache_key)
     if found:
         return JSONResponse(cached, headers=_daily_headers("daily-market-data"))
-    payload = _PUBLIC_STOCK_PAGE_SF.do(cache_key, lambda: _load_stock_page_data(clean, resolved))
+    payload = _PUBLIC_STOCK_PAGE_SF.do(cache_key, lambda: _load_stock_page_data(clean, resolved, ex_hint or None))
     _PUBLIC_STOCK_PAGE_CACHE.set(cache_key, payload, ttl=_RUN_TO_RUN_TTL)
     return JSONResponse(payload, headers=_daily_headers("daily-market-data"))
 
@@ -2122,16 +2268,141 @@ async def api_scan_similarity_published(request: Request):
 
 # ── Sector Heatmap & Timeline ────────────────────────────────────────────────
 
+def _enrich_heatmap_symbol_metadata(
+    sb: Any,
+    exchanges: List[str],
+    syms: List[str],
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    fundamentals: Dict[str, Dict[str, Any]] = {}
+    stocks_meta: Dict[str, Dict[str, Any]] = {}
+    is_egx_only = exchanges == ["EGX"]
+    for i in range(0, len(syms), 200):
+        chunk = syms[i : i + 200]
+        try:
+            f_data = getattr(sb.table("stock_fundamentals").select("symbol,name,name_ar,data").in_("exchange", exchanges).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
+        except Exception:
+            f_data = getattr(sb.table("stock_fundamentals").select("symbol,data").in_("exchange", exchanges).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
+        for row in f_data:
+            if row.get("symbol"):
+                fundamentals[row["symbol"]] = {"name": row.get("name"), "name_ar": row.get("name_ar"), "data": _parse_json_obj(row.get("data")) or {}}
+        stock_cols = "symbol,name,name_ar" if is_egx_only else "symbol,name,name_ar,sector"
+        stock_cols_fb = "symbol,name" if is_egx_only else "symbol,name,sector"
+        try:
+            s_data = getattr(sb.table("stocks").select(stock_cols).in_("exchange", exchanges).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
+        except Exception:
+            s_data = getattr(sb.table("stocks").select(stock_cols_fb).in_("exchange", exchanges).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
+        for row in s_data:
+            if row.get("symbol"):
+                stocks_meta[row["symbol"]] = row
+    return fundamentals, stocks_meta
+
+
+def _compute_heatmap_from_indicators(
+    sb: Any,
+    market: str,
+    exchange: str,
+    exchanges: List[str],
+    currency: str,
+    sel_date: Optional[str],
+    start_d: Optional[str],
+    end_d: Optional[str],
+) -> Dict[str, Any]:
+    d_rows = getattr(sb.table("stock_technical_indicators").select("date").in_("exchange", exchanges).order("date", desc=True).limit(3000).execute(), "data", None) or []
+    avail = sorted({str(r.get("date") or "")[:10] for r in d_rows if r.get("date")}, reverse=True)[:60]
+    if not avail:
+        return {"rows": [], "available_dates": [], "market": market, "exchange": exchange, "currency": currency}
+    eff_date = sel_date if (sel_date and sel_date in avail) else (next((d for d in avail if sel_date and d <= sel_date), avail[0]))
+    s = start_d or eff_date
+    e = end_d or eff_date
+    f_d, t_d = (s, e) if s <= e else (e, s)
+    ind_rows: List[Dict[str, Any]] = []
+    for cols in (
+        "symbol,exchange,date,close,volume,change_pct,cmf_20",
+        "symbol,exchange,date,close,volume,change_pct",
+        "symbol,date,close,volume,change_pct",
+    ):
+        try:
+            ind_rows = getattr(
+                sb.table("stock_technical_indicators")
+                .select(cols)
+                .in_("exchange", exchanges)
+                .gte("date", f_d)
+                .lte("date", t_d)
+                .order("date", desc=False)
+                .limit(10000)
+                .execute(),
+                "data",
+                None,
+            ) or []
+            break
+        except Exception:
+            continue
+
+    dedup: Dict[str, Dict[str, Any]] = {}
+    for row in ind_rows:
+        sym = row.get("symbol")
+        day = str(row.get("date") or "")[:10]
+        if not sym or not day:
+            continue
+        dedup[f"{day}|{sym}"] = row
+
+    syms = list({r.get("symbol") for r in dedup.values() if r.get("symbol")})
+    fundamentals, stocks_meta = _enrich_heatmap_symbol_metadata(sb, exchanges, syms)
+    rows_out: List[Dict[str, Any]] = []
+    for row in dedup.values():
+        sym = str(row["symbol"])
+        close_v = _num(row.get("close"))
+        vol = _num(row.get("volume"))
+        if close_v <= 0 or vol <= 0:
+            continue
+        f_rec = fundamentals.get(sym) or {}
+        f_data = f_rec.get("data") or {}
+        s_meta = stocks_meta.get(sym) or {}
+        name_ar = s_meta.get("name_ar") or f_rec.get("name_ar") or f_data.get("name_ar") or f_data.get("NameAr")
+        name_en = f_data.get("name") or f_data.get("Name") or f_data.get("companyName") or f_rec.get("name") or s_meta.get("name")
+        resolved_name = (name_ar or name_en or sym) if market != "egx" else (name_en or name_ar or sym)
+        raw_sec = f_data.get("sector") or f_data.get("Sector") or s_meta.get("sector") or "Other"
+        item: Dict[str, Any] = {
+            "symbol": sym,
+            "exchange": row.get("exchange") or exchange,
+            "currency": currency,
+            "date": str(row.get("date"))[:10],
+            "close": close_v,
+            "volume": vol,
+            "change_pct": _num(row.get("change_pct")),
+            "cmf_20": _num(row.get("cmf_20")),
+            "sector": raw_sec,
+            "name": resolved_name,
+        }
+        if name_ar:
+            item["name_ar"] = name_ar
+        rows_out.append(item)
+
+    return {
+        "rows": rows_out,
+        "selected_date": eff_date,
+        "requested_date": sel_date,
+        "available_dates": avail,
+        "range_start": f_d,
+        "range_end": t_d,
+        "range_dates": [d for d in avail if f_d <= d <= t_d],
+        "market": market,
+        "exchange": exchange,
+        "currency": currency,
+    }
+
+
 def _load_sector_heatmap(market: str, sel_date: Optional[str], start_d: Optional[str], end_d: Optional[str]) -> Dict[str, Any]:
     sb = get_market_supabase(market)
     exchange = get_market_exchange(market)
-    currency = "SAR" if market == "tasi" else "EGP"
+    exchanges = get_market_exchanges(market)
+    currency = _MARKET_CURRENCY_MAP.get(market, "EGP")
     if sb is None:
         return {"rows": [], "available_dates": [], "market": market, "exchange": exchange, "currency": currency}
-    d_rows = getattr(sb.table("market_heatmap").select("captured_at").eq("exchange", exchange).order("captured_at", desc=True).limit(12000).execute(), "data", None) or []
+    d_rows = getattr(sb.table("market_heatmap").select("captured_at").in_("exchange", exchanges).order("captured_at", desc=True).limit(12000).execute(), "data", None) or []
     avail = sorted({str(r.get("captured_at") or "")[:10] for r in d_rows if r.get("captured_at")}, reverse=True)
     if not avail:
-        return {"rows": [], "available_dates": [], "market": market, "exchange": exchange, "currency": currency}
+        return _compute_heatmap_from_indicators(sb, market, exchange, exchanges, currency, sel_date, start_d, end_d)
     eff_date = sel_date if (sel_date and sel_date in avail) else (next((d for d in avail if sel_date and d <= sel_date), avail[0]))
     s = start_d or eff_date
     e = end_d or eff_date
@@ -2139,7 +2410,7 @@ def _load_sector_heatmap(market: str, sel_date: Optional[str], start_d: Optional
     c_rows = getattr(
         sb.table("market_heatmap")
         .select("symbol,exchange,sector,change_pct,cmf_20,volume,cap,captured_at")
-        .eq("exchange", exchange)
+        .in_("exchange", exchanges)
         .gte("captured_at", f"{f_d}T00:00:00Z")
         .lte("captured_at", f"{t_d}T23:59:59.999Z")
         .order("captured_at", desc=False)
@@ -2148,6 +2419,8 @@ def _load_sector_heatmap(market: str, sel_date: Optional[str], start_d: Optional
         "data",
         None,
     ) or []
+    if not c_rows:
+        return _compute_heatmap_from_indicators(sb, market, exchange, exchanges, currency, sel_date, start_d, end_d)
     dedup: Dict[str, Dict[str, Any]] = {}
     for row in c_rows:
         day = str(row.get("captured_at") or "")[:10]
@@ -2157,25 +2430,7 @@ def _load_sector_heatmap(market: str, sel_date: Optional[str], start_d: Optional
             dedup[k] = row
 
     syms = list({r.get("symbol") for r in dedup.values() if r.get("symbol")})
-    fundamentals: Dict[str, Dict[str, Any]] = {}
-    stocks_meta: Dict[str, Dict[str, Any]] = {}
-    for i in range(0, len(syms), 200):
-        chunk = syms[i : i + 200]
-        try:
-            f_data = getattr(sb.table("stock_fundamentals").select("symbol,name,name_ar,data").eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
-        except Exception:
-            f_data = getattr(sb.table("stock_fundamentals").select("symbol,data").eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
-        for row in f_data:
-            fundamentals[row["symbol"]] = {"name": row.get("name"), "name_ar": row.get("name_ar"), "data": _parse_json_obj(row.get("data")) or {}}
-        stock_cols = "symbol,name,name_ar" if exchange == "EGX" else "symbol,name,name_ar,sector"
-        stock_cols_fb = "symbol,name" if exchange == "EGX" else "symbol,name,sector"
-        try:
-            s_data = getattr(sb.table("stocks").select(stock_cols).eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
-        except Exception:
-            s_data = getattr(sb.table("stocks").select(stock_cols_fb).eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
-        for row in s_data:
-            if row.get("symbol"):
-                stocks_meta[row["symbol"]] = row
+    fundamentals, stocks_meta = _enrich_heatmap_symbol_metadata(sb, exchanges, syms)
 
     rows_out: List[Dict[str, Any]] = []
     for row in dedup.values():
@@ -2187,7 +2442,7 @@ def _load_sector_heatmap(market: str, sel_date: Optional[str], start_d: Optional
         s_meta = stocks_meta.get(sym) or {}
         name_ar = s_meta.get("name_ar") or f_rec.get("name_ar") or f_data.get("name_ar") or f_data.get("NameAr")
         name_en = f_data.get("name") or f_data.get("Name") or f_data.get("companyName") or f_rec.get("name") or s_meta.get("name")
-        resolved_name = (name_ar or name_en or sym) if market == "tasi" else (name_en or name_ar or sym)
+        resolved_name = (name_ar or name_en or sym) if market != "egx" else (name_en or name_ar or sym)
         item: Dict[str, Any] = {
             "symbol": sym,
             "exchange": row.get("exchange") or exchange,
@@ -2234,11 +2489,111 @@ async def api_scan_sectors_heatmap(request: Request):
     return JSONResponse(cached, headers=headers)
 
 
+def _compute_sector_timeline_from_indicators(
+    sb: Any,
+    market: str,
+    country: str,
+    months_i: int,
+) -> Optional[Dict[str, Any]]:
+    exchanges = get_market_exchanges(market)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=min(months_i, 12) * 32)).strftime("%Y-%m-%d")
+    ind_rows: List[Dict[str, Any]] = []
+    for cols in (
+        "symbol,date,close,volume,cmf_20,change_pct",
+        "symbol,date,close,volume,change_pct",
+    ):
+        try:
+            ind_rows = getattr(
+                sb.table("stock_technical_indicators")
+                .select(cols)
+                .in_("exchange", exchanges)
+                .gte("date", cutoff)
+                .order("date", desc=True)
+                .limit(12000)
+                .execute(),
+                "data",
+                None,
+            ) or []
+            break
+        except Exception:
+            continue
+    if not ind_rows:
+        return None
+    syms = list({str(r.get("symbol") or "").upper() for r in ind_rows if r.get("symbol")})
+    fundamentals, stocks_meta = _enrich_heatmap_symbol_metadata(sb, exchanges, syms)
+    sym_sector: Dict[str, Dict[str, str]] = {}
+    for sym in syms:
+        f_data = (fundamentals.get(sym) or {}).get("data") or {}
+        s_meta = stocks_meta.get(sym) or {}
+        sym_sector[sym] = _classify_market_sector(
+            str(f_data.get("sector") or f_data.get("Sector") or s_meta.get("sector") or ""),
+            str(f_data.get("industry") or f_data.get("Industry") or ""),
+        )
+
+    monthly_totals: Dict[str, float] = {}
+    sector_monthly: Dict[str, Dict[str, Any]] = {}
+    for row in ind_rows:
+        sym = str(row.get("symbol") or "").upper()
+        day = str(row.get("date") or "")[:10]
+        if not sym or len(day) < 7:
+            continue
+        month = day[:7]
+        close_v = _num(row.get("close"))
+        vol_v = _num(row.get("volume"))
+        if close_v <= 0 or vol_v <= 0:
+            continue
+        flow = close_v * vol_v
+        cmf = _finite(row.get("cmf_20"))
+        chg = _num(row.get("change_pct"))
+        net = flow * (cmf if cmf is not None else (1.0 if chg > 0 else (-1.0 if chg < 0 else 0.0)))
+        sec_info = sym_sector.get(sym) or {"sector": "Other Sectors", "sector_ar": "قطاعات متنوعة أخرى"}
+        sec_name = sec_info["sector"]
+        monthly_totals[month] = monthly_totals.get(month, 0.0) + flow
+        bucket = sector_monthly.setdefault(
+            sec_name,
+            {"sector": sec_name, "sector_ar": sec_info["sector_ar"], "total_flow": 0.0, "months": {}},
+        )
+        bucket["total_flow"] += flow
+        m_entry = bucket["months"].setdefault(month, {"flow": 0.0, "net": 0.0})
+        m_entry["flow"] += flow
+        m_entry["net"] += net
+
+    if not monthly_totals:
+        return None
+    months_sorted = sorted(monthly_totals.keys())[-months_i:]
+    monthly = [{"month": m, "total_flow": round(monthly_totals[m], 2)} for m in months_sorted]
+    sectors_out = []
+    for b in sorted(sector_monthly.values(), key=lambda x: x["total_flow"], reverse=True):
+        series = [
+            {
+                "month": m,
+                "flow": round(b["months"].get(m, {}).get("flow", 0.0), 2),
+                "net": round(b["months"].get(m, {}).get("net", 0.0), 2),
+            }
+            for m in months_sorted
+        ]
+        sectors_out.append({
+            "sector": b["sector"],
+            "sector_ar": b["sector_ar"],
+            "total_flow": round(sum(p["flow"] for p in series), 2),
+            "series": series,
+        })
+    return {
+        "months": months_sorted,
+        "monthly": monthly,
+        "sectors": sectors_out,
+        "market": market,
+        "country": country,
+        "cached": False,
+        "computed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
 @router.get("/api/scan/sectors/timeline")
 async def api_scan_sectors_timeline(request: Request):
     qp = request.query_params
     market = resolve_request_market(request, qp.get("country"))
-    country = "Saudi Arabia" if market == "tasi" else "Egypt"
+    country = {"tasi": "Saudi Arabia", "uae": "UAE", "qatar": "Qatar"}.get(market, "Egypt")
     m_val = _num(qp.get("months"), 6)
     months_i = int(m_val) if m_val > 0 else 6
     cache_key = f"sector_timeline_{months_i}m"
@@ -2249,12 +2604,15 @@ async def api_scan_sectors_timeline(request: Request):
             sb = get_market_supabase(market)
             if sb is None:
                 return None
-            res = sb.table("market_cache").select("payload,computed_at").eq("cache_key", cache_key).eq("country", country).order("computed_at", desc=True).limit(1).execute()
-            row = (getattr(res, "data", None) or [None])[0]
-            if not row or not row.get("payload"):
-                return None
-            pl = _parse_json_obj(row["payload"]) or {}
-            return {**pl, "market": market, "country": country, "cached": True, "computed_at": row.get("computed_at")}
+            if market in ("egx", "tasi"):
+                res = sb.table("market_cache").select("payload,computed_at").eq("cache_key", cache_key).eq("country", country).order("computed_at", desc=True).limit(1).execute()
+                row = (getattr(res, "data", None) or [None])[0]
+                if row and row.get("payload"):
+                    pl = _parse_json_obj(row["payload"]) or {}
+                    return {**pl, "market": market, "country": country, "cached": True, "computed_at": row.get("computed_at")}
+            if market != "egx":
+                return _compute_sector_timeline_from_indicators(sb, market, country, months_i)
+            return None
         cached = _TIMELINE_SF.do(c_key, _load)
         if cached:
             _TIMELINE_CACHE.set(c_key, cached, ttl=_RUN_TO_RUN_TTL)
@@ -2566,7 +2924,7 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
     latest_date = d_rows[0]["date"]
 
     def _q_ind():
-        for f in ("symbol, close, volume, ema_50, ema_200, rsi_14, vol_sma20, r_vol, cmf_20, change_pct", "symbol, close, volume, ema_50, ema_200, rsi_14, vol_sma20, r_vol, change_pct", "symbol, close, volume, ema_50, ema_200, rsi_14, volume_sma_20, r_vol, change_pct", "symbol, close, volume, change_pct"):
+        for f in ("symbol, exchange, close, volume, ema_50, ema_200, rsi_14, vol_sma20, r_vol, cmf_20, change_pct", "symbol, exchange, close, volume, ema_50, ema_200, rsi_14, vol_sma20, r_vol, change_pct", "symbol, close, volume, ema_50, ema_200, rsi_14, vol_sma20, r_vol, cmf_20, change_pct", "symbol, close, volume, ema_50, ema_200, rsi_14, volume_sma_20, r_vol, change_pct", "symbol, close, volume, change_pct"):
             try:
                 return getattr(sb.table("stock_technical_indicators").select(f).in_("exchange", exchanges).eq("date", latest_date).limit(500).execute(), "data", None) or []
             except Exception:
@@ -2574,7 +2932,7 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
         return []
 
     def _q_funds():
-        for f in ("symbol, name, name_ar, data", "symbol, name, data", "symbol, data"):
+        for f in ("symbol, exchange, name, name_ar, data", "symbol, name, name_ar, data", "symbol, name, data", "symbol, data"):
             try:
                 return getattr(sb.table("stock_fundamentals").select(f).in_("exchange", exchanges).limit(500).execute(), "data", None) or []
             except Exception:
@@ -2590,7 +2948,7 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
     def _q_tasi():
         if market not in ("tasi", "uae", "qatar"):
             return []
-        for f in ("symbol, name, name_ar, sector", "symbol, name, sector"):
+        for f in ("symbol, exchange, name, name_ar, sector", "symbol, name, name_ar, sector", "symbol, name, sector"):
             try:
                 return getattr(sb.table("stocks").select(f).in_("exchange", exchanges).eq("is_active", True).limit(500).execute(), "data", None) or []
             except Exception:
@@ -2612,10 +2970,13 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
 
     name_map: Dict[str, str] = {}
     sector_map: Dict[str, Dict[str, str]] = {}
+    exchange_map: Dict[str, str] = {}
     for s in saudi_rows:
         sym = str(s.get("symbol") or "").upper()
         if not sym:
             continue
+        if s.get("exchange"):
+            exchange_map[sym] = str(s["exchange"]).upper()
         lbl = s.get("name_ar") or s.get("name") or ""
         if lbl:
             name_map[sym] = str(lbl)
@@ -2698,12 +3059,13 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
             unch_to += to_v
 
         sname = name_map.get(sym) or sym
+        sym_ex = str(ind.get("exchange") or exchange_map.get(sym) or exchange).upper()
         s_info = sector_map.get(sym) or {"sector": "Other Sectors", "sector_ar": "قطاعات متنوعة أخرى"}
         sec, sec_ar = s_info["sector"], s_info["sector_ar"]
         if to_v > 0:
             b = buckets.setdefault(sec, {
                 "sector": sec, "sector_ar": sec_ar, "turnover_value": 0.0, "w_chg": 0.0, "w_cmf": 0.0,
-                "stocks_count": 0, "advancing": 0, "declining": 0, "top_sym": sym, "top_name": sname, "top_to": to_v, "top_chg": chg,
+                "stocks_count": 0, "advancing": 0, "declining": 0, "top_sym": sym, "top_ex": sym_ex, "top_name": sname, "top_to": to_v, "top_chg": chg,
             })
             b["turnover_value"] += to_v
             b["w_chg"] += chg * to_v
@@ -2714,10 +3076,10 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
             elif chg < 0:
                 b["declining"] += 1
             if to_v > b["top_to"]:
-                b["top_sym"], b["top_name"], b["top_to"], b["top_chg"] = sym, sname, to_v, chg
+                b["top_sym"], b["top_ex"], b["top_name"], b["top_to"], b["top_chg"] = sym, sym_ex, sname, to_v, chg
 
         valid_stocks.append({
-            "symbol": sym, "name": sname, "sector": sec, "sector_ar": sec_ar,
+            "symbol": sym, "exchange": sym_ex, "name": sname, "sector": sec, "sector_ar": sec_ar,
             "change_pct": chg, "close": close, "volume": vol, "turnover_egp": to_v,
             "r_vol": round(rvol, 2), "cmf_20": round(cmf, 3), "rsi_14": rsi if rsi is not None else 50.0,
         })
@@ -2750,7 +3112,7 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
             "weighted_change_pct": round(b["w_chg"] / b["turnover_value"], 2) if b["turnover_value"] > 0 else 0,
             "weighted_cmf_20": round(b["w_cmf"] / b["turnover_value"], 3) if b["turnover_value"] > 0 else 0,
             "stocks_count": b["stocks_count"], "advancing": b["advancing"], "declining": b["declining"],
-            "top_stock_symbol": b["top_sym"], "top_stock_name": b["top_name"],
+            "top_stock_symbol": b["top_sym"], "top_stock_exchange": b["top_ex"], "top_stock_name": b["top_name"],
             "top_stock_turnover_million_egp": round(b["top_to"] / 1_000_000, 2),
             "top_stock_change_pct": round(b["top_chg"], 2),
         }
@@ -2758,7 +3120,7 @@ def _load_market_breadth(market: str) -> Optional[Dict[str, Any]]:
     ]
     top_liq = [
         {
-            "symbol": s["symbol"], "name": s["name"], "sector": s["sector"], "sector_ar": s["sector_ar"],
+            "symbol": s["symbol"], "exchange": s["exchange"], "name": s["name"], "sector": s["sector"], "sector_ar": s["sector_ar"],
             "close": round(s["close"], 2), "change_pct": round(s["change_pct"], 2),
             "turnover_million_egp": round(s["turnover_egp"] / 1_000_000, 2),
             "market_share_pct": round((s["turnover_egp"] / tot_to) * 100, 2) if tot_to > 0 else 0,
@@ -3286,3 +3648,46 @@ async def api_disclosure_image(item_id: str):
 </svg>"""
         _SVG_CACHE.set(item_id, svg, ttl=_RUN_TO_RUN_TTL)
     return Response(content=svg, media_type="image/svg+xml; charset=utf-8", headers={"Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800"})
+
+
+_DIVIDENDS_CACHE = BoundedTTLCache(max_entries=64, default_ttl=1800.0)
+_DIVIDENDS_SF = SingleFlight()
+
+
+@router.get("/api/market/dividends")
+async def api_market_dividends(
+    market: str = Query(default="egx"),
+    symbol: Optional[str] = Query(default=None),
+):
+    norm_mkt = (market or "egx").strip().lower()
+    if norm_mkt in ("tadawul", "sa", "saudi"):
+        norm_mkt = "tasi"
+    elif norm_mkt in ("qse", "qe"):
+        norm_mkt = "qatar"
+    elif norm_mkt in ("dfm", "adx"):
+        norm_mkt = "uae"
+    if norm_mkt not in ("egx", "tasi", "qatar", "uae"):
+        norm_mkt = "egx"
+
+    clean_sym = (symbol or "").strip().upper().split(".")[0] or None
+    if clean_sym and not _SYMBOL_PARAM_RE.match(clean_sym):
+        return JSONResponse({"error": "Invalid symbol"}, status_code=400)
+
+    ck = f"div:{norm_mkt}:{clean_sym or 'all'}"
+    found, cached = _DIVIDENDS_CACHE.get(ck)
+    if not found:
+        def _load():
+            from api.dividends_engine import get_cached_market_dividends
+            return get_cached_market_dividends(norm_mkt, symbol=clean_sym)
+
+        cached = _DIVIDENDS_SF.do(ck, _load)
+        _DIVIDENDS_CACHE.set(ck, cached, ttl=1800.0)
+
+    return JSONResponse(
+        cached,
+        headers={
+            "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600",
+            "Vercel-CDN-Cache-Control": "public, s-maxage=1800, stale-while-revalidate=86400",
+            "Vercel-Cache-Tag": "daily-market-data",
+        },
+    )
