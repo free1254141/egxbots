@@ -113,6 +113,7 @@ def test_tools_execution_rich_fundamentals_and_graham_fair_value():
         "netIncome": 82_240_000_000.0,
         "debtToEquity": 0.13,
         "sector": "Finance",
+        "industry": "Major Banks",
     }
     extracted = _extract_rich_fundamentals(fd, fund_score=88)
     assert extracted["pe_ratio"] == 7.14
@@ -126,10 +127,37 @@ def test_tools_execution_rich_fundamentals_and_graham_fair_value():
 
     fv, model, extra = _compute_fundamental_fair_value(130.0, 125.0, 120.0, fd)
     expected_graham = round((22.5 * 18.25 * 70.16) ** 0.5, 2)
-    assert fv == expected_graham
-    assert "جراهام" in model
+    assert extra["graham_value"] == expected_graham
+    assert "المالي" in model
+    assert 130.0 < fv <= round(130.0 * 1.65, 2)
     assert extra["pe_ratio"] == 7.14
     assert extra["roe_pct"] == 35.69
+
+    # ABUK-like high-ROE stock with attractive Forward P/E (6.27x vs trailing 20.7x):
+    # Blended institutional FV must be realistic (~65-75 EGP), NOT raw 1934 Graham (~39 EGP),
+    # while still exposing graham_value as the conservative defensive floor.
+    abuk_fd = {
+        "peRatio": 20.7,
+        "forwardPe": 6.27,
+        "pbRatio": 4.15,
+        "eps": 3.69,
+        "bookValuePerShare": 18.40,
+        "roe": 16.5,
+        "netMargin": 35.0,
+        "debtToEquity": 0.0,
+        "sector": "Basic Materials",
+        "industry": "Agricultural Inputs",
+    }
+    abuk_fv, abuk_model, abuk_extra = _compute_fundamental_fair_value(76.36, 75.0, 74.0, abuk_fd)
+    assert abuk_extra["graham_value"] == round((22.5 * 3.69 * 18.40) ** 0.5, 2)
+    assert 60.0 <= abuk_fv <= 85.0
+    assert "المرجّح" in abuk_model
+    assert abuk_extra["forward_pe"] == 6.27
+
+    abuk_extracted = _extract_rich_fundamentals(abuk_fd, fund_score=78, close_price=76.36, name="Abu Qir Fertilizers")
+    abuk_diag = abuk_extracted["fundamental_diagnosis"]
+    assert any("Forward P/E" in s for s in abuk_diag["strengths"])
+    assert not any("جراهام" in w for w in abuk_diag["weaknesses"])
 
     # Fallback when fundamentals absent -> VWAP/EMA quant model
     fv_q, model_q, _ = _compute_fundamental_fair_value(100.0, 105.0, 95.0, {})

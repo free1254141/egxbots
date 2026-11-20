@@ -745,11 +745,20 @@ def _compute_single_fair_value(
     sec_pe = round(sector_median_pe, 2)
     sec_pb = round(sector_median_pb, 2)
     raw_pe = _finite(data.get("peRatio") if data.get("peRatio") is not None else data.get("pe_ratio"))
+    raw_fwd_pe = _finite(data.get("forwardPe") if data.get("forwardPe") is not None else data.get("forward_pe"))
     raw_pb = _finite(data.get("pbRatio") if data.get("pbRatio") is not None else data.get("pb_ratio"))
 
     eps = _finite(data.get("eps"))
     if (eps is None or eps == 0) and raw_pe and raw_pe > 0 and close > 0:
         eps = round(close / raw_pe, 4)
+    eff_eps = eps if (eps is not None and eps > 0) else None
+    if raw_fwd_pe is not None and 2.0 <= raw_fwd_pe <= 60.0 and close > 0:
+        fwd_eps = close / raw_fwd_pe
+        if eff_eps is not None and eff_eps > 0:
+            fwd_eps_clamped = _clamp(fwd_eps, eff_eps * 0.4, eff_eps * 3.0)
+            eff_eps = round(0.50 * eff_eps + 0.50 * fwd_eps_clamped, 4)
+        else:
+            eff_eps = round(fwd_eps, 4)
     bvps = _finite(
         data.get("bookValuePerShare")
         or data.get("book_value_per_share")
@@ -776,10 +785,10 @@ def _compute_single_fair_value(
     is_financial = ("بنوك" in sector_ar) or ("خدمات مالية" in sector_ar) or ("استثمار" in sector_ar)
     is_tech = ("تكنولوجيا" in sector_ar) or ("مدفوعات" in sector_ar) or ("اتصالات" in sector_ar)
 
-    if eps is not None and eps > 0 and bvps is not None and bvps > 0:
-        eps_r = round(eps, 2)
+    if eff_eps is not None and eff_eps > 0 and bvps is not None and bvps > 0:
+        eps_r = round(eff_eps, 2)
         bvps_r = round(bvps, 2)
-        pe_fair = round(eps * sec_pe, 2)
+        pe_fair = round(eff_eps * sec_pe, 2)
         pb_fair = round(bvps * sec_pb, 2)
         if is_financial:
             fair_value = round(_clamp(0.55 * pe_fair + 0.45 * pb_fair, close * 0.55, close * 1.65), 2)
@@ -805,7 +814,7 @@ def _compute_single_fair_value(
             ]
         else:
             mult = round(_clamp(sec_pe * sec_pb, 8.0, 14.0), 2)
-            raw_graham = math.sqrt(mult * eps * bvps)
+            raw_graham = math.sqrt(mult * eff_eps * bvps)
             graham_value = round(raw_graham, 2)
             fair_value = round(_clamp(0.40 * raw_graham + 0.35 * pe_fair + 0.25 * pb_fair, close * 0.55, close * 1.65), 2)
             model_type = "graham_fundamental"
@@ -818,10 +827,10 @@ def _compute_single_fair_value(
                 f"3️⃣ تقييم مضاعف القيمة الدفترية للقطاع: القيمة الدفترية ({bvps_r}) × وسيط مضاعف القطاع ({sec_pb}x) = {pb_fair} {currency_ar} (وزن 25%)",
                 f"✅ السعر العادل المرجح للسهم = {fair_value} {currency_ar} (مع صمام أمان سعري للمحافظة على واقعية ومصداقية التقييم).",
             ]
-    elif eps is not None and eps > 0:
-        eps_r = round(eps, 2)
-        pe_fair = round(eps * sec_pe, 2)
-        fair_value = round(_clamp(eps * sec_pe, close * 0.50, close * 1.65), 2)
+    elif eff_eps is not None and eff_eps > 0:
+        eps_r = round(eff_eps, 2)
+        pe_fair = round(eff_eps * sec_pe, 2)
+        fair_value = round(_clamp(eff_eps * sec_pe, close * 0.50, close * 1.65), 2)
         model_type = "pe_multiple"
         model_label_ar = "مضاعف الربحية القطاعي (P/E)"
         eq_ar = "السعر العادل = ربحية السهم (EPS) × وسيط مضاعف ربحية القطاع (Sector P/E)"
@@ -943,9 +952,10 @@ def _build_fair_value_report(market: str) -> Dict[str, Any]:
         )
 
     def _q_stocks():
+        cols = "symbol,name,name_ar" if norm_market == "egx" else "symbol,name,name_ar,sector"
         return (
             sb.table("stocks")
-            .select("symbol,name,name_ar,sector")
+            .select(cols)
             .in_("exchange", exchanges)
             .eq("is_active", True)
             .limit(400)
@@ -2157,10 +2167,12 @@ def _load_sector_heatmap(market: str, sel_date: Optional[str], start_d: Optional
             f_data = getattr(sb.table("stock_fundamentals").select("symbol,data").eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
         for row in f_data:
             fundamentals[row["symbol"]] = {"name": row.get("name"), "name_ar": row.get("name_ar"), "data": _parse_json_obj(row.get("data")) or {}}
+        stock_cols = "symbol,name,name_ar" if exchange == "EGX" else "symbol,name,name_ar,sector"
+        stock_cols_fb = "symbol,name" if exchange == "EGX" else "symbol,name,sector"
         try:
-            s_data = getattr(sb.table("stocks").select("symbol,name,name_ar,sector").eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
+            s_data = getattr(sb.table("stocks").select(stock_cols).eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
         except Exception:
-            s_data = getattr(sb.table("stocks").select("symbol,name,sector").eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
+            s_data = getattr(sb.table("stocks").select(stock_cols_fb).eq("exchange", exchange).in_("symbol", chunk).limit(len(chunk)).execute(), "data", None) or []
         for row in s_data:
             if row.get("symbol"):
                 stocks_meta[row["symbol"]] = row

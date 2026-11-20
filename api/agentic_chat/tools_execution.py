@@ -1554,6 +1554,26 @@ def _is_financial_sector(sector: Any, industry: Any, name: Any = None) -> bool:
     return False
 
 
+def _is_tech_growth_sector(sector: Any, industry: Any) -> bool:
+    """Detect technology / fintech / telecom / digital-payment companies where asset-light growth multiples apply."""
+    blob = f"{sector or ''} {industry or ''}".lower()
+    return any(
+        kw in blob
+        for kw in (
+            "technology",
+            "software",
+            "fintech",
+            "payment",
+            "telecom",
+            "electronic",
+            "digital",
+            "تكنولوجيا",
+            "مدفوعات",
+            "اتصالات",
+        )
+    )
+
+
 def _build_fundamental_diagnosis(
     metrics: Dict[str, Any],
     *,
@@ -1565,6 +1585,7 @@ def _build_fundamental_diagnosis(
     so ARTORO gives users a crystal-clear bottom-line answer: is this stock financially good or bad, and WHY?
     """
     pe = metrics.get("pe_ratio")
+    forward_pe = metrics.get("forward_pe")
     pb = metrics.get("pb_ratio")
     ev_ebitda = metrics.get("ev_ebitda")
     eps = metrics.get("eps")
@@ -1594,6 +1615,7 @@ def _build_fundamental_diagnosis(
         return None
 
     is_bank = _is_financial_sector(metrics.get("sector"), metrics.get("industry"), name)
+    is_tech = _is_tech_growth_sector(metrics.get("sector"), metrics.get("industry"))
     loss_making = (eps is not None and eps < 0) or (ni is not None and ni < 0)
 
     strengths: List[str] = []
@@ -1642,10 +1664,28 @@ def _build_fundamental_diagnosis(
             if not any("P/B" in w for w in weaknesses):
                 weaknesses.append(f"مضاعف القيمة الدفترية مرتفع ({pb:.2f}x)")
 
+    has_attractive_forward_pe = (
+        forward_pe is not None
+        and 0 < forward_pe <= 12.0
+        and pe is not None
+        and pe > 15.5
+    )
+    if has_attractive_forward_pe and not loss_making:
+        strengths.append(
+            f"المكرر المستقبلي جذاب (Forward P/E = {forward_pe:.2f}x) — السوق يسعّر تحسناً قوياً في الأرباح القادمة"
+        )
+
     if graham_upside is not None and graham_upside >= 15 and not loss_making:
-        strengths.append(f"يتداول بخصم عن قيمة جراهام الأساسية (فجوة صعود نظرية +{graham_upside:.0f}%)")
-    elif graham_upside is not None and graham_upside <= -30 and not loss_making:
-        weaknesses.append(f"السعر السوقي أعلى من قيمة جراهام الأساسية بنحو {abs(graham_upside):.0f}%")
+        strengths.append(f"يتداول بخصم عن قيمة جراهام الدفاعية (فجوة صعود نظرية +{graham_upside:.0f}%)")
+    elif (
+        graham_upside is not None
+        and graham_upside <= -30
+        and not loss_making
+        and not is_bank
+        and not is_tech
+        and not has_attractive_forward_pe
+    ):
+        weaknesses.append(f"السعر السوقي أعلى من قيمة جراهام الدفاعية بنحو {abs(graham_upside):.0f}%")
 
     # 2. Profitability Pillar
     if loss_making:
@@ -1869,8 +1909,15 @@ def _compute_fundamental_fair_value(
     vwap: float,
     ema: float,
     fd: Optional[Dict[str, Any]],
+    market: str = "EGX",
 ) -> Tuple[float, str, Dict[str, Any]]:
-    """Compute institutional fair value (Graham -> P/E -> P/B -> VWAP/EMA fallback) matching fair-value.ts."""
+    """
+    Compute realistic blended institutional fair value across all 4 markets (EGX, TADAWUL, QSE, UAE):
+    - Blends market- & sector/ROE-calibrated P/E + P/B + Graham (with Forward P/E awareness)
+    - Applies institutional safety clamp (0.55x–1.65x close) so outliers never distort valuation
+    - Always preserves classic Graham Number separately in `extra["graham_value"]` as defensive floor
+    - Falls back cleanly to P/E -> P/B -> VWAP/EMA quant equilibrium when fundamentals are missing.
+    """
     f = fd if isinstance(fd, dict) else {}
     eps = _safe_float(f.get("eps") if f.get("eps") is not None else f.get("trailing_eps"), 4)
     bvps = _safe_float(
@@ -1880,40 +1927,121 @@ def _compute_fundamental_fair_value(
         4,
     )
     pe = _safe_float(f.get("peRatio") if f.get("peRatio") is not None else f.get("pe_ratio"))
+    forward_pe = _safe_float(f.get("forwardPe") if f.get("forwardPe") is not None else f.get("forward_pe"))
     pb = _safe_float(f.get("pbRatio") if f.get("pbRatio") is not None else f.get("pb_ratio"))
     if (eps is None or eps <= 0) and pe and pe > 0 and close > 0:
         eps = round(close / pe, 4)
     if (bvps is None or bvps <= 0) and pb and pb > 0 and close > 0:
         bvps = round(close / pb, 4)
 
+    roe = _safe_float(f.get("roe"))
+    dy = _safe_float(f.get("dividendYield"))
+    sector = f.get("sector")
+    industry = f.get("industry")
+
     extra: Dict[str, Any] = {}
     if pe is not None:
         extra["pe_ratio"] = pe
+    if forward_pe is not None and forward_pe > 0:
+        extra["forward_pe"] = forward_pe
     if pb is not None:
         extra["pb_ratio"] = pb
     if eps is not None:
         extra["eps"] = eps
     if bvps is not None:
         extra["book_value_per_share"] = bvps
-    roe = _safe_float(f.get("roe"))
     if roe is not None:
         extra["roe_pct"] = roe
-    dy = _safe_float(f.get("dividendYield"))
     if dy is not None:
         extra["dividend_yield_pct"] = dy
-    if f.get("sector"):
-        extra["sector"] = f.get("sector")
+    if sector:
+        extra["sector"] = sector
 
+    def _clamp_fv(val: float) -> float:
+        if close and close > 0:
+            return max(close * 0.55, min(close * 1.65, val))
+        return val
+
+    # Classic Graham Number (always preserved as conservative defensive floor)
+    graham_classic: Optional[float] = None
     if eps and eps > 0 and bvps and bvps > 0:
-        graham = round((22.5 * eps * bvps) ** 0.5, 2)
-        if graham > 0:
-            extra["graham_value"] = graham
-            return graham, "معادلة جراهام الأساسية (Graham Number)", extra
-    if eps and eps > 0:
-        fv_pe = round(eps * 10.0, 2)
+        g = round((22.5 * eps * bvps) ** 0.5, 2)
+        if g > 0:
+            graham_classic = g
+            extra["graham_value"] = g
+
+    # Incorporate Forward EPS when reasonable Forward P/E is present (prevents penalizing turnaround stocks like ABUK)
+    eff_eps: Optional[float] = eps if (eps and eps > 0) else None
+    if forward_pe is not None and 2.0 <= forward_pe <= 60.0 and close and close > 0:
+        fwd_eps = close / forward_pe
+        if eff_eps is not None and eff_eps > 0:
+            fwd_eps_clamped = max(eff_eps * 0.4, min(eff_eps * 3.0, fwd_eps))
+            eff_eps = round(0.50 * eff_eps + 0.50 * fwd_eps_clamped, 4)
+        else:
+            eff_eps = round(fwd_eps, 4)
+
+    is_fin = _is_financial_sector(sector, industry)
+    is_tech = _is_tech_growth_sector(sector, industry)
+    mkt_upper = str(market or "EGX").strip().upper()
+
+    if mkt_upper in ("TADAWUL", "TASI", "SA", "SAUDI"):
+        if is_fin:
+            target_pe = 13.0
+            target_pb = min(2.8, max(1.6, roe / 9.0)) if (roe is not None and roe >= 14.0) else 1.9
+        elif is_tech:
+            target_pe = 19.0
+            target_pb = 3.5
+        else:
+            target_pe = 15.0 if (roe is not None and roe >= 15.0) else 13.0
+            target_pb = min(3.2, max(2.0, roe / 7.0)) if (roe is not None and roe >= 12.0) else 2.0
+    elif mkt_upper in ("QSE", "QATAR", "QE", "DFM", "ADX", "UAE"):
+        if is_fin:
+            target_pe = 11.5
+            target_pb = min(2.5, max(1.5, roe / 9.5)) if (roe is not None and roe >= 14.0) else 1.75
+        elif is_tech:
+            target_pe = 17.5
+            target_pb = 3.2
+        else:
+            target_pe = 13.5 if (roe is not None and roe >= 15.0) else 12.0
+            target_pb = min(3.0, max(1.9, roe / 7.2)) if (roe is not None and roe >= 12.0) else 1.9
+    else:
+        if is_fin:
+            target_pe = 9.5
+            target_pb = min(2.4, max(1.4, roe / 10.0)) if (roe is not None and roe >= 14.0) else 1.65
+        elif is_tech:
+            target_pe = 16.0
+            target_pb = 3.0
+        else:
+            target_pe = 12.0 if (roe is not None and roe >= 15.0) else 10.5
+            target_pb = min(2.8, max(1.75, roe / 7.5)) if (roe is not None and roe >= 12.0) else 1.75
+
+    if eff_eps and eff_eps > 0 and bvps and bvps > 0:
+        pe_fair = round(eff_eps * target_pe, 2)
+        pb_fair = round(bvps * target_pb, 2)
+        extra["pe_fair_value"] = pe_fair
+        extra["pb_fair_value"] = pb_fair
+        if is_fin:
+            raw_fv = 0.55 * pe_fair + 0.45 * pb_fair
+            model = "التقييم الأساسي للقطاع المالي (مضاعفات P/E + P/B)"
+        elif is_tech:
+            raw_fv = 0.70 * pe_fair + 0.30 * pb_fair
+            model = "التقييم الأساسي لقطاع التكنولوجيا والنمو (P/E + P/B)"
+        else:
+            graham_eff = (22.5 * eff_eps * bvps) ** 0.5
+            raw_fv = 0.50 * pe_fair + 0.25 * pb_fair + 0.25 * graham_eff
+            model = "التقييم الأساسي المرجّح (مضاعفات P/E وP/B + جراهام)"
+        fv = round(_clamp_fv(raw_fv), 2)
+        if fv > 0:
+            return fv, model, extra
+
+    if eff_eps and eff_eps > 0:
+        fv_pe = round(_clamp_fv(eff_eps * target_pe), 2)
+        extra["pe_fair_value"] = round(eff_eps * target_pe, 2)
         return fv_pe, "مضاعف الربحية الأساسي (P/E Multiple)", extra
+
     if bvps and bvps > 0:
-        fv_pb = round(bvps * 1.5, 2)
+        fv_pb = round(_clamp_fv(bvps * target_pb), 2)
+        extra["pb_fair_value"] = round(bvps * target_pb, 2)
         return fv_pb, "مضاعف القيمة الدفترية (P/B Multiple)", extra
 
     fv_q = _safe_price((vwap * 0.6) + (ema * 0.4))
@@ -4162,7 +4290,7 @@ def _sync_get_fair_value(
             vwap = _safe_price(r.get("vwap_20")) or close
             ema = _safe_price(r.get("ema_50")) or close
             fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
-                close, vwap, ema, fv_fund_sa.get(str(sym).upper())
+                close, vwap, ema, fv_fund_sa.get(str(sym).upper()), market=eff_mkt
             )
             upside = round(((fair_value - close) / close) * 100, 2)
             nm = names_map.get(sym, {})
@@ -4256,7 +4384,7 @@ def _sync_get_fair_value(
         vwap = _safe_price(r.get("vwap_20")) or close
         ema = _safe_price(r.get("ema_50")) or close
         fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
-            close, vwap, ema, fv_fund_egx.get(str(sym).upper())
+            close, vwap, ema, fv_fund_egx.get(str(sym).upper()), market="EGX"
         )
         upside = round(((fair_value - close) / close) * 100, 2)
 
