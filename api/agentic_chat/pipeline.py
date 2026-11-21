@@ -36,6 +36,7 @@ from api.agentic_chat.tools_execution import (
     set_telegram_portfolio_context,
 )
 from api.agentic_chat.auth_guard import filter_output, strip_dsml
+from api.agentic_chat.output_guard import verify_and_guard_reply
 from api.agentic_chat.vision import (
     analyze_image,
     reconcile_vision_with_market,
@@ -506,7 +507,8 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
     hints: List[Dict[str, Any]] = []
     seen_symbols = set()
 
-    # 1a. Match Egyptian Arabic full names and aliases, sorted longest first
+    # 1a. Match Egyptian Arabic full names and aliases, sorted longest first (masking matched spans)
+    scan_egx = norm_msg
     sorted_egx = sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True)
     for ar_name, sym in sorted_egx:
         norm_key = _norm_ar_hint(ar_name)
@@ -520,7 +522,9 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
         else:
             pattern = rf"(?:^|[^\w\u0621-\u064a])(?:و|ف|ب|ل|ك|ال)?{escaped}(?:$|[^\w\u0621-\u064a])"
 
-        if re.search(pattern, norm_msg, re.IGNORECASE):
+        m_egx = re.search(pattern, scan_egx, re.IGNORECASE)
+        if m_egx:
+            scan_egx = scan_egx[: m_egx.start()] + (" " * (m_egx.end() - m_egx.start())) + scan_egx[m_egx.end() :]
             s_upper = sym.upper()
             if s_upper not in seen_symbols:
                 seen_symbols.add(s_upper)
@@ -1049,9 +1053,9 @@ async def _run_agentic_chat_stream_impl(
     if hints:
         hints_payload = {"symbol_hints": hints}
         hints_text = (
-            "سياق رموز الأسهم المكتشفة في استفسار المستخدم والصور المرفقة (EGX / TASI symbol_hints):\n"
+            "تلميحات استرشادية أولية لرموز محتملة في الرسالة والصور المرفقة (Advisory symbol_hints):\n"
             f"{json.dumps(hints_payload, ensure_ascii=False)}\n"
-            "التزم بدقة بهذه الرموز عند استدعاء الأدوات get_stock و get_stock_levels و get_comparison ولا تخترع رمزاً بديلاً."
+            "إذا تطابق التلميح تماماً مع مقصود المستخدم استخدم الرمز، أما إذا ذكر المستخدم أسماء شركات عربية غير واضحة أو ناقصة من التلميحات فاستدعِ أداة search_stocks أولاً للتحقق من الكود الرسمي ولا تخمّن أي كود من الذاكرة."
         )
         formatted_messages.append({"role": "system", "content": hints_text})
 
@@ -1089,6 +1093,9 @@ async def _run_agentic_chat_stream_impl(
     visuals_data: Dict[str, Any] = {}
     tools_executed_count = 0
     has_missing_stock_data = False
+    turn_tool_payloads: List[Dict[str, Any]] = []
+    guard_warnings: List[str] = []
+    guard_block_cache = False
     candidate_cache_key: Optional[str] = None
     has_followup_flag = False
     model_confirmed_standalone = False
@@ -1200,6 +1207,7 @@ async def _run_agentic_chat_stream_impl(
             if isinstance(r, Exception):
                 fast_ctx_payload[t_name] = {"status": "error", "message": str(r)}
             else:
+                turn_tool_payloads.append(r)
                 if t_name == "get_stock" and _tool_result_has_missing_stock(r):
                     has_missing_stock_data = True
                 _collect_structured_outputs(r, tables_data, recommendations_data, visuals_data)
@@ -1314,6 +1322,12 @@ async def _run_agentic_chat_stream_impl(
                         accumulated_reply = "أهلاً بك! 👋 يرجى كتابة اسم أو كود السهم أو تحديد السؤال وسأقوم بجلبه وتحليله فوراً."
 
                     if accumulated_reply:
+                        guard_res = verify_and_guard_reply(accumulated_reply, turn_tool_payloads, market=effective_market)
+                        accumulated_reply = guard_res["reply"]
+                        if guard_res["warnings"]:
+                            guard_warnings = list(dict.fromkeys(guard_warnings + guard_res["warnings"]))
+                        if guard_res["block_cache"]:
+                            guard_block_cache = True
                         # Stream the reply smoothly in natural word chunks
                         words = accumulated_reply.split(" ")
                         chunk_size = 4
@@ -1548,6 +1562,8 @@ async def _run_agentic_chat_stream_impl(
                 logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
                 for (_, fn_name, _), r in zip(prepared_calls, tool_results):
+                    if isinstance(r, dict):
+                        turn_tool_payloads.append(r)
                     if fn_name == "get_stock" and _tool_result_has_missing_stock(r):
                         has_missing_stock_data = True
 
@@ -1657,6 +1673,9 @@ async def _run_agentic_chat_stream_impl(
                                     return_exceptions=True,
                                 )
                                 formatted_messages.append({"role": "assistant", "content": None, "tool_calls": dsml_extra_calls})
+                                for er in extra_results:
+                                    if isinstance(er, dict):
+                                        turn_tool_payloads.append(er)
                                 _append_tool_results(
                                     dsml_extra_calls,
                                     list(extra_results),
@@ -1685,7 +1704,12 @@ async def _run_agentic_chat_stream_impl(
                                     )
                                     retry_content = retry_json.get("choices", [{}])[0].get("message", {}).get("content", "")
                                     filtered_synth = filter_output(retry_content)
-                        accumulated_reply = filtered_synth
+                        guard_res = verify_and_guard_reply(filtered_synth, turn_tool_payloads, market=effective_market)
+                        accumulated_reply = guard_res["reply"]
+                        if guard_res["warnings"]:
+                            guard_warnings = list(dict.fromkeys(guard_warnings + guard_res["warnings"]))
+                        if guard_res["block_cache"]:
+                            guard_block_cache = True
                         if accumulated_reply:
                             words = accumulated_reply.split(" ")
                             chunk_size = 24 if len(words) > 300 else 12
@@ -1910,12 +1934,13 @@ async def _run_agentic_chat_stream_impl(
         (not has_conversation_history and not has_followup_flag)
         or (has_conversation_history and model_confirmed_standalone and tools_executed_count > 0)
     )
-    if has_missing_stock_data:
+    if has_missing_stock_data or guard_block_cache:
         candidate_cache_key = None
 
     if (
         not is_cross_market
         and not has_missing_stock_data
+        and not guard_block_cache
         and can_save_for_history
         and not has_user_rules
         and not visuals_data.get("portfolio")
@@ -1963,6 +1988,7 @@ async def _run_agentic_chat_stream_impl(
         "cached": False,
         "cache_key": saved_cache_key or candidate_cache_key,
         "usage": _finalize_usage_cost(usage_acc, cached=False),
+        **({"guard_warnings": guard_warnings} if guard_warnings else {}),
     }
 
     yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"

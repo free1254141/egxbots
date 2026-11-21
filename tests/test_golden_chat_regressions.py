@@ -190,3 +190,88 @@ def test_graham_gap_and_support_risk_reward_eliminate_mental_math():
 
     ctx = _compute_stock_context_metrics(11.62, 12.53, 12.28, 11.69, 10.54, 12.80, 10.12)
     assert ctx["risk_reward_from_support"] == 5.38
+
+
+def test_alias_dictionary_has_zero_generic_city_collisions_or_dead_mnhd():
+    from api.agentic_chat.pipeline import known_symbol_hints
+    from api.stock_aliases import ARABIC_STOCK_MAPPINGS, resolve_stock_symbol
+
+    for bad_generic in ("الاسكندرية", "الإسكندرية", "اسكندرية", "اسكندريه", "النصر", "جولدن", "فاينانس", "النيل", "جراند"):
+        assert bad_generic not in ARABIC_STOCK_MAPPINGS
+    assert "MNHD" not in ARABIC_STOCK_MAPPINGS.values()
+
+    assert resolve_stock_symbol("فتنس برايم") == "FTNS"
+    assert resolve_stock_symbol("اسكندرية زيوت") == "AMOC"
+    assert resolve_stock_symbol("مدينة نصر للإسكان") == "MASR"
+    assert resolve_stock_symbol("اسمنت بورتلاند طرة") == "TORA"
+
+    ftns_hints = known_symbol_hints("هل سهم فتنس برايم ممكن ينهار")
+    assert any("FTNS" in h.get("symbols", []) for h in ftns_hints)
+    assert not any("PRMH" in h.get("symbols", []) for h in ftns_hints)
+
+    amoc_hints = known_symbol_hints("اسكندريه زيوت")
+    assert any("AMOC" in h.get("symbols", []) for h in amoc_hints)
+    assert not any("ALCN" in h.get("symbols", []) for h in amoc_hints)
+
+
+def test_universal_tool_identity_enricher_fills_names_and_usd_currency():
+    from api.agentic_chat.tools_execution import _enrich_tool_result_identities
+
+    with patch("api.agentic_chat.tools_execution._get_market_stocks_catalog", return_value=[]):
+        out = _enrich_tool_result_identities(
+            {
+                "items": [
+                    {"symbol": "MASR", "fair_value": 10.74},
+                    {"symbol": "FAITA", "close": 1.01},
+                ]
+            },
+            default_market="EGX",
+        )
+    assert "مدينة مصر" in out["items"][0]["name_ar"]
+    assert out["items"][0]["currency"] == "ج.م"
+    assert out["items"][1]["currency"] == "$"
+
+
+def test_search_stocks_tool_resolves_colloquial_arabic_names():
+    from api.agentic_chat.tools_execution import _sync_search_stocks
+
+    fake_catalog = [
+        {"symbol": "AMOC", "name": "Alexandria Mineral Oils Co.", "name_ar": "الإسكندرية للزيوت المعدنية"},
+        {"symbol": "FTNS", "name": "Fitness Prime", "name_ar": "فتنس برايم"},
+        {"symbol": "ADIB", "name": "Abu Dhabi Islamic Bank-Egypt", "name_ar": "مصرف أبوظبي الإسلامي"},
+    ]
+    with patch("api.agentic_chat.tools_execution._get_market_stocks_catalog", return_value=fake_catalog):
+        res = _sync_search_stocks(["اسكندريه زيوت", "فتنس برايم", "بنك ابو ظبي"], market="EGX")
+    top_syms = [row["matches"][0]["symbol"] for row in res["results"]]
+    assert top_syms == ["AMOC", "FTNS", "ADIB"]
+
+
+def test_output_guard_enforces_stale_warning_blocks_currency_mismatch_and_sanitizes_tool_leaks():
+    from api.agentic_chat.output_guard import verify_and_guard_reply
+
+    # 1. Stale stock omitted in reply -> prepends warning + blocks cache
+    g1 = verify_and_guard_reply(
+        "سعر السهم 7.30 جنيه والوضع إيجابي.",
+        [{"stocks": [{"symbol": "FCMD", "date": "2026-09-23", "close": 7.30, "currency": "ج.م", "data_is_stale": True, "stale_data_warning": "⚠️ تنبيه شفافية مهم: آخر جلسة 2026-09-23"}]}],
+    )
+    assert g1["prepended_warning"] is True
+    assert g1["block_cache"] is True
+    assert "2026-09-23" in g1["reply"]
+
+    # 2. USD stock quoted with ج.م -> flags currency_mismatch + blocks cache
+    g2 = verify_and_guard_reply(
+        "سهم FAITA يتداول عند 1.01 ج.م حالياً.",
+        [{"stocks": [{"symbol": "FAITA", "close": 1.01, "currency": "$"}]}],
+    )
+    assert any("currency_mismatch" in w for w in g2["warnings"])
+    assert g2["block_cache"] is True
+
+    # 3. Leaked Python tool identifier -> sanitized cleanly
+    g3 = verify_and_guard_reply("يمكنك فحص التطهير عبر `get_sharia_cleanser` مباشرة.", [])
+    assert "get_sharia_cleanser" not in g3["reply"]
+    assert "tool_name_leaked:get_sharia_cleanser" in g3["warnings"]
+
+    # 4. Clean reply -> zero warnings, cache allowed
+    g4 = verify_and_guard_reply("سهم COMI عند 127.50 ج.م.", [{"stocks": [{"symbol": "COMI", "close": 127.5, "currency": "ج.م"}]}])
+    assert g4["warnings"] == []
+    assert g4["block_cache"] is False

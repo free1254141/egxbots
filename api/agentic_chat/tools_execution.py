@@ -26,6 +26,7 @@ from api.stock_aliases import (
     resolve_stock_symbol,
 )
 from api.sharia_stocks import is_sharia_compliant
+from api.egx_canonical_names import CANONICAL_EGX_STOCK_NAMES
 
 try:
     import api.saudi_stock_aliases as _saudi_aliases_mod
@@ -2235,6 +2236,169 @@ def _search_catalog_candidates(
 
     scored.sort(key=lambda x: (x[0], -len(x[1]["symbol"])), reverse=True)
     return [c for _, c in scored[:limit]]
+
+
+_CATALOG_INDEX_BY_ID: Dict[str, Tuple[int, Dict[str, Dict[str, str]]]] = {}
+_NON_TICKER_LABELS = frozenset({
+    "EGX", "TASI", "TADAWUL", "QSE", "DFM", "ADX", "UAE", "KSE", "COMMODITIES",
+    "ALL", "MARKET", "USD", "EGP", "SAR", "QAR", "AED", "KWD", "NONE", "NULL",
+})
+
+
+def _resolve_symbol_display_names(symbol: str, exchange: str = "EGX") -> Tuple[str, str]:
+    """O(1) cached lookup returning (name_ar, name_en) from DB catalog, canonical EGX map, and aliases."""
+    sym = str(symbol or "").strip().upper()
+    if not sym or sym in _NON_TICKER_LABELS:
+        return ("", "")
+    exch = _normalize_market_code(exchange)
+    catalog = _get_market_stocks_catalog(exch)
+    item: Optional[Dict[str, str]] = None
+    if catalog:
+        hit = _CATALOG_INDEX_BY_ID.get(exch)
+        cat_id = id(catalog)
+        if hit and hit[0] == cat_id:
+            idx_map = hit[1]
+        else:
+            idx_map = {str(it.get("symbol") or "").upper(): it for it in catalog if it.get("symbol")}
+            _CATALOG_INDEX_BY_ID[exch] = (cat_id, idx_map)
+        item = idx_map.get(sym)
+
+    canon = CANONICAL_EGX_STOCK_NAMES.get(sym) or {} if exch == "EGX" else {}
+    db_ar = str(item.get("name_ar") or "").strip() if item else ""
+    db_en = str(item.get("name") or "").strip() if item else ""
+    if db_ar.upper() == sym:
+        db_ar = ""
+    if db_en.upper() == sym:
+        db_en = ""
+
+    canon_ar = str(canon.get("name_ar") or "").strip()
+    canon_en = str(canon.get("name_en") or "").strip()
+    alias_ar = str(_alias_name_for_symbol(sym, market=exch) or "").strip()
+    if alias_ar.upper() == sym:
+        alias_ar = ""
+
+    name_ar = db_ar or canon_ar or alias_ar
+    name_en = db_en or canon_en
+    return (name_ar, name_en)
+
+
+def _enrich_tool_result_identities(res: Any, default_market: Optional[str] = None) -> Any:
+    """Universal identity & currency enricher ensuring zero bare tickers or wrong currencies across all tools."""
+    if not isinstance(res, (dict, list)):
+        return res
+    base_mkt = _normalize_market_code(default_market or get_active_market_context() or "EGX")
+
+    def _visit(node: Any, depth: int) -> None:
+        if depth > 4:
+            return
+        if isinstance(node, list):
+            for el in node:
+                _visit(el, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+
+        sym_raw = node.get("symbol")
+        if isinstance(sym_raw, str):
+            sym = sym_raw.strip().upper()
+            if sym and sym not in _NON_TICKER_LABELS and re.fullmatch(r"[A-Z0-9.=-]{2,14}", sym):
+                row_exch = _normalize_market_code(node.get("exchange") or node.get("market") or base_mkt)
+                if "." in sym:
+                    suf = _reg_detect_exchange_from_suffix(sym)
+                    if suf:
+                        sym = suf[0]
+                        row_exch = suf[1]
+                cur_ar = str(node.get("name_ar") or "").strip()
+                cur_en = str(node.get("name") or "").strip()
+                need_ar = not cur_ar or cur_ar.upper() == sym
+                need_en = not cur_en or cur_en.upper() == sym
+                if need_ar or need_en:
+                    res_ar, res_en = _resolve_symbol_display_names(sym, row_exch)
+                    if need_ar and res_ar:
+                        node["name_ar"] = res_ar
+                    if need_en and res_en:
+                        node["name"] = res_en
+                    elif need_en and res_ar and "name" in node and not cur_en:
+                        node["name"] = res_ar
+                if "currency" in node or any(
+                    k in node for k in ("close", "current_price", "fair_value", "support_1", "market_value", "entry_price")
+                ):
+                    canon_curr = _reg_currency_for_symbol(sym, row_exch)
+                    if not str(node.get("currency") or "").strip() or (row_exch == "EGX" and canon_curr == "$"):
+                        node["currency"] = canon_curr
+
+        for v in node.values():
+            if isinstance(v, (dict, list)):
+                _visit(v, depth + 1)
+
+    _visit(res, 0)
+    return res
+
+
+def _sync_search_stocks(queries: List[str], market: Optional[str] = None) -> Dict[str, Any]:
+    """Fast RAM-cached stock lookup resolving Arabic names, nicknames, and tickers in <1ms."""
+    eff_mkt = _normalize_market_code(market or get_active_market_context() or "EGX")
+    clean_qs = [str(q).strip() for q in (queries or []) if str(q or "").strip()][:20]
+    if not clean_qs:
+        return {"status": "error", "message": "لم يتم تحديد كلمات بحث صالحة", "results": []}
+
+    norm_egx_map: Dict[str, str] = {}
+    if eff_mkt == "EGX":
+        for k_ar, v_sym in ARABIC_STOCK_MAPPINGS.items():
+            nk = _normalize_arabic_text(k_ar).lower()
+            if nk and nk not in norm_egx_map:
+                norm_egx_map[nk] = v_sym.upper()
+
+    results: List[Dict[str, Any]] = []
+    for q in clean_qs:
+        seen_syms = set()
+        matches: List[Dict[str, str]] = []
+
+        def _add_match(sym_code: str, exch_code: str) -> None:
+            su = str(sym_code or "").strip().upper()
+            if not su or su in seen_syms or len(matches) >= 3:
+                return
+            seen_syms.add(su)
+            ar_nm, en_nm = _resolve_symbol_display_names(su, exch_code)
+            matches.append({
+                "symbol": su,
+                "name_ar": ar_nm or en_nm or su,
+                "name": en_nm or ar_nm or su,
+                "exchange": exch_code,
+                "currency": _reg_currency_for_symbol(su, exch_code),
+            })
+
+        q_norm = _normalize_arabic_text(q).lower()
+        if eff_mkt == "EGX":
+            direct = norm_egx_map.get(q_norm)
+            if not direct:
+                padded_q = f" {q_norm} "
+                for nk, v_sym in sorted(norm_egx_map.items(), key=lambda kv: len(kv[0]), reverse=True):
+                    if len(nk) >= 3 and f" {nk} " in padded_q:
+                        direct = v_sym
+                        break
+            if direct:
+                _add_match(direct, "EGX")
+        elif eff_mkt == "TADAWUL":
+            sa_hit = _resolve_saudi_alias_local(q)
+            if sa_hit and sa_hit != "TASI":
+                _add_match(sa_hit, "TADAWUL")
+
+        for cand in _search_catalog_candidates(q, exchange=eff_mkt, limit=3, min_score=2.0):
+            _add_match(cand["symbol"], cand.get("exchange") or eff_mkt)
+
+        results.append({"query": q, "matches": matches})
+
+    return {
+        "status": "success",
+        "market": _ui_market_label(eff_mkt),
+        "exchange": eff_mkt,
+        "results": results,
+    }
+
+
+async def execute_search_stocks(queries: List[str], market: Optional[str] = None) -> Dict[str, Any]:
+    return await asyncio.to_thread(_sync_search_stocks, queries, market)
 
 
 def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[str, Any]:
@@ -4631,9 +4795,12 @@ def _sync_get_fair_value(
         )
         gap_info = _build_fair_value_gap(close, fair_value)
         upside = gap_info["upside_pct"]
+        sym_ar, sym_en = _resolve_symbol_display_names(sym, "EGX")
 
         items.append({
             "symbol": sym,
+            "name": sym_en or sym_ar or sym,
+            "name_ar": sym_ar or sym_en or sym,
             "market": "EGX",
             "exchange": "EGX",
             "currency": _reg_currency_for_symbol(sym, "EGX"),
@@ -7242,42 +7409,53 @@ async def dispatch_tool(
     eff_default_mkt = arguments.get("market") or default_market
     ctx_token = set_active_market_context(eff_default_mkt) if eff_default_mkt else None
     try:
-        if tool_name == "get_stock":
+        result: Dict[str, Any]
+        if tool_name == "search_stocks":
+            raw_qs = arguments.get("queries")
+            if not raw_qs and arguments.get("query"):
+                raw_qs = [arguments["query"]]
+            result = await execute_search_stocks(
+                queries=raw_qs if isinstance(raw_qs, list) else ([str(raw_qs)] if raw_qs else []),
+                market=arguments.get("market"),
+            )
+
+        elif tool_name == "get_stock":
             symbols = arguments.get("symbols") or ([arguments["symbol"]] if "symbol" in arguments else [])
-            return await execute_get_stock(symbols, market=arguments.get("market"))
+            result = await execute_get_stock(symbols, market=arguments.get("market"))
 
         elif tool_name == "get_stock_levels":
             symbols = arguments.get("symbols") or ([arguments["symbol"]] if "symbol" in arguments else [])
-            return await execute_get_stock_levels(symbols, market=arguments.get("market"))
+            result = await execute_get_stock_levels(symbols, market=arguments.get("market"))
 
         elif tool_name == "get_market":
-            return await execute_get_market(market=arguments.get("market"))
+            result = await execute_get_market(market=arguments.get("market"))
 
         elif tool_name == "get_recommendations":
             if not _ALLOW_RECOMMENDATIONS_CTX.get():
-                return {
+                result = {
                     "status": "disabled",
                     "message": "تم تعطيل توصيات الشراء والبيع المفتوحة لهذه المجموعة بناءً على إعدادات الإدارة.",
                     "recommendations": [],
                 }
-            return await execute_get_recommendations(
-                status=arguments.get("status", "open"),
-                timeframe=arguments.get("timeframe", "all"),
-                symbols=arguments.get("symbols"),
-                sharia_only=arguments.get("sharia_only", False),
-                limit=arguments.get("limit", 20),
-                market=arguments.get("market"),
-            )
+            else:
+                result = await execute_get_recommendations(
+                    status=arguments.get("status", "open"),
+                    timeframe=arguments.get("timeframe", "all"),
+                    symbols=arguments.get("symbols"),
+                    sharia_only=arguments.get("sharia_only", False),
+                    limit=arguments.get("limit", 20),
+                    market=arguments.get("market"),
+                )
 
         elif tool_name == "get_technical_scan":
-            return await execute_get_technical_scan(
+            result = await execute_get_technical_scan(
                 preset=arguments.get("preset", "top_gainers"),
                 sharia_only=arguments.get("sharia_only", False),
                 market=arguments.get("market"),
             )
 
         elif tool_name == "get_accumulation_stocks":
-            return await execute_get_accumulation_stocks(
+            result = await execute_get_accumulation_stocks(
                 sharia_only=arguments.get("sharia_only", False),
                 market=arguments.get("market"),
             )
@@ -7288,16 +7466,16 @@ async def dispatch_tool(
                 sym_val = str(arguments.get("symbol") or "").strip().upper()
                 if sym_val and sym_val not in ("EGX", "MARKET", "ALL", "TASI", "SAUDI"):
                     news_syms = [sym_val]
-            return await execute_get_news(
+            result = await execute_get_news(
                 symbols=news_syms,
                 market=arguments.get("market"),
             )
 
         elif tool_name == "get_comparison":
-            return await execute_get_comparison(symbols=arguments.get("symbols", []))
+            result = await execute_get_comparison(symbols=arguments.get("symbols", []))
 
         elif tool_name == "get_fair_value":
-            return await execute_get_fair_value(
+            result = await execute_get_fair_value(
                 symbols=arguments.get("symbols"),
                 mode=arguments.get("mode", "screen_undervalued"),
                 sharia_only=arguments.get("sharia_only", False),
@@ -7306,7 +7484,7 @@ async def dispatch_tool(
             )
 
         elif tool_name == "get_dividends":
-            return await execute_get_dividends(
+            result = await execute_get_dividends(
                 symbols=arguments.get("symbols"),
                 upcoming_only=arguments.get("upcoming_only", True),
                 limit=arguments.get("limit", 15),
@@ -7314,7 +7492,7 @@ async def dispatch_tool(
             )
 
         elif tool_name == "get_sharia_cleanser":
-            return await execute_get_sharia_cleanser(
+            result = await execute_get_sharia_cleanser(
                 symbol=arguments.get("symbol", ""),
                 shares_count=arguments.get("shares_count", 1000.0),
                 coupon_per_share=arguments.get("coupon_per_share"),
@@ -7323,14 +7501,14 @@ async def dispatch_tool(
             )
 
         elif tool_name == "get_price_traps":
-            return await execute_get_price_traps(
+            result = await execute_get_price_traps(
                 market=arguments.get("market"),
                 symbol=arguments.get("symbol"),
                 limit=arguments.get("limit", 8),
             )
 
         elif tool_name == "get_disclosures":
-            return await execute_get_disclosures(
+            result = await execute_get_disclosures(
                 symbol=arguments.get("symbol"),
                 disclosure_type=arguments.get("disclosure_type"),
                 limit=arguments.get("limit", 10),
@@ -7338,7 +7516,7 @@ async def dispatch_tool(
             )
 
         elif tool_name == "manage_portfolio":
-            return await execute_manage_portfolio(
+            result = await execute_manage_portfolio(
                 user_id=user_id,
                 operation=arguments.get("operation", "view"),
                 symbol=arguments.get("symbol"),
@@ -7349,7 +7527,7 @@ async def dispatch_tool(
             )
 
         elif tool_name == "calculate_position":
-            return await execute_calculate_position(
+            result = await execute_calculate_position(
                 symbol=arguments.get("symbol", ""),
                 quantity=arguments.get("quantity"),
                 entry_price=arguments.get("entry_price"),
@@ -7357,7 +7535,7 @@ async def dispatch_tool(
             )
 
         elif tool_name == "optimize_portfolio":
-            return await execute_optimize_portfolio(
+            result = await execute_optimize_portfolio(
                 user_id=user_id,
                 symbols=arguments.get("symbols"),
                 capital=arguments.get("capital"),
@@ -7371,21 +7549,21 @@ async def dispatch_tool(
             )
 
         elif tool_name == "enable_autonomous_recommendations":
-            return {
+            result = {
                 "status": "success",
                 "autonomous_recommendations_enabled": True,
                 "message": "تم تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي بنجاح في الواجهة.",
             }
 
         elif tool_name == "disable_autonomous_recommendations":
-            return {
+            result = {
                 "status": "success",
                 "autonomous_recommendations_enabled": False,
                 "message": "تم إيقاف وضع التوصيات الحرة المستقلة والعودة للوضع القياسي.",
             }
 
         elif tool_name == "manage_user_preferences":
-            return await execute_manage_user_preferences(
+            result = await execute_manage_user_preferences(
                 user_id=user_id,
                 operation=arguments.get("operation", "get"),
                 rule=arguments.get("rule"),
@@ -7393,7 +7571,7 @@ async def dispatch_tool(
             )
 
         elif tool_name == "manage_automations":
-            return await execute_manage_automations(
+            result = await execute_manage_automations(
                 user_id=user_id,
                 operation=arguments.get("operation", "list"),
                 name=arguments.get("name"),
@@ -7406,7 +7584,9 @@ async def dispatch_tool(
             )
 
         else:
-            return {"status": "error", "message": f"الأداة {tool_name} غير معروفة"}
+            result = {"status": "error", "message": f"الأداة {tool_name} غير معروفة"}
+
+        return _enrich_tool_result_identities(result, default_market=eff_default_mkt)
 
     except Exception as e:
         return {"status": "error", "message": f"خطأ أثناء تنفيذ الأداة {tool_name}: {str(e)}"}

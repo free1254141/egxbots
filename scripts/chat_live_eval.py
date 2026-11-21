@@ -118,6 +118,42 @@ def _build_cases() -> List[Tuple[int, str, str, List[EvalCheck]]]:
                 ("uses ر.س currency", lambda r: "ر.س" in (r.get("reply") or "")),
             ],
         ),
+        (
+            9,
+            "هل سهم فتنس برايم ممكن ينهار لمستويات تحت جامد",
+            "EGX",
+            [
+                ("resolves FTNS", lambda r: "FTNS" in (r.get("reply") or "").upper()),
+                ("does not hijack to PRMH", lambda r: "PRMH" not in (r.get("reply") or "").upper()),
+            ],
+        ),
+        (
+            10,
+            "فوري اسكندريه زيوت اسمنت بورتلاند طرة بنك ابو ظبي",
+            "EGX",
+            [
+                ("resolves AMOC", lambda r: "AMOC" in (r.get("reply") or "").upper()),
+                ("resolves ADIB", lambda r: "ADIB" in (r.get("reply") or "").upper()),
+                ("resolves TORA", lambda r: "TORA" in (r.get("reply") or "").upper()),
+                ("does not hijack to MTIE", lambda r: "MTIE" not in (r.get("reply") or "").upper()),
+                ("does not hijack to ABUK", lambda r: "ABUK" not in (r.get("reply") or "").upper()),
+                ("does not hijack to ALCN", lambda r: "ALCN" not in (r.get("reply") or "").upper()),
+            ],
+        ),
+        (
+            11,
+            "قائمة بالاسهم المصرية المتوافقة مع الشريعة سعرها اقل من 50 جنيه",
+            "EGX",
+            [
+                (
+                    "MASR is never mislabeled as مطاحن ومخابز الإسكندرية",
+                    lambda r: all(
+                        not ("MASR" in ln.upper() and "مطاحن" in ln)
+                        for ln in (r.get("reply") or "").splitlines()
+                    ),
+                ),
+            ],
+        ),
     ]
 
 
