@@ -331,4 +331,31 @@ def test_dividends_engine_date_status_and_chat_tool_schema():
     assert sample["days_until_ex"] is not None
 
 
+def test_nov21_audit_bugfixes_vision_cache_aliases():
+    from api.stock_aliases import resolve_stock_symbol
+    from api.agentic_chat.analysis_cache import build_analysis_cache_key
+    from api.agentic_chat.vision import validate_vision_output
+
+    # 1. National Housing Arabic alias resolves cleanly to NHPS
+    assert resolve_stock_symbol("الوطنية للإسكان") == "NHPS"
+    assert resolve_stock_symbol("سهم الوطنيه للاسكان") == "NHPS"
+
+    # 2. Complaint messages must NEVER hit blind stock cache
+    assert build_analysis_cache_key("طلبت تحليل fcmd والأرقام غير محدثة وده بيضعف مصداقية التطبيق") is None
+    assert build_analysis_cache_key("سهم CRST موقوف ليه البيانات قديمة") is None
+
+    # 3. Vision resolves abbreviated OCR headers via full visible company name (general, zero hardcoding)
+    norm_v = validate_vision_output({
+        "image_type": "portfolio",
+        "symbols": [
+            {"symbol": "PREMIUM", "name": "بريميم هيلث كير", "visible_values": {"price": 0.078}},
+            {"symbol": "ALOMR", "name": "الحديثة للتعليم", "visible_values": {"price": 0.479}},
+            {"symbol": "SM", "name": "سماد مصر", "visible_values": {"price": 216.65}},
+        ],
+    })
+    syms = [s["symbol"] for s in norm_v["symbols"]]
+    assert syms == ["PHGC", "MOED", "SMFR"]
+
+
+
 

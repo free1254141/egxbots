@@ -40,6 +40,11 @@ Rules:
 - If the screen lists holdings with only market value and return % (no share count and no average price), preserve those in market_value and return_pct; leave price, average_price, and quantity null. Never infer missing fields.
 - If the screen is a single-stock position detail, use units as quantity and average unit price as average_price.
 - Return each ticker at most once.
+- Egyptian vs Saudi broker currency disambiguation (CRITICAL):
+  * Egyptian broker apps (Thndr / ثاندر, Mubasher Egypt, Beltone, EFG) display "ج.م" (EGP), which on small/compressed screenshots can visually resemble "ر.م" or "ر.س".
+  * Saudi Tadawul (TASI) stocks ALWAYS have 4-digit numeric tickers (e.g. 2222, 1120, 2010), NEVER Latin words/abbreviations (like PREMIUM, ALOMR, SM, PHGC, MOED, SMFR).
+  * If a ticker is Latin letters (not 4 digits), NEVER label its currency as Saudi Riyal ("ر.س") — treat it as EGX (ج.م / EGP) unless "USD" or "$" or "AED" or "QAR" is explicitly shown!
+  * Always transcribe the full visible company name in "name" (Arabic or English) alongside the ticker so abbreviated/truncated headers (e.g. PREMIUM -> PHGC, SM -> SMFR) can be resolved accurately.
 - Never invent a ticker, price, or quantity. If the image text is unreadable, return unknown image_type and empty symbols array.
 - confidence: a number from 0 to 1 reflecting how clearly you could read the image.
 """
@@ -202,9 +207,10 @@ def validate_vision_output(data: Any) -> Optional[Dict[str, Any]]:
         return None
 
     try:
-        from api.stock_aliases import ARABIC_STOCK_MAPPINGS, resolve_stock_symbol
+        from api.stock_aliases import ARABIC_STOCK_MAPPINGS, _KNOWN_SYMBOLS, resolve_stock_symbol
     except Exception:
         ARABIC_STOCK_MAPPINGS = {}
+        _KNOWN_SYMBOLS = set()
         resolve_stock_symbol = lambda s: s
 
     uncertainties: List[str] = [str(u) for u in data.get("uncertainties", []) if isinstance(u, (str, int, float))]
@@ -252,7 +258,12 @@ def validate_vision_output(data: Any) -> Optional[Dict[str, Any]]:
         if len(raw_sym) < 2:
             continue
 
-        resolved = resolve_stock_symbol(raw_sym) or raw_sym
+        sym_cand = resolve_stock_symbol(raw_sym) or raw_sym
+        if sym_cand not in _KNOWN_SYMBOLS and not re.fullmatch(r"\d{4}", sym_cand) and entry.get("name"):
+            name_cand = resolve_stock_symbol(str(entry.get("name") or ""))
+            if name_cand and name_cand in _KNOWN_SYMBOLS:
+                sym_cand = name_cand
+        resolved = sym_cand
 
         raw_change_pct = coerce_number_or_null(
             entry.get("visible_values", {}).get("change_pct") if isinstance(entry.get("visible_values"), dict) else entry.get("change_pct")

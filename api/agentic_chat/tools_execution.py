@@ -2102,6 +2102,116 @@ def _compute_fundamental_fair_value(
     return fv_q, "التوازن الكمي (VWAP & EMA)", extra
 
 
+_CATALOG_CACHE: Dict[str, Tuple[float, List[Dict[str, str]]]] = {}
+_CATALOG_CACHE_LOCK = threading.Lock()
+_CATALOG_TTL_SECONDS = 3600.0
+
+
+def _get_market_stocks_catalog(exchange: str = "EGX") -> List[Dict[str, str]]:
+    """Hourly RAM-cached catalog of active stocks (symbol, name, name_ar) from Supabase."""
+    raw_exch = str(exchange or "EGX").strip().upper()
+    exch = "UAE" if raw_exch == "UAE" else _normalize_market_code(raw_exch)
+    now = time.time()
+    with _CATALOG_CACHE_LOCK:
+        hit = _CATALOG_CACHE.get(exch)
+        if hit and (now - hit[0]) < _CATALOG_TTL_SECONDS:
+            return hit[1]
+    sb = _get_sb() if exch == "EGX" else _get_sb_for_market("DFM" if exch == "UAE" else exch)
+    if sb is None:
+        return []
+    try:
+        if exch in ("TADAWUL", "TASI"):
+            exchs = ["TADAWUL", "TASI"]
+        elif exch == "UAE":
+            exchs = ["DFM", "ADX"]
+        else:
+            exchs = [exch]
+        rows = (
+            sb.table("stocks")
+            .select("symbol,name,name_ar")
+            .in_("exchange", exchs)
+            .eq("is_active", True)
+            .limit(450)
+            .execute()
+            .data
+            or []
+        )
+        cleaned = [
+            {
+                "symbol": str(r.get("symbol") or "").strip().upper(),
+                "name": str(r.get("name") or "").strip(),
+                "name_ar": str(r.get("name_ar") or "").strip(),
+            }
+            for r in rows
+            if r.get("symbol")
+        ]
+        with _CATALOG_CACHE_LOCK:
+            _CATALOG_CACHE[exch] = (now, cleaned)
+        return cleaned
+    except Exception:
+        return []
+
+
+def _search_catalog_candidates(query_text: str, exchange: str = "EGX", limit: int = 4) -> List[Dict[str, str]]:
+    """Zero-regex token-overlap + SequenceMatcher lookup against the real DB stocks catalog."""
+    from difflib import SequenceMatcher
+
+    raw = str(query_text or "").strip()
+    if len(raw) < 2:
+        return []
+    q_norm = _normalize_arabic_text(raw).lower()
+    q_tokens = {t for t in q_norm.split() if len(t) >= 2 and t not in ("سهم", "شركه", "شركة", "شركات", "في", "من", "على")}
+    catalog = _get_market_stocks_catalog(exchange)
+    if not catalog:
+        return []
+
+    scored: List[Tuple[float, Dict[str, str]]] = []
+    for item in catalog:
+        sym = item["symbol"]
+        sym_low = sym.lower()
+        name_en = item["name"].lower()
+        name_ar = _normalize_arabic_text(item["name_ar"]).lower()
+        alias_ar = _normalize_arabic_text(_alias_name_for_symbol(sym, market=exchange) or "").lower()
+        haystack = f"{sym_low} {name_en} {name_ar} {alias_ar}".strip()
+        if not haystack:
+            continue
+
+        score = 0.0
+        if q_norm == sym_low:
+            score = 10.0
+        elif sym_low.startswith(q_norm) or (len(q_norm) >= 3 and q_norm in sym_low):
+            score = 4.0
+        else:
+            # Pure token overlap (Arabic + English)
+            if q_tokens:
+                h_tokens = set(haystack.split())
+                exact_hits = len(q_tokens & h_tokens)
+                sub_hits = sum(1 for qt in q_tokens if qt in haystack)
+                score += exact_hits * 2.5 + sub_hits * 1.2
+            # SequenceMatcher similarity for minor typos (e.g. IENG -> INEG, PREMIUM -> Premium HealthCare)
+            sim_sym = SequenceMatcher(None, q_norm, sym_low).ratio()
+            sim_name = max(
+                SequenceMatcher(None, q_norm, name_en[: len(q_norm) + 8]).ratio() if name_en else 0.0,
+                SequenceMatcher(None, q_norm, name_ar[: len(q_norm) + 8]).ratio() if name_ar else 0.0,
+                SequenceMatcher(None, q_norm, alias_ar[: len(q_norm) + 8]).ratio() if alias_ar else 0.0,
+            )
+            if sim_sym >= 0.72:
+                score += sim_sym * 3.0
+            if sim_name >= 0.65:
+                score += sim_name * 2.5
+
+        if score >= 2.0:
+            scored.append((score, {
+                "symbol": sym,
+                "name_ar": item["name_ar"] or _alias_name_for_symbol(sym, market=exchange) or item["name"] or sym,
+                "name": item["name"],
+                "exchange": exchange,
+            }))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [c for _, c in scored[:limit]]
+
+
 def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[str, Any]:
     grouped_syms = _group_symbols_by_exchange(symbols, market=market)
     if not grouped_syms:
@@ -2391,6 +2501,21 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
             up_div = _lookup_upcoming_dividend(sym, "EGX")
             if up_div:
                 egx_item["upcoming_dividend"] = up_div
+            # Flag stale / suspended stock quotes (> 10 days old) so ARTORO warns transparently
+            _raw_dt = str(latest_tech.get("date") or "")[:10]
+            if len(_raw_dt) == 10:
+                try:
+                    _age_days = (datetime.now(CAIRO_TZ).date() - datetime.strptime(_raw_dt, "%Y-%m-%d").date()).days
+                    if _age_days > 10:
+                        egx_item["data_is_stale"] = True
+                        egx_item["data_age_days"] = _age_days
+                        egx_item["stale_data_warning"] = (
+                            f"⚠️ تنبيه شفافية مهم: آخر جلسة مسجلة لسهم {sym} في قاعدة البيانات بتاريخ {_raw_dt} "
+                            f"(منذ {_age_days} يوماً) — قد يكون السهم موقوفاً عن التداول أو غير محدث من مزود البيانات، "
+                            "فلا تعتمد هذا السعر كإغلاق حالي."
+                        )
+                except Exception:
+                    pass
             ui_chart = _build_ui_chart_payload(
                 by_sym.get(sym, []) if "by_sym" in locals() else [],
                 _safe_price(latest_tech.get("ema_50")),
@@ -2738,6 +2863,21 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     up_div_sa = _lookup_upcoming_dividend(sym, exch_code)
                     if up_div_sa:
                         sa_item["upcoming_dividend"] = up_div_sa
+                    # Flag stale / suspended quotes (> 10 days old) across GCC markets as well
+                    _raw_sa_dt = str(ti_date or "")[:10]
+                    if len(_raw_sa_dt) == 10:
+                        try:
+                            _sa_age_days = (datetime.now(CAIRO_TZ).date() - datetime.strptime(_raw_sa_dt, "%Y-%m-%d").date()).days
+                            if _sa_age_days > 10:
+                                sa_item["data_is_stale"] = True
+                                sa_item["data_age_days"] = _sa_age_days
+                                sa_item["stale_data_warning"] = (
+                                    f"⚠️ تنبيه شفافية مهم: آخر جلسة مسجلة لسهم {sym} في قاعدة البيانات بتاريخ {_raw_sa_dt} "
+                                    f"(منذ {_sa_age_days} يوماً) — قد يكون السهم موقوفاً عن التداول أو غير محدث من مزود البيانات، "
+                                    "فلا تعتمد هذا السعر كإغلاق حالي."
+                                )
+                        except Exception:
+                            pass
                     ui_chart_sa = _build_ui_chart_payload(
                         sa_ohlcv_map.get(sym, []),
                         ema_50,
@@ -2749,9 +2889,24 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         sa_item["_ui_chart"] = ui_chart_sa
                     stocks_data.append(sa_item)
 
+    # If any requested symbol had no price/indicator data, suggest closest real DB matches in the user's market
+    eff_mkt_for_lookup = _normalize_market_code(market or _ACTIVE_MARKET_CTX.get() or "EGX")
+    suggested_map: Dict[str, List[Dict[str, str]]] = {}
+    for row in stocks_data:
+        if row.get("close") is None:
+            q_sym = str(row.get("symbol") or "").strip()
+            if q_sym:
+                row_mkt = _normalize_market_code(row.get("exchange") or eff_mkt_for_lookup)
+                cands = _search_catalog_candidates(q_sym, exchange=row_mkt, limit=4)
+                if cands:
+                    row["suggested_matches"] = cands
+                    suggested_map[q_sym] = cands
+
     res: Dict[str, Any] = {"status": "success", "stocks": stocks_data}
     if errors:
         res["warnings"] = errors
+    if suggested_map:
+        res["suggested_matches"] = suggested_map
     _set_tool_cached(cache_key, res)
     return res
 

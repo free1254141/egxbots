@@ -348,6 +348,11 @@ _UNCACHEABLE_ERROR_MARKERS = (
     "الرمز غير معروف",
     "الرمز غير متاح",
     "بدون أي بيانات سعر",
+    "لا تتوفر بيانات فنية",
+    "لا تتوفر بيانات حالياً",
+    "البيانات غير متوفرة",
+    "السهم غير متوفر",
+    "الرمز غير متوفر",
     "تعذر الاتصال بمحرك الذكاء الاصطناعي",
 )
 
@@ -699,6 +704,8 @@ DIALOGUE_WORDS = {
         "ليه", "لماذا", "ازاي", "كيف", "اشمعني", "اشمعنا", "امتي", "امتى", "متي", "متى",
         "لو", "اذا", "افرض", "تفتكر", "تتوقع", "اشرح", "اشرحلي", "فهمني", "باك", "backtest",
         "غلط", "خطا", "تفهم", "تفهمني", "فهمتني", "اقصد", "قصدي", "مقصود", "اخبرتك",
+        "محدثه", "محدثة", "قديمه", "قديمة", "مصداقيه", "مصداقية", "مشكله", "مشكلة",
+        "موقوف", "متوقف", "متاخر", "متأخر", "شكوى", "عطل", "يضعف", "تضعف",
     }
 }
 
@@ -710,6 +717,73 @@ _MARKET_CONSTRAINT_PHRASES = tuple(
         " تحت سعر", " فوق سعر", " مضاربه لحظ", " غير ", " ماعدا ", " بدون ",
     )
 )
+
+
+_PURE_STOCK_QUERY_WORDS = {
+    _normalize_ar_for_cache(w)
+    for w in {
+        # Direct analysis verbs & nouns
+        "حلل", "حللي", "تحليل", "تحليلك", "وتحليلك", "تقرير", "تقييم", "وضع", "حالة", "اداء",
+        "سهم", "لسهم", "السهم", "للسهم", "شركة", "شركه", "لشركة", "لشركه",
+        "بنك", "البنك", "مصرف", "المصرف", "مجموعة", "مجموعه", "المجموعة", "القابضة", "قابضة",
+        # Technical & fundamental scope words
+        "فني", "فنيا", "وفني", "مالي", "ماليا", "ومالي", "وماليا", "اساسي", "اساسيا", "واساسي",
+        "شامل", "كامل", "مختصر", "سريع", "سعر", "مؤشرات", "مستويات", "دعم", "مقاومة", "ومقاومة",
+        "مناطق", "منطقة", "دخول", "خروج", "مناسبة", "مناسبه", "فرصة", "فرصه", "شراء", "نظامه", "نظامها",
+        "اهداف", "القيمة", "قيمة", "العادلة", "عادلة", "مضاعف", "قوائم", "ميزانية", "ديون", "ربحية", "قوة",
+        "تجميع", "سيولة", "مؤسسي", "وايكوف", "اخبار", "خبر", "افصاح", "افصاحات", "اعلان", "اعلانات",
+        "كوبون", "كوبونات", "توزيع", "توزيعات", "ارباح", "شرعي", "شرعية", "الشريعة", "شريعة", "حلال", "متوافق",
+        # Neutral polite/connector filler words
+        "عايز", "عاوز", "اريد", "ابغى", "هات", "اعطني", "وريني", "قولي", "لي", "ممكن",
+        "هل", "ما", "ايه", "كام", "كم", "رايك", "رأيك", "في", "فى", "عن", "من", "مع", "على", "الى", "ل", "و", "هو", "هي",
+        "النهارده", "النهاردة", "اليوم", "حاليا", "الان", "الآن", "دلوقتي", "الجديد", "اخر", "احدث",
+        "مصر", "مصري", "المصري", "المصرية", "السعودي", "سعودي", "السعودية", "تداول", "تاسي", "قطر", "قطري", "الامارات", "اماراتي", "دبي", "ابوظبي",
+        "egx", "tasi", "tadawul", "qse", "dfm", "adx", "ca", "sr", "sa", "qa", "qe", "du", "ad", "kw",
+        "stock", "analyze", "analysis", "price", "of", "news", "financial", "technical", "dividend", "dividends", "fair", "value",
+    }
+}
+
+
+_PURE_COMPARE_WORDS = {
+    _normalize_ar_for_cache(w)
+    for w in {
+        "قارن", "مقارن", "مقارنه", "مقارنة", "بين", "مقابل", "ايهما", "أيهما",
+        "ام", "أم", "او", "أو", "ولا", "افضل", "أفضل", "compare", "comparison", "vs", "versus",
+    }
+}
+
+
+def _is_pure_single_stock_query(
+    remaining_norm: str,
+    found_sym: Any,
+    *,
+    allow_comparison: bool = False,
+) -> bool:
+    """True Strict Allowlist (zero regex): every word outside the matched stock name(s) must be a pure analysis/comparison word."""
+    syms = [found_sym] if isinstance(found_sym, str) else list(found_sym or [])
+    syms_low = [s.lower() for s in syms if s]
+    rem = remaining_norm
+    skip_tokens = set()
+    for sym_low in syms_low:
+        rem = rem.replace(f" {sym_low} ", " ")
+        skip_tokens.update({sym_low, f"و{sym_low}", f"ل{sym_low}", f"ب{sym_low}"})
+    extra_tokens = [t for t in rem.split() if t and t not in skip_tokens]
+    max_words = 10
+    if len(extra_tokens) > max_words:
+        return False
+
+    allowed = (_PURE_STOCK_QUERY_WORDS | _PURE_COMPARE_WORDS) if allow_comparison else _PURE_STOCK_QUERY_WORDS
+
+    def _in_allowlist(tok: str) -> bool:
+        if tok in allowed:
+            return True
+        for pref in ("وال", "بال", "كال", "لل", "ال", "و", "ب", "ل"):
+            if tok.startswith(pref) and len(tok) > len(pref) + 1:
+                if tok[len(pref):] in allowed:
+                    return True
+        return False
+
+    return all(_in_allowlist(t) for t in extra_tokens)
 
 
 def build_analysis_cache_key(
@@ -811,23 +885,24 @@ def build_analysis_cache_key(
                     found_syms.append(num_code)
 
     ar_scan_norm = norm
-    for ar_name, sym in sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True):
-        ar_low = _normalize_ar_for_cache(ar_name)
-        matched = False
-        for pat in (f" {ar_low} ", f" و{ar_low} ", f" ب{ar_low} "):
-            if pat in ar_scan_norm:
-                matched = True
-                # Preserve conjunction prefix when removing matched alias so adjacent aliases remain detectable
-                replacement = " و" if pat.startswith(" و") else (" ب" if pat.startswith(" ب") else " ")
-                ar_scan_norm = ar_scan_norm.replace(pat, replacement, 1)
-                break
-        if matched and sym not in found_syms:
-            found_syms.append(sym)
-            if len(found_syms) >= 3:
-                break
+    if exch == "EGX":
+        for ar_name, sym in sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True):
+            ar_low = _normalize_ar_for_cache(ar_name)
+            matched = False
+            for pat in (f" {ar_low} ", f" و{ar_low} ", f" ب{ar_low} "):
+                if pat in ar_scan_norm:
+                    matched = True
+                    # Preserve conjunction prefix when removing matched alias so adjacent aliases remain detectable
+                    replacement = " و" if pat.startswith(" و") else (" ب" if pat.startswith(" ب") else " ")
+                    ar_scan_norm = ar_scan_norm.replace(pat, replacement, 1)
+                    break
+            if matched and sym not in found_syms:
+                found_syms.append(sym)
+                if len(found_syms) >= 3:
+                    break
 
     if is_comparison_query:
-        if len(found_syms) == 2:
+        if len(found_syms) == 2 and _is_pure_single_stock_query(ar_scan_norm, found_syms, allow_comparison=True):
             s1, s2 = sorted(found_syms)
             return f"vip_compare_{s1}_{s2}"
         return None
@@ -852,6 +927,11 @@ def build_analysis_cache_key(
         return "vip_open_recommendations"
 
     if found_sym:
+        # True Strict Allowlist (zero regex, zero blacklist chasing): every word outside the matched
+        # stock symbol/name MUST be a pure canonical analysis word. Any complaint, custom condition,
+        # objection, or conversational word automatically bypasses blind cache!
+        if not _is_pure_single_stock_query(ar_scan_norm, found_sym):
+            return None
         # Specialized sub-intents take precedence so e.g. "تحليل مالي لسهم COMI" hits financials, not general analysis
         if re.search(r"اخبار|خبر|افصاح|اعلان", norm):
             return f"vip_stock_{found_sym}_news"
