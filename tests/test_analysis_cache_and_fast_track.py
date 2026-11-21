@@ -86,7 +86,8 @@ async def test_single_stock_fast_track_single_llm_call_and_cache_hit(monkeypatch
 
     async def fake_dispatch(tool_name, arguments, **_kwargs):
         dispatched_calls.append((tool_name, arguments))
-        assert arguments == {"symbols": ["PHDC"]}
+        sym_list = arguments.get("symbols") or ([arguments["symbol"]] if arguments.get("symbol") else [])
+        assert sym_list == ["PHDC"]
         if tool_name == "get_stock":
             return {"status": "success", "stocks": [{"symbol": "PHDC", "name_ar": "بالم هيلز", "close": 12.39, "change_pct": -0.08}]}
         if tool_name == "get_stock_levels":
@@ -102,7 +103,7 @@ async def test_single_stock_fast_track_single_llm_call_and_cache_hit(monkeypatch
     ), patch("api.agentic_chat.pipeline._init_supabase"), patch.object(
         pipeline, "supabase", SimpleNamespace()
     ):
-        # 1) Cold call: Fast-track runs 3 tools concurrently + ONLY 1 DeepSeek LLM call
+        # 1) Cold call: Fast-track runs single-stock tools concurrently + ONLY 1 DeepSeek LLM call
         done_cold = None
         async for chunk in pipeline.run_agentic_chat_stream(
             message="حلل سهم PHDC",
@@ -121,8 +122,14 @@ async def test_single_stock_fast_track_single_llm_call_and_cache_hit(monkeypatch
                     done_cold = ev
 
         assert len(post_calls) == 1
-        assert [c[0] for c in dispatched_calls] == ["get_stock", "get_stock_levels", "get_news"]
-        assert all(c[1] == {"symbols": ["PHDC"]} for c in dispatched_calls)
+        assert [c[0] for c in dispatched_calls] == [
+            "get_stock",
+            "get_fair_value",
+            "get_news",
+            "get_disclosures",
+            "get_price_traps",
+        ]
+        assert all((c[1].get("symbols") or [c[1].get("symbol")]) == ["PHDC"] for c in dispatched_calls)
         assert done_cold is not None
         assert done_cold["cached"] is False
         assert done_cold["cache_key"] == "vip_stock_PHDC"
@@ -202,7 +209,7 @@ def test_resolve_tool_calls_to_cache_key_strict_rejections():
             {"function": {"name": "get_stock", "arguments": '{"symbol": "COMI"}'}},
             {"function": {"name": "get_fair_value", "arguments": '{"symbol": "COMI"}'}},
         ]
-    ) is None
+    ) == "vip_stock_COMI"
     assert resolve_tool_calls_to_cache_key(
         [{"function": {"name": "get_stock", "arguments": '{"symbols": ["COMI", "PHDC"]}'}}]
     ) is None

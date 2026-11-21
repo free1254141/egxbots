@@ -118,3 +118,75 @@ def test_blended_fair_value_tactical_levels_and_math_consistency():
     # King AI unified 0-100 scale
     assert _normalize_king_ai_score(0.494) == 49.4
     assert _normalize_king_ai_score(84.0) == 84.0
+
+
+def test_missing_stock_detector_prevents_poisoned_error_cache():
+    from api.agentic_chat.pipeline import _tool_result_has_missing_stock
+
+    assert _tool_result_has_missing_stock({"stocks": [{"symbol": "IENG", "close": None}]}) is True
+    assert _tool_result_has_missing_stock({"suggested_matches": {"IENG": [{"symbol": "INEG"}]}}) is True
+    assert _tool_result_has_missing_stock({"stocks": [{"symbol": "COMI", "close": 127.5}]}) is False
+
+
+def test_catalog_tie_break_prefers_shorter_parent_symbol_for_emaar():
+    from api.agentic_chat.tools_execution import _search_catalog_candidates
+
+    fake_dfm = [
+        {"symbol": "EMAARDEV", "name": "Emaar Development", "name_ar": "إعمار للتطوير"},
+        {"symbol": "EMAAR", "name": "Emaar Properties", "name_ar": "إعمار العقارية"},
+    ]
+    with patch("api.agentic_chat.tools_execution._get_market_stocks_catalog", return_value=fake_dfm):
+        hits = _search_catalog_candidates("اعمار", exchange="DFM", limit=2)
+        assert hits and hits[0]["symbol"] == "EMAAR"
+
+
+def test_prioritize_active_market_hints_remaps_to_dfm_without_breaking_egx():
+    from api.agentic_chat.pipeline import _prioritize_active_market_hints
+
+    egx_sa_hints = [
+        {"name": "إعمار", "symbols": ["EMFD"], "market": "EGX"},
+        {"name": "إعمار", "symbols": ["4220"], "market": "TASI"},
+    ]
+    with patch(
+        "api.agentic_chat.tools_execution._search_catalog_candidates",
+        return_value=[{"symbol": "EMAAR", "name_ar": "إعمار العقارية"}],
+    ):
+        remapped = _prioritize_active_market_hints(egx_sa_hints, "DFM", "حلل اعمار")
+        assert remapped == [{"name": "إعمار", "symbols": ["EMAAR"], "market": "DFM"}]
+
+        unchanged = _prioritize_active_market_hints(egx_sa_hints, "EGX", "حلل اعمار")
+        assert unchanged == egx_sa_hints
+
+
+def test_sharia_cleanser_honest_market_value_zakat_and_no_invented_purification():
+    from api.agentic_chat.tools_execution import _sync_get_sharia_cleanser
+
+    with patch(
+        "api.agentic_chat.tools_execution._resolve_symbol_and_market",
+        return_value=("COMI", "EGX"),
+    ), patch(
+        "api.agentic_chat.tools_execution._sync_get_stock",
+        return_value={"stocks": [{"symbol": "COMI", "close": 127.5}]},
+    ), patch(
+        "api.agentic_chat.tools_execution._lookup_upcoming_dividend",
+        return_value=None,
+    ), patch(
+        "api.agentic_chat.tools_execution.is_sharia_compliant",
+        return_value=False,
+    ):
+        res = _sync_get_sharia_cleanser("COMI", 1000)
+        assert res["market_value"] == 127500.0
+        assert res["zakat_amount"] == 3187.5
+        assert res["purification_amount"] is None
+        assert res["purification_rate_pct"] is None
+        assert res.get("purification_note_ar")
+
+
+def test_graham_gap_and_support_risk_reward_eliminate_mental_math():
+    from api.agentic_chat.tools_execution import _build_graham_gap_ar, _compute_stock_context_metrics
+
+    g_text = _build_graham_gap_ar(18.11, 22.32)
+    assert g_text is not None and "+23.2%" in g_text and "18.9%" in g_text
+
+    ctx = _compute_stock_context_metrics(11.62, 12.53, 12.28, 11.69, 10.54, 12.80, 10.12)
+    assert ctx["risk_reward_from_support"] == 5.38

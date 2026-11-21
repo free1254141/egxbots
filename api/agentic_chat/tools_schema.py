@@ -278,15 +278,15 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                     },
                     "shares_count": {
                         "type": "number",
-                        "description": "عدد الأسهم المملوكة للمستخدم لحساب مبلغ التطهير أو الزكاة",
+                        "description": "عدد الأسهم (لو لم يذكره المستخدم استخدم 1000 كمثال واذكر ذلك)",
                     },
                     "coupon_per_share": {
                         "type": "number",
-                        "description": "قيمة الكوبون أو التوزيع النقدي للسهم الواحد (ج.م للمصري أو ر.س للسعودي)",
+                        "description": "اتركه فارغاً إن لم يذكره المستخدم (سيُستخدم الكوبون القادم المسجل إن وجد)",
                     },
                     "purification_rate_pct": {
                         "type": "number",
-                        "description": "نسبة التطهير المئوية % (اختياري)",
+                        "description": "نسبة التطهير % — اتركها فارغة إن لم يذكرها المستخدم؛ لا تفترض قيمة",
                     },
                     "market": dict(_MARKET_PARAM_SCHEMA),
                 },

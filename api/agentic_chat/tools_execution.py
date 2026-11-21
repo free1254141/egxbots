@@ -535,6 +535,10 @@ def _lookup_symbol_in_db(raw_text: str, market: str = "EGX") -> Optional[str]:
                     if len(w_rows) == 1:
                         found = str(w_rows[0]["symbol"]).upper().strip()
                         break
+        if found is None and norm_mkt != "EGX" and any(ord(ch) > 127 for ch in clean_q):
+            cands = _search_catalog_candidates(clean_q, exchange=norm_mkt, limit=1, min_score=3.5)
+            if cands:
+                found = str(cands[0]["symbol"]).upper().strip()
     except Exception:
         pass
     if len(_DB_SYMBOL_CACHE) < 300:
@@ -1491,6 +1495,17 @@ def _build_fair_value_gap(close: float, fair_value: float) -> Dict[str, Any]:
     }
 
 
+def _build_graham_gap_ar(close: Optional[float], graham: Optional[float]) -> Optional[str]:
+    """Return exact, unambiguous Graham defensive-floor comparison text without LLM mental math."""
+    if not close or not graham or close <= 0 or graham <= 0:
+        return None
+    up = (graham - close) / close * 100.0
+    disc = (graham - close) / graham * 100.0
+    if up >= 0:
+        return f"أرضية جراهام {graham:g} أعلى من السعر الحالي بنسبة +{up:.1f}% (أي السعر أقل منها بخصم {disc:.1f}%)"
+    return f"السعر الحالي أعلى من أرضية جراهام {graham:g} بنسبة +{(close - graham) / graham * 100.0:.1f}% (أي جراهام أقل من السعر بنحو {abs(up):.1f}%)"
+
+
 def _compute_stock_context_metrics(
     close: Optional[float],
     ema_50: Optional[float],
@@ -1521,6 +1536,11 @@ def _compute_stock_context_metrics(
         reward = resistance_1 - close
         if risk > 0:
             metrics["risk_reward_from_close"] = round(reward / risk, 2)
+    if support_1 and resistance_1 and stop_loss and stop_loss < support_1 < close < resistance_1:
+        s_risk = support_1 - stop_loss
+        s_reward = resistance_1 - support_1
+        if s_risk > 0:
+            metrics["risk_reward_from_support"] = round(s_reward / s_risk, 2)
 
     # When structural support_1 is far below close (> 12%), compute practical near-term tactical support & stop
     if dist_s1_pct is not None and dist_s1_pct < -12.0:
@@ -2152,7 +2172,12 @@ def _get_market_stocks_catalog(exchange: str = "EGX") -> List[Dict[str, str]]:
         return []
 
 
-def _search_catalog_candidates(query_text: str, exchange: str = "EGX", limit: int = 4) -> List[Dict[str, str]]:
+def _search_catalog_candidates(
+    query_text: str,
+    exchange: str = "EGX",
+    limit: int = 4,
+    min_score: float = 2.0,
+) -> List[Dict[str, str]]:
     """Zero-regex token-overlap + SequenceMatcher lookup against the real DB stocks catalog."""
     from difflib import SequenceMatcher
 
@@ -2200,7 +2225,7 @@ def _search_catalog_candidates(query_text: str, exchange: str = "EGX", limit: in
             if sim_name >= 0.65:
                 score += sim_name * 2.5
 
-        if score >= 2.0:
+        if score >= min_score:
             scored.append((score, {
                 "symbol": sym,
                 "name_ar": item["name_ar"] or _alias_name_for_symbol(sym, market=exchange) or item["name"] or sym,
@@ -2208,7 +2233,7 @@ def _search_catalog_candidates(query_text: str, exchange: str = "EGX", limit: in
                 "exchange": exchange,
             }))
 
-    scored.sort(key=lambda x: x[0], reverse=True)
+    scored.sort(key=lambda x: (x[0], -len(x[1]["symbol"])), reverse=True)
     return [c for _, c in scored[:limit]]
 
 
@@ -4527,6 +4552,7 @@ def _sync_get_fair_value(
                 "model": fv_model,
                 "is_sharia_compliant": None,
                 **fv_extra,
+                "graham_gap_ar": _build_graham_gap_ar(close, fv_extra.get("graham_value")),
             })
 
         if mode == "screen_undervalued":
@@ -4619,6 +4645,7 @@ def _sync_get_fair_value(
             "model": fv_model,
             "is_sharia_compliant": is_sharia_compliant(sym),
             **fv_extra,
+            "graham_gap_ar": _build_graham_gap_ar(close, fv_extra.get("graham_value")),
         })
 
     if mode == "screen_undervalued":
@@ -4773,13 +4800,69 @@ def _sync_get_sharia_cleanser(
     purification_rate_pct: Optional[float] = None,
     market: Optional[str] = None,
 ) -> Dict[str, Any]:
-    clean_sym, sym_mkt = _resolve_symbol_and_market(symbol)
+    clean_sym, sym_mkt = _resolve_symbol_and_market(symbol, explicit_market=market)
     eff_mkt = _normalize_market_code(market) if market else sym_mkt
-    rate = purification_rate_pct or 1.5
-    coupon = coupon_per_share or 1.0
-    total_coupon = shares_count * coupon
-    purification_amount = round(total_coupon * (rate / 100.0), 2)
-    zakat_amount = round(total_coupon * 0.025, 2)
+    try:
+        shares = float(shares_count) if shares_count is not None else 1000.0
+    except Exception:
+        shares = 1000.0
+    if shares <= 0:
+        shares = 1000.0
+
+    close_px: Optional[float] = None
+    try:
+        stock_res = _sync_get_stock([clean_sym], market=eff_mkt)
+        row = (stock_res.get("stocks") or [{}])[0]
+        if isinstance(row, dict):
+            close_px = _safe_price(row.get("close"))
+    except Exception:
+        close_px = None
+
+    market_value = round(shares * close_px, 2) if (close_px and close_px > 0) else None
+    zakat_amount = round(market_value * 0.025, 2) if market_value is not None else None
+
+    coupon: Optional[float] = None
+    coupon_source: Optional[str] = None
+    if coupon_per_share is not None:
+        try:
+            c_val = float(coupon_per_share)
+            if c_val > 0:
+                coupon = c_val
+                coupon_source = "user"
+        except Exception:
+            pass
+    if coupon is None:
+        try:
+            up_div = _lookup_upcoming_dividend(clean_sym, eff_mkt)
+            if isinstance(up_div, dict) and up_div.get("amount"):
+                amt = _safe_float(up_div.get("amount"), 4)
+                if amt and amt > 0:
+                    coupon = amt
+                    coupon_source = "upcoming_dividend"
+        except Exception:
+            pass
+    total_coupon = round(shares * coupon, 2) if coupon is not None else None
+
+    rate: Optional[float] = None
+    if purification_rate_pct is not None:
+        try:
+            r_val = float(purification_rate_pct)
+            if r_val >= 0:
+                rate = r_val
+        except Exception:
+            pass
+    purification_amount = (
+        round(total_coupon * (rate / 100.0), 2)
+        if (total_coupon is not None and rate is not None)
+        else None
+    )
+
+    zakat_basis_ar = "الزكاة الاسترشادية = 2.5% من القيمة السوقية للأسهم (عدد الأسهم × سعر الإغلاق)"
+    purif_note_ar = (
+        "نسبة التطهير المعتمدة لهذا السهم غير متوفرة في قاعدة البيانات — لم نفترض أي نسبة؛ أدخل النسبة من القوائم المالية أو راجع [حاسبة التوافق الشرعي](/sharia)"
+        if rate is None
+        else None
+    )
 
     if eff_mkt != "EGX":
         cfg = _reg_get_market_config(eff_mkt)
@@ -4810,7 +4893,7 @@ def _sync_get_sharia_cleanser(
         else:
             verdict_ar = (
                 f"تصنيف الشريعة الرسمي للسهم في {cfg.name_ar} غير متوفر حالياً في القاعدة؛ "
-                f"تم حساب التطهير والزكاة الاسترشادية بعملة السوق ({cfg.currency_ar})"
+                f"الزكاة الاسترشادية محسوبة بعملة السوق ({cfg.currency_ar}) على القيمة السوقية"
             )
             idx_lbl = f"قيد المراجعة الشرعية ({cfg.ui_code})"
 
@@ -4822,21 +4905,29 @@ def _sync_get_sharia_cleanser(
             "symbol": clean_sym,
             "is_sharia_compliant": sharia_mkt,
             "sharia_index": idx_lbl,
-            "shares_count": shares_count,
+            "shares_count": shares,
+            "close_price": close_px,
+            "market_value": market_value,
             "coupon_per_share": coupon,
+            "coupon_source": coupon_source,
             "total_dividends": total_coupon,
             "purification_rate_pct": rate,
             "purification_amount": purification_amount,
             "zakat_amount": zakat_amount,
+            "zakat_basis_ar": zakat_basis_ar,
             "verdict_ar": verdict_ar,
         }
+        if purif_note_ar:
+            out_sharia["purification_note_ar"] = purif_note_ar
+        if sharia_mkt is False:
+            out_sharia["sharia_note_ar"] = "السهم غير متوافق شرعياً؛ التطهير لا يجعله متوافقاً"
         if eff_mkt == "TADAWUL":
             out_sharia["purification_amount_sar"] = purification_amount
             out_sharia["zakat_amount_sar"] = zakat_amount
         return out_sharia
 
     sharia = is_sharia_compliant(clean_sym)
-    return {
+    out_egx: Dict[str, Any] = {
         "status": "success",
         "market": "EGX",
         "exchange": "EGX",
@@ -4844,16 +4935,25 @@ def _sync_get_sharia_cleanser(
         "symbol": clean_sym,
         "is_sharia_compliant": sharia,
         "sharia_index": "EGX33 Shariah" if sharia else "غير مدرج بمؤشر الشريعة",
-        "shares_count": shares_count,
+        "shares_count": shares,
+        "close_price": close_px,
+        "market_value": market_value,
         "coupon_per_share": coupon,
+        "coupon_source": coupon_source,
         "total_dividends": total_coupon,
         "purification_rate_pct": rate,
         "purification_amount": purification_amount,
         "purification_amount_egp": purification_amount,
         "zakat_amount": zakat_amount,
         "zakat_amount_egp": zakat_amount,
+        "zakat_basis_ar": zakat_basis_ar,
         "verdict_ar": "السهم متوافق مع معايير الشريعة الإسلامية ومؤشر EGX33" if sharia else "السهم غير مصنف ضمن أسهم الشريعة المعتمدة EGX33",
     }
+    if purif_note_ar:
+        out_egx["purification_note_ar"] = purif_note_ar
+    if sharia is False:
+        out_egx["sharia_note_ar"] = "السهم غير متوافق شرعياً؛ التطهير لا يجعله متوافقاً"
+    return out_egx
 
 
 async def execute_get_sharia_cleanser(

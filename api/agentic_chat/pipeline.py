@@ -443,6 +443,49 @@ def _norm_ar_hint(text: str) -> str:
     return t.lower()
 
 
+def _tool_result_has_missing_stock(res: Any) -> bool:
+    """Return True if a get_stock tool result returned any missing quote or catalog suggestions."""
+    if not isinstance(res, dict):
+        return False
+    stocks = res.get("stocks")
+    if isinstance(stocks, list) and any(isinstance(s, dict) and s.get("close") is None for s in stocks):
+        return True
+    return bool(res.get("suggested_matches"))
+
+
+def _prioritize_active_market_hints(
+    hints: List[Dict[str, Any]],
+    active_market: Optional[str],
+    message: str,
+) -> List[Dict[str, Any]]:
+    """Remap cross-market Arabic company hints (e.g. اعمار in DFM) to the user's active exchange when not overridden by explicit text."""
+    act = normalize_exchange_code(active_market)
+    if not hints or act in ("EGX", "TADAWUL"):
+        return hints
+    txt_mkt = detect_market_from_text(str(message or ""))
+    if txt_mkt and normalize_exchange_code(txt_mkt) != act:
+        return hints
+    try:
+        from api.agentic_chat.tools_execution import _search_catalog_candidates
+    except Exception:
+        return hints
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for h in hints:
+        if not isinstance(h, dict) or not h.get("symbols"):
+            continue
+        if normalize_exchange_code(h.get("market")) != act:
+            cands = _search_catalog_candidates(str(h.get("name") or ""), exchange=act, limit=1, min_score=3.5)
+            if cands:
+                h = {"name": h.get("name"), "symbols": [cands[0]["symbol"]], "market": act}
+        sym = str(h["symbols"][0]).upper()
+        if sym in seen:
+            continue
+        seen.add(sym)
+        out.append(h)
+    return out
+
+
 def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
     """
     Extract EGX and Saudi (TASI) stock symbol hints from Arabic names, aliases, Latin tickers,
@@ -992,6 +1035,7 @@ async def _run_agentic_chat_stream_impl(
 
     # Inject symbol hints if detected in user message, context, or vision
     hints = known_symbol_hints(message)
+    hints = _prioritize_active_market_hints(hints, ui_exch, message)
     if vision_data:
         vision_symbols = [
             s["symbol"].upper()
@@ -1044,6 +1088,7 @@ async def _run_agentic_chat_stream_impl(
     recommendations_data: List[Any] = []
     visuals_data: Dict[str, Any] = {}
     tools_executed_count = 0
+    has_missing_stock_data = False
     candidate_cache_key: Optional[str] = None
     has_followup_flag = False
     model_confirmed_standalone = False
@@ -1155,6 +1200,8 @@ async def _run_agentic_chat_stream_impl(
             if isinstance(r, Exception):
                 fast_ctx_payload[t_name] = {"status": "error", "message": str(r)}
             else:
+                if t_name == "get_stock" and _tool_result_has_missing_stock(r):
+                    has_missing_stock_data = True
                 _collect_structured_outputs(r, tables_data, recommendations_data, visuals_data)
                 fast_ctx_payload[t_name] = _strip_ui_only_fields_for_llm(r)
 
@@ -1499,6 +1546,10 @@ async def _run_agentic_chat_stream_impl(
                     ]
                 t_tools = time.time() - t_tools_start
                 logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
+
+                for (_, fn_name, _), r in zip(prepared_calls, tool_results):
+                    if fn_name == "get_stock" and _tool_result_has_missing_stock(r):
+                        has_missing_stock_data = True
 
                 _append_tool_results(
                     tool_calls,
@@ -1859,8 +1910,12 @@ async def _run_agentic_chat_stream_impl(
         (not has_conversation_history and not has_followup_flag)
         or (has_conversation_history and model_confirmed_standalone and tools_executed_count > 0)
     )
+    if has_missing_stock_data:
+        candidate_cache_key = None
+
     if (
         not is_cross_market
+        and not has_missing_stock_data
         and can_save_for_history
         and not has_user_rules
         and not visuals_data.get("portfolio")
