@@ -37,6 +37,22 @@ _ORDERED_TOOL_PATTERNS: List[Tuple[str, re.Pattern[str], str]] = [
     for name, label in sorted(_TOOL_NAME_LABELS.items(), key=lambda kv: len(kv[0]), reverse=True)
 ]
 
+_LEAKED_FIELD_EXPR_RE = re.compile(
+    r"\s*\(\s*`?(?:is_sharia_compliant|data_is_stale|support_1_is_distant|has_active_recommendation)`?\s*[:=]\s*(?:true|false|null)\s*\)",
+    re.IGNORECASE,
+)
+_LEAKED_FIELD_LABELS: Dict[str, str] = {
+    "has_active_recommendation": "التوصية المفتوحة",
+    "support_1_is_distant": "بعد الدعم الهيكلي",
+    "is_sharia_compliant": "التوافق الشرعي",
+    "king_ai_score": "تقييم الذكاء الاصطناعي",
+    "data_is_stale": "قدم البيانات",
+}
+_ORDERED_FIELD_PATTERNS: List[Tuple[str, re.Pattern[str], str]] = [
+    (name, re.compile(rf"`?\b{re.escape(name)}\b`?"), label)
+    for name, label in sorted(_LEAKED_FIELD_LABELS.items(), key=lambda kv: len(kv[0]), reverse=True)
+]
+
 
 def _collect_ground_truth(
     tool_payloads: List[Dict[str, Any]],
@@ -142,11 +158,20 @@ def verify_and_guard_reply(
         warnings.append("missing_stock_data")
         block_cache = True
 
-    # Check D: Internal Tool-Name Leak Sanitizer
+    # Check D: Internal Tool-Name & Schema Field Leak Sanitizer
     for name, pat, label in _ORDERED_TOOL_PATTERNS:
         if pat.search(guarded):
             guarded = pat.sub(label, guarded)
             warnings.append(f"tool_name_leaked:{name}")
+
+    if _LEAKED_FIELD_EXPR_RE.search(guarded):
+        guarded = _LEAKED_FIELD_EXPR_RE.sub("", guarded)
+        warnings.append("internal_field_leaked")
+
+    for fname, fpat, flabel in _ORDERED_FIELD_PATTERNS:
+        if fpat.search(guarded):
+            guarded = fpat.sub(flabel, guarded)
+            warnings.append(f"internal_field_leaked:{fname}")
 
     return {
         "reply": guarded,

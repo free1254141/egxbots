@@ -1933,6 +1933,7 @@ def _extract_rich_fundamentals(
     *,
     close_price: Optional[float] = None,
     name: Optional[str] = None,
+    trade_currency: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Extract normalized financial & fundamental ratios (camelCase + snake_case) plus deterministic diagnosis."""
     if not isinstance(fd, dict):
@@ -1973,6 +1974,13 @@ def _extract_rich_fundamentals(
         "fund_score": _safe_float(fund_score),
     }
     clean = {k: v for k, v in raw.items() if v is not None}
+    raw_fin_curr = str(pick("financialCurrency", "currency") or "").strip().upper()
+    if trade_currency == "$" and raw_fin_curr == "EGP":
+        clean["financials_currency"] = "ج.م"
+        clean["financials_currency_note_ar"] = (
+            "تنبيه عملة القوائم: سعر تداول السهم بالدولار ($) لكن أرقام القوائم المالية والتدفق النقدي "
+            "والكوبون المسجل بالجنيه المصري (ج.م) — اكتبها بـ ج.م ولا تضع علامة $ بجانبها."
+        )
     diag = _build_fundamental_diagnosis(clean, close_price=close_price, name=name or pick("name", "name_ar"))
     if diag:
         clean["fundamental_diagnosis"] = diag
@@ -2581,6 +2589,7 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     fund_score=fund_score_map.get(sym),
                     close_price=close_price,
                     name=stock_name_en,
+                    trade_currency=_reg_currency_for_symbol(sym, "EGX"),
                 )
 
             change_pct = _safe_float(latest_tech.get("change_pct"))

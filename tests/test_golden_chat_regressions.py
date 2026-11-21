@@ -275,3 +275,31 @@ def test_output_guard_enforces_stale_warning_blocks_currency_mismatch_and_saniti
     g4 = verify_and_guard_reply("سهم COMI عند 127.50 ج.م.", [{"stocks": [{"symbol": "COMI", "close": 127.5, "currency": "ج.م"}]}])
     assert g4["warnings"] == []
     assert g4["block_cache"] is False
+
+
+def test_usd_egx_stock_flags_egp_financials_currency():
+    from api.agentic_chat.tools_execution import _extract_rich_fundamentals
+
+    res_usd = _extract_rich_fundamentals(
+        {"currency": "EGP", "dividendPerShare": 0.7619, "dividendYield": 3.15},
+        close_price=0.50,
+        trade_currency="$",
+    )
+    assert res_usd["financials_currency"] == "ج.م"
+    assert res_usd.get("financials_currency_note_ar")
+
+    res_egp = _extract_rich_fundamentals(
+        {"currency": "EGP", "dividendPerShare": 2.30, "dividendYield": 6.57},
+        close_price=35.0,
+        trade_currency="ج.م",
+    )
+    assert "financials_currency_note_ar" not in res_egp
+
+
+def test_output_guard_strips_leaked_boolean_debug_fields():
+    from api.agentic_chat.output_guard import verify_and_guard_reply
+
+    g = verify_and_guard_reply("⚠️ الاتنين غير متوافقين مع الشريعة (is_sharia_compliant = false).", [])
+    assert "is_sharia_compliant" not in g["reply"]
+    assert g["reply"] == "⚠️ الاتنين غير متوافقين مع الشريعة."
+    assert g["warnings"]
