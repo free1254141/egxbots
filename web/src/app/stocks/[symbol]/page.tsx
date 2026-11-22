@@ -271,6 +271,7 @@ export default async function StockDetailPage({ params }: PageProps) {
     : { snapshot: await getPublicStockSnapshot(symbol, marketMode, explicitExchange), related: null };
   const snapshot = bundle.snapshot;
   const { fundamentals: fundRow, latestPrice, latestTech, historicalPrices, latestScan } = snapshot;
+  const recentDisclosures = Array.isArray((snapshot as any).recentDisclosures) ? (snapshot as any).recentDisclosures : [];
   if (!fundRow && !latestPrice) notFound();
   const snapshotExchange = String(
     (fundRow as any)?.data?.exchange || (fundRow as any)?.exchange || (latestPrice as any)?.exchange || ""
@@ -321,6 +322,17 @@ export default async function StockDetailPage({ params }: PageProps) {
   const priceDate = (latestPrice as any)?.date || (latestTech as any)?.date;
 
   const lastPriceVal = Number((latestPrice as any)?.close ?? 0);
+  const lpHigh = Number((latestPrice as any)?.high ?? (latestTech as any)?.close ?? lastPriceVal);
+  const lpLow = Number((latestPrice as any)?.low ?? (latestTech as any)?.close ?? lastPriceVal);
+  const hasPivot = Number.isFinite(lastPriceVal) && lastPriceVal > 0 && Number.isFinite(lpHigh) && lpHigh > 0 && Number.isFinite(lpLow) && lpLow > 0;
+  const pivotP = hasPivot ? (lpHigh + lpLow + lastPriceVal) / 3 : 0;
+  const pivotR1 = hasPivot ? 2 * pivotP - lpLow : 0;
+  const pivotS1 = hasPivot ? 2 * pivotP - lpHigh : 0;
+  const pivotR2 = hasPivot ? pivotP + (lpHigh - lpLow) : 0;
+  const pivotS2 = hasPivot ? pivotP - (lpHigh - lpLow) : 0;
+  const rsiVal = Number((latestTech as any)?.rsi_14);
+  const rsiText = Number.isFinite(rsiVal) && rsiVal > 0 ? `، كما يسجل مؤشر القوة النسبية RSI(14) قراءة ${rsiVal.toFixed(1)}` : "";
+  const latestDisc = recentDisclosures[0];
 
   // Complete Schema.org Breadcrumbs + WebPage + FinancialProduct + FAQPage for Google & AI Engines (GEO)
   const structuredDataGraph = {
@@ -381,7 +393,9 @@ export default async function StockDetailPage({ params }: PageProps) {
             "name": `ما هي مستويات الدعم والمقاومة لسهم ${nameAr} (${symbol})؟`,
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": `تعتمد منصة EGX BOTS على خوارزميات التحليل الفني الكمي لحساب مستويات الدعم والمقاومة المحورية (Pivot Points S1, S2, R1, R2) ومؤشرات الزخم RSI و MACD لسهم ${nameAr} (${symbol}) بشكل يومي بعد إغلاق الجلسة.`
+              "text": hasPivot
+                ? `تقع نقطة الارتكاز المحورية (P) لسهم ${nameAr} (${symbol}) عند ${pivotP.toFixed(2)} ${currencyNameAr}، وتقع مستويات الدعم عند ${pivotS1.toFixed(2)} (S1) و ${pivotS2.toFixed(2)} (S2)، بينما تقع مستويات المقاومة عند ${pivotR1.toFixed(2)} (R1) و ${pivotR2.toFixed(2)} (R2)${rsiText}.`
+                : `تعتمد منصة EGX BOTS على خوارزميات التحليل الفني الكمي لحساب مستويات الدعم والمقاومة المحورية (Pivot Points S1, S2, R1, R2) ومؤشرات الزخم RSI و MACD لسهم ${nameAr} (${symbol}) بشكل يومي بعد إغلاق الجلسة.`
             }
           },
           {
@@ -391,7 +405,15 @@ export default async function StockDetailPage({ params }: PageProps) {
               "@type": "Answer",
               "text": `يتم حساب التقييم الكمي AI Score ومؤشر السعر العادل لسهم ${nameAr} (${symbol}) عبر دمج مضاعفات الربحية والقيمة الدفترية مع مؤشرات السيولة التاريخية دون أي تحيز بشري، لأغراض البحث والدراسة الإحصائية.`
             }
-          }
+          },
+          ...(latestDisc ? [{
+            "@type": "Question",
+            "name": `ما هي أحدث أخبار وإفصاحات سهم ${nameAr} (${symbol})؟`,
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": `أحدث إفصاح مسجل لسهم ${nameAr} (${symbol}) بتاريخ ${String(latestDisc.disclosure_date || '').slice(0, 10)}: ${latestDisc.title || ''}${latestDisc.ai_summary ? ` — ${latestDisc.ai_summary}` : ''}`
+            }
+          }] : [])
         ]
       }
     ]
@@ -413,6 +435,7 @@ export default async function StockDetailPage({ params }: PageProps) {
         latestTech={latestTech}
         historicalPrices={historicalPrices}
         latestScan={latestScan}
+        recentDisclosures={recentDisclosures}
         relatedStocks={related.stocks}
         relatedBasis={related.basis}
       />

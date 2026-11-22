@@ -246,17 +246,38 @@ export default function RecommendationCalendar({
         [sentEvents, shariaOnly, isSaudi, market],
     );
 
+    const baseById = useMemo(
+        () => new Map(filteredBaseRecs.map(r => [String(r.id), r])),
+        [filteredBaseRecs],
+    );
+
+    const mergeEventWithBase = (event: any) => {
+        const base = baseById.get(String(event.recommendation_id));
+        return {
+            ...(base || {}),
+            ...event,
+            id: event.recommendation_id,
+            created_at: base?.created_at || event.created_at || event.occurred_at,
+            updated_at: event.occurred_at || base?.updated_at,
+            top_reasons: base?.top_reasons ?? event.top_reasons ?? null,
+            rich_details: base?.rich_details ?? event.rich_details ?? null,
+            adjustments: Array.isArray(event.adjustments) && event.adjustments.length > 0
+                ? event.adjustments
+                : (Array.isArray(base?.adjustments) ? base.adjustments : []),
+            exit_reason: event.exit_reason || base?.exit_reason || null,
+            exit_reason_ar: event.exit_reason_ar || base?.exit_reason_ar || null,
+            exit_reason_en: event.exit_reason_en || base?.exit_reason_en || null,
+            _timelineKey: `event:${event.id}`,
+            _calendarEventAt: event.occurred_at,
+            _eventType: event.event_type,
+        };
+    };
+
     const closureTimeline = useMemo(() => {
         const eventRecommendationIds = new Set(trackedRecommendationIds);
         const fromEvents = filteredSentEvents
             .filter(event => event.event_type === "recommendation_closed" || event.event_type === "recommendation_stale")
-            .map(event => ({
-                ...event,
-                id: event.recommendation_id,
-                _timelineKey: `event:${event.id}`,
-                _calendarEventAt: event.occurred_at,
-                _eventType: event.event_type,
-            }));
+            .map(mergeEventWithBase);
         const legacy = filteredBaseRecs
             .filter(row => ["win", "loss"].includes(String(row.status || "").toLowerCase()))
             .filter(row => !eventRecommendationIds.has(String(row.id)))
@@ -267,7 +288,7 @@ export default function RecommendationCalendar({
                 _eventType: "legacy_closed",
             }));
         return [...fromEvents, ...legacy];
-    }, [filteredBaseRecs, filteredSentEvents, trackedRecommendationIds]);
+    }, [filteredBaseRecs, filteredSentEvents, trackedRecommendationIds, baseById]);
 
     // Shared boundaries for the summary and trade-aligned benchmark comparison.
     const dateRangeBoundaries = useMemo(() => {
@@ -290,14 +311,8 @@ export default function RecommendationCalendar({
     const adjustmentTimeline = useMemo(
         () => filteredSentEvents
             .filter(event => event.event_type === "target_or_stop_adjusted")
-            .map(event => ({
-                ...event,
-                id: event.recommendation_id,
-                _timelineKey: `event:${event.id}`,
-                _calendarEventAt: event.occurred_at,
-                _eventType: event.event_type,
-            })),
-        [filteredSentEvents],
+            .map(mergeEventWithBase),
+        [filteredSentEvents, baseById],
     );
 
     const viewedMonthCreatedCount = useMemo(() => {

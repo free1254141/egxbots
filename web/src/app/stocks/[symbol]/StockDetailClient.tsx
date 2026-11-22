@@ -42,6 +42,16 @@ interface HistoricalPrice {
   volume: number | null;
 }
 
+interface StockDisclosureItem {
+  id?: string;
+  symbol?: string;
+  disclosure_type?: string;
+  disclosure_date?: string;
+  title?: string;
+  ai_summary?: string;
+  sentiment?: string;
+}
+
 interface StockDetailClientProps {
   symbol: string;
   exchange: string;
@@ -51,6 +61,7 @@ interface StockDetailClientProps {
   latestTech: any;
   historicalPrices: HistoricalPrice[];
   latestScan: any;
+  recentDisclosures?: StockDisclosureItem[];
   relatedStocks?: Array<{ symbol: string; name: string }>;
   relatedBasis?: "sector" | "directory";
 }
@@ -183,6 +194,7 @@ export default function StockDetailClient({
   latestTech: initialLatestTech,
   historicalPrices: initialHistoricalPrices,
   latestScan: initialLatestScan,
+  recentDisclosures: initialRecentDisclosures = [],
   relatedStocks: initialRelatedStocks = [],
   relatedBasis: initialRelatedBasis = "directory"
 }: StockDetailClientProps) {
@@ -211,6 +223,7 @@ export default function StockDetailClient({
     latestTech: any;
     historicalPrices: HistoricalPrice[];
     latestScan: any;
+    recentDisclosures?: StockDisclosureItem[];
     relatedStocks?: Array<{ symbol: string; name: string }>;
     relatedBasis?: "sector" | "directory";
   } | null>(null);
@@ -243,6 +256,7 @@ export default function StockDetailClient({
             ? s.historicalPrices
             : initialHistoricalPrices,
           latestScan: s.latestScan ?? initialLatestScan,
+          recentDisclosures: Array.isArray(s.recentDisclosures) ? s.recentDisclosures : initialRecentDisclosures,
           relatedStocks: Array.isArray(data.related?.stocks) ? data.related.stocks : initialRelatedStocks,
           relatedBasis: data.related?.basis === "sector" ? "sector" : initialRelatedBasis,
         });
@@ -256,6 +270,7 @@ export default function StockDetailClient({
   const latestTech = livePageData?.latestTech ?? initialLatestTech;
   const historicalPrices = livePageData?.historicalPrices ?? initialHistoricalPrices;
   const latestScan = livePageData?.latestScan ?? initialLatestScan;
+  const recentDisclosures = livePageData?.recentDisclosures ?? initialRecentDisclosures;
   const relatedStocks = livePageData?.relatedStocks ?? initialRelatedStocks;
   const relatedBasis = livePageData?.relatedBasis ?? initialRelatedBasis;
 
@@ -1297,6 +1312,55 @@ export default function StockDetailClient({
         </div>
       </div>
 
+      {/* Recent Corporate Disclosures & News Section (Unique Per-Stock SEO Content) */}
+      <section dir={language === "ar" ? "rtl" : "ltr"} className="app-panel p-6 bg-[var(--app-surface)] rounded-none border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_#000] dark:shadow-[4px_4px_0px_0px_#fff]">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-xl font-extrabold tracking-tight flex items-center gap-2 text-[var(--app-text)]">
+            <Info className="w-5 h-5 text-amber-500" />
+            {language === "ar"
+              ? `أحدث أخبار وإفصاحات سهم ${nameAr} (${symbol})`
+              : `Latest News & Disclosures for ${nameEn} (${symbol})`}
+          </h2>
+          <div className="flex items-center gap-2 text-xs font-black">
+            <Link href={isSaudiStock ? "/disclosures?market=tasi" : "/disclosures"} className="px-2.5 py-1 border border-black dark:border-white hover:bg-amber-300 hover:text-black transition-colors">
+              {language === "ar" ? "رادار الإفصاحات" : "Disclosures Radar"}
+            </Link>
+            <Link href={isSaudiStock ? "/news?market=tasi" : "/news"} className="px-2.5 py-1 border border-black dark:border-white hover:bg-amber-300 hover:text-black transition-colors">
+              {language === "ar" ? "أخبار السوق" : "Market News"}
+            </Link>
+          </div>
+        </div>
+        {recentDisclosures && recentDisclosures.length > 0 ? (
+          <div className="space-y-3">
+            {recentDisclosures.slice(0, 3).map((d, idx) => (
+              <div key={d.id || `${symbol}-disc-${idx}`} className="p-3.5 border border-black/20 dark:border-white/20 bg-zinc-50 dark:bg-zinc-900/60">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                  <span className="font-bold text-sm text-[var(--app-text)]">
+                    {d.title || (language === "ar" ? `إفصاح رسمي لسهم ${symbol}` : `Official Disclosure for ${symbol}`)}
+                  </span>
+                  {d.disclosure_date && (
+                    <time dateTime={String(d.disclosure_date).slice(0, 10)} className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
+                      {String(d.disclosure_date).slice(0, 10)}
+                    </time>
+                  )}
+                </div>
+                {d.ai_summary && (
+                  <p className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                    {d.ai_summary}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs sm:text-sm text-[var(--app-text-muted)] leading-relaxed">
+            {language === "ar"
+              ? `تتم متابعة أحدث الإفصاحات الرسمية وتعاملات الداخليين وتوزيعات الأرباح والأخبار الجوهرية لسهم ${nameAr} (${symbol}) يومياً عبر رادار الإفصاحات وأخبار السوق.`
+              : `Official corporate disclosures, insider transactions, dividend announcements, and material news for ${nameEn} (${symbol}) are tracked daily on the Disclosures Radar and Market News feed.`}
+          </p>
+        )}
+      </section>
+
       {/* Cash Dividend Schedule & Calculator (All 4 Markets) */}
       <StockDividendCard
         symbol={symbol}
@@ -1305,6 +1369,55 @@ export default function StockDetailClient({
 
       {/* SEO & Quantitative FAQ Summary (Responds to Light/Dark Mode & AR/EN) */}
       <div dir={language === "ar" ? "rtl" : "ltr"} className="app-panel p-6 sm:p-8 bg-white dark:bg-zinc-900 rounded-none border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_#000] dark:shadow-[4px_4px_0px_0px_#fff]">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 pb-6 border-b border-zinc-300 dark:border-zinc-700">
+          <div className="p-4 border border-black/20 dark:border-white/20 bg-zinc-50 dark:bg-zinc-800/60">
+            <h2 className="text-base font-black text-zinc-950 dark:text-white mb-2">
+              {language === "ar"
+                ? `نقاط الدعم والمقاومة لسهم ${nameAr} (${symbol}) اليوم`
+                : `Support & Resistance Levels for ${nameEn} (${symbol})`}
+            </h2>
+            <p className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed">
+              {pivotPoints
+                ? language === "ar"
+                  ? `الارتكاز ${pivotPoints.P.toFixed(2)} ${currencyLabel} · الدعم S1: ${pivotPoints.S1.toFixed(2)} و S2: ${pivotPoints.S2.toFixed(2)} · المقاومة R1: ${pivotPoints.R1.toFixed(2)} و R2: ${pivotPoints.R2.toFixed(2)}.`
+                  : `Pivot ${pivotPoints.P.toFixed(2)} ${currency} · Support S1: ${pivotPoints.S1.toFixed(2)}, S2: ${pivotPoints.S2.toFixed(2)} · Resistance R1: ${pivotPoints.R1.toFixed(2)}, R2: ${pivotPoints.R2.toFixed(2)}.`
+                : language === "ar"
+                  ? `تُحدث مستويات الدعم والمقاومة لسهم ${nameAr} (${symbol}) بعد كل جلسة تداول.`
+                  : `Support and resistance levels for ${symbol} update after every trading session.`}
+            </p>
+          </div>
+          <div className="p-4 border border-black/20 dark:border-white/20 bg-zinc-50 dark:bg-zinc-800/60">
+            <h2 className="text-base font-black text-zinc-950 dark:text-white mb-2">
+              {language === "ar"
+                ? `السعر العادل وتقييم الذكاء الاصطناعي لسهم ${nameAr} (${symbol})`
+                : `Fair Value & AI Score for ${nameEn} (${symbol})`}
+            </h2>
+            <p className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed">
+              {language === "ar"
+                ? `تقييم AI Score الحالي: ${computedAIScore}/100${fairValueInfo ? ` · السعر العادل التقديري: ${fairValueInfo.fairValue.toFixed(2)} ${currencyLabel}` : ""}.`
+                : `Current AI Score: ${computedAIScore}/100${fairValueInfo ? ` · Estimated Fair Value: ${fairValueInfo.fairValue.toFixed(2)} ${currency}` : ""}.`}{" "}
+              <Link href={isSaudiStock ? "/fair-value?market=tasi" : "/fair-value"} className="font-bold underline text-emerald-700 dark:text-emerald-400">
+                {language === "ar" ? "حاسبة السعر العادل" : "Fair Value Calculator"}
+              </Link>
+            </p>
+          </div>
+          <div className="p-4 border border-black/20 dark:border-white/20 bg-zinc-50 dark:bg-zinc-800/60">
+            <h2 className="text-base font-black text-zinc-950 dark:text-white mb-2">
+              {language === "ar"
+                ? `حكم التوافق الشرعي ونسبة تطهير سهم ${nameAr} (${symbol})`
+                : `Shariah Compliance & Purification for ${nameEn} (${symbol})`}
+            </h2>
+            <p className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed">
+              {language === "ar"
+                ? `افحص الضوابط المالية الشرعية ومعامل تطهير التوزيعات لسهم ${nameAr} (${symbol}) مباشرة عبر `
+                : `Verify Shariah financial ratios and dividend purification for ${symbol} directly via `}
+              <Link href={isSaudiStock ? "/sharia?market=tasi" : "/sharia"} className="font-bold underline text-emerald-700 dark:text-emerald-400">
+                {language === "ar" ? "حاسبة الأسهم الشرعية والتطهير" : "Shariah & Purification Calculator"}
+              </Link>.
+            </p>
+          </div>
+        </div>
+
         <h2 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white mb-6">
           {language === "ar"
             ? `أسئلة شائعة وتحليل سهم ${nameAr} (${symbol}) في ${isGccStock ? gccMarketNameAr : isSaudiStock ? "السوق السعودي (تاسي)" : "البورصة المصرية"}`

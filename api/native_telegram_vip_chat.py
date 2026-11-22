@@ -43,6 +43,22 @@ _SUPABASE_HTTP_SESSION.mount("http://", _adapter)
 # Bounded ThreadPoolExecutor for async execution & background admin logging
 _VIP_CHAT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=12, thread_name_prefix="vip_chat")
 
+_GREETING_TOKENS = frozenset({
+    "start", "help", "hi", "hello", "hey", "مرحبا", "مرحباً", "اهلا", "أهلا", "اهلاً", "أهلاً",
+    "اهلين", "أهلين", "السلام عليكم", "سلام", "صباح الخير", "مساء الخير", "هاي", "هلو",
+})
+
+
+def _is_greeting_or_start_query(query: str) -> bool:
+    """Return True only for empty, /start, or pure short greetings; real stock questions must not show welcome fallback."""
+    clean = re.sub(r"[\s!؟?,،.\u064B-\u065F]+", " ", str(query or "").strip().lower()).strip()
+    if not clean or clean in ("/start", "/help"):
+        return True
+    if clean in _GREETING_TOKENS:
+        return True
+    words = clean.split()
+    return len(words) <= 3 and all(w in _GREETING_TOKENS or w in ("عليكم", "ورحمة", "الله", "يا", "بوت", "أرتورو", "ارتورو") for w in words)
+
 # Short-lived in-memory cache for _resolve_telegram_user (reduces 5 Supabase calls per message to 0 on repeat turns)
 _USER_RESOLVE_CACHE: Dict[int, Dict[str, Any]] = {}
 _USER_RESOLVE_LOCK = threading.Lock()
@@ -512,6 +528,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(f"[NATIVE_VIP_CHAT] Fast-path cache check warning: {cache_init_err}")
 
     # Run the full Agentic Chat Pipeline with all tools (DeepSeek-V3) if not already served by fast-path cache
+    stream_error: Optional[str] = None
     if not reply_text:
         acquired_inflight = False
         try:
@@ -555,6 +572,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     stream_cached = False
                     stream_cache_key = None
                     stream_usage = None
+                    stream_error = None
                     async for sse_chunk in run_agentic_chat_stream(
                         message=query,
                         history=formatted_history,
@@ -579,6 +597,8 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                                     ev = json.loads(dp)
                                     if ev.get("type") == "token":
                                         full += ev.get("token", "")
+                                    elif ev.get("type") == "error":
+                                        stream_error = ev.get("detail") or ev.get("message") or "stream_error"
                                     elif ev.get("type") == "done":
                                         full = ev.get("reply", full)
                                         tbls = ev.get("tables", [])
@@ -590,18 +610,20 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                                             stream_usage = ev.get("usage")
                                 except Exception:
                                     pass
-                    return full, tbls, stream_cached, stream_cache_key, stream_usage
+                    return full, tbls, stream_cached, stream_cache_key, stream_usage, stream_error
 
+                stream_error = None
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
-                        reply_text, tables, was_cached, used_cache_key, usage_stats = _VIP_CHAT_EXECUTOR.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
+                        reply_text, tables, was_cached, used_cache_key, usage_stats, stream_error = _VIP_CHAT_EXECUTOR.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
                     else:
-                        reply_text, tables, was_cached, used_cache_key, usage_stats = loop.run_until_complete(_run_agentic())
+                        reply_text, tables, was_cached, used_cache_key, usage_stats, stream_error = loop.run_until_complete(_run_agentic())
                 except RuntimeError:
-                    reply_text, tables, was_cached, used_cache_key, usage_stats = asyncio.run(_run_agentic())
+                    reply_text, tables, was_cached, used_cache_key, usage_stats, stream_error = asyncio.run(_run_agentic())
         except Exception as exc:
             logger.warning(f"[NATIVE_VIP_CHAT] Agentic pipeline error: {exc}")
+            stream_error = str(exc)
         finally:
             if acquired_inflight and inflight_lock is not None:
                 try:
@@ -610,6 +632,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     pass
 
     # Fallback to direct technical indicators if agentic call failed
+    is_fallback_error = False
     if not reply_text:
         was_cached = False
         used_cache_key = None
@@ -628,12 +651,16 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
 
         if not reply_text:
-            reply_text = (
-                f"مرحباً بك يا {user_info['display_name']}! 👋\n\n"
-                f"أنا **أرتورو (ARTORO AI)**، المساعد الذكي لتحليل الأسهم المصرية.\n"
-                f"يمكنك سؤالي عن أي سهم بكتابة رمزه (مثال: `COMI` أو `فوري` أو `سهم طلعت مصطفى`)، "
-                f"أو الاستفسار عن وضع المؤشرات العامة والسيولة وسأجيبك بأدق القراءات الفنية اللحظية."
-            )
+            if _is_greeting_or_start_query(query):
+                reply_text = (
+                    f"مرحباً بك يا {user_info['display_name']}! 👋\n\n"
+                    f"أنا **أرتورو (ARTORO AI)**، المساعد الذكي لتحليل الأسهم المصرية.\n"
+                    f"يمكنك سؤالي عن أي سهم بكتابة رمزه (مثال: `COMI` أو `فوري` أو `سهم طلعت مصطفى`)، "
+                    f"أو الاستفسار عن وضع المؤشرات العامة والسيولة وسأجيبك بأدق القراءات الفنية اللحظية."
+                )
+            else:
+                is_fallback_error = True
+                reply_text = "⚠️ تعذّر إكمال التحليل مؤقتاً بسبب ضغط لحظي على الخادم — يرجى إعادة إرسال سؤالك خلال ثوانٍ."
 
     latency_ms = int((time.time() - start_time) * 1000)
     assistant_created_dt = datetime.now(timezone.utc)
@@ -654,6 +681,10 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
     if used_cache_key:
         common_meta["cache_key"] = used_cache_key
+    if is_fallback_error:
+        common_meta["fallback_error"] = True
+        if stream_error:
+            common_meta["error_detail"] = str(stream_error)[:240]
     if was_cached and usage_stats is None:
         from api.agentic_chat.pipeline import _finalize_usage_cost, _new_usage_accumulator
         usage_stats = _finalize_usage_cost(_new_usage_accumulator(), cached=True)

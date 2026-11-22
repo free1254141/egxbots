@@ -1080,8 +1080,20 @@ def _build_scan_results_and_backtest(
 ) -> List[Dict[str, Any]]:
     print("  -> Generating System 1 recommendations via exact EGX StrategyEngine + recommendation_policy...")
 
-    # CRITICAL: Clear ALL existing rows from scan_results cleanly before writing new System 1 track record
-    sb.table("scan_results").delete().neq("symbol", "").execute()
+    # Load existing System 1 rows so IDs are preserved across incremental daily runs.
+    existing_rows = (
+        sb.table("scan_results")
+        .select("id,symbol,created_at")
+        .limit(500)
+        .execute()
+        .data
+        or []
+    )
+    existing_by_key = {
+        (str(r["symbol"]), str(r.get("created_at") or "")[:10]): r["id"]
+        for r in existing_rows
+        if r.get("symbol") and r.get("id") is not None
+    }
 
     df_win = df_all[df_all["date_str"] >= VAL_START_DATE].copy()
     if df_win.empty:
@@ -1269,7 +1281,9 @@ def _build_scan_results_and_backtest(
             exit_px_val = round(float(ev["exit_price"]), decimals) if (status != "open" and ev.get("exit_price") is not None) else None
             effective_stop = round(float(ev.get("stop_loss") or stop_loss), decimals)
 
-            scan_rows.append({
+            existing_id = existing_by_key.get((sym, d_str))
+            resolved_last_close = last_px if status == "open" else (exit_px_val if exit_px_val is not None else last_px)
+            row_dict: Dict[str, Any] = {
                 "batch_id": open_batch_id if status == "open" else eval_batch_id,
                 "user_id": None,
                 "symbol": sym,
@@ -1277,7 +1291,7 @@ def _build_scan_results_and_backtest(
                 "name": meta["NameAr"],
                 "model_name": "KING 👑",
                 "country": COUNTRY,
-                "last_close": round(last_px if status == "open" else entry_close, decimals),
+                "last_close": round(resolved_last_close, decimals),
                 "precision": round(shown_precision, 4),
                 "signal": "BUY",
                 "status": status,
@@ -1322,6 +1336,7 @@ def _build_scan_results_and_backtest(
                     },
                     "evaluation": {
                         "last_evaluated_date": exit_date if status != "open" else latest_date,
+                        "closed_on": exit_date if status != "open" else None,
                         "cursor": ev.get("cursor") or latest_date,
                         "sessions_held": int(ev.get("sessions_held") or 0),
                         "exit_price": exit_px_val,
@@ -1331,11 +1346,22 @@ def _build_scan_results_and_backtest(
                 },
                 "created_at": f"{d_str}T12:30:00+00:00",
                 "updated_at": f"{exit_date}T12:30:00+00:00" if status != "open" else now_iso,
-            })
+            }
+            if existing_id is not None:
+                row_dict["id"] = existing_id
+            scan_rows.append(row_dict)
             picked += 1
 
-    for i in range(0, len(scan_rows), 50):
-        sb.table("scan_results").insert(scan_rows[i : i + 50]).execute()
+    to_upsert = [r for r in scan_rows if "id" in r]
+    to_insert = [r for r in scan_rows if "id" not in r]
+    for i in range(0, len(to_upsert), 50):
+        sb.table("scan_results").upsert(to_upsert[i : i + 50], on_conflict="id").execute()
+    for i in range(0, len(to_insert), 50):
+        sb.table("scan_results").insert(to_insert[i : i + 50]).execute()
+    kept_ids = {r["id"] for r in to_upsert}
+    stale_ids = [r["id"] for r in existing_rows if r.get("id") is not None and r["id"] not in kept_ids]
+    for i in range(0, len(stale_ids), 50):
+        sb.table("scan_results").delete().in_("id", stale_ids[i : i + 50]).execute()
 
     open_cnt = sum(1 for r in scan_rows if r["status"] == "open")
     win_cnt = sum(1 for r in scan_rows if r["status"] == "win")

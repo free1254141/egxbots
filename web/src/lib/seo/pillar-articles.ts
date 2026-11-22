@@ -1191,6 +1191,263 @@ export const PILLAR_ARTICLES: Record<string, PillarArticle> = {
         <p>Verify compliance status and estimate SAR dividend purification automatically inside our <a href="/sharia?market=tasi" class="text-emerald-600 font-bold underline">TASI Sharia Screener</a>, then cross-check institutional momentum on the <a href="/scanner/ai?market=tasi" class="text-emerald-600 font-bold underline">Saudi AI Radar</a>.</p>
       `
     }
+  },
+
+  "gold-silver-xauusd-ai-technical-analysis-guide": {
+    slug: "gold-silver-xauusd-ai-technical-analysis-guide",
+    market: "both",
+    title: {
+      ar: "تحليل الذهب اليوم (XAUUSD) والفضة (XAGUSD) بالذكاء الاصطناعي: مستويات الدعم والمقاومة 2026",
+      en: "Gold (XAUUSD) & Silver (XAGUSD) AI Technical Analysis: Support, Resistance & Outlook 2026"
+    },
+    subtitle: {
+      ar: "كيف تقرأ حركة أونصة الذهب والفضة العالمية بالدولار باستخدام مؤشرات RSI وMACD ونقاط الارتكاز اليومية",
+      en: "How to track global spot Gold & Silver in USD using daily Pivot Points, RSI, and MACD momentum models"
+    },
+    description: {
+      ar: "دليلك العملي لتحليل الذهب اليوم XAUUSD والفضة XAGUSD بالذكاء الاصطناعي في EGX BOTS: مستويات الدعم والمقاومة، مناطق التشبع الشرائي والبيعي، وإدارة التحوط.",
+      en: "Practical 2026 guide to AI technical analysis for Gold (XAUUSD) and Silver (XAGUSD): Pivot support/resistance levels, RSI momentum, and hedging insights."
+    },
+    keywords: [
+      "تحليل الذهب اليوم XAUUSD",
+      "سعر أونصة الذهب اليوم",
+      "مستويات الدعم والمقاومة للذهب",
+      "تحليل الفضة XAGUSD",
+      "توقعات الذهب بالذكاء الاصطناعي",
+      "EGX BOTS"
+    ],
+    readingTime: { ar: "5 دقائق قراءة", en: "5 min read" },
+    publishedAt: "2026-11-22",
+    author: { ar: "وحدة أبحاث المعادن والسلع — EGX BOTS", en: "Commodities Research Unit — EGX BOTS" },
+    faqs: [
+      {
+        question: {
+          ar: "كيف أتابع تحليل الذهب والفضة يومياً على EGX BOTS؟",
+          en: "How can I follow daily Gold and Silver technical analysis on EGX BOTS?"
+        },
+        answer: {
+          ar: "يمكنك فتح صفحة دليل الذهب والفضة (/markets/gold-silver) أو صفحة XAUUSD و XAGUSD مباشرة لمشاهدة سعر الإغلاق ومؤشر القوة النسبية RSI ونقاط الدعم والمقاومة المحدثة يومياً.",
+          en: "Open the Gold & Silver market hub (/markets/gold-silver) or the dedicated XAUUSD and XAGUSD pages to view daily closing prices, RSI(14), and classic Pivot support/resistance levels."
+        }
+      },
+      {
+        question: {
+          ar: "هل يمكن سؤال الشات بوت عن مستويات الذهب XAUUSD؟",
+          en: "Can I ask the AI chatbot about Gold XAUUSD levels?"
+        },
+        answer: {
+          ar: "نعم، يدعم الشات بوت ARTORO تحليل XAUUSD و XAGUSD مباشرة باللغة العربية والإنجليزية ويعرض مستويات الدعم والمقاومة ومؤشرات الزخم فوراً.",
+          en: "Yes, the ARTORO AI chatbot natively analyzes XAUUSD and XAGUSD in both Arabic and English with computed support, resistance, and momentum readings."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <p>يمثل <strong>الذهب (XAUUSD)</strong> و<strong>الفضة (XAGUSD)</strong> ركيزة رئيسية للتحوط وحفظ القيمة لدى المستثمرين في مصر والخليج. بدلاً من متابعة التوقعات العشوائية، يوفر التحليل الكمي قراءة رقمية منضبطة لحركة الأونصة بالدولار الأمريكي.</p>
+        <h3>1. أهم مؤشرات قراءة اتجاه الذهب XAUUSD</h3>
+        <ul>
+          <li><strong>نقاط الارتكاز والدعم والمقاومة:</strong> تحديد مستويات <code>S1 / S2</code> للارتداد ومستويات <code>R1 / R2</code> لجني الأرباح بدقة حسابية يومية.</li>
+          <li><strong>مؤشر القوة النسبية RSI(14):</strong> رصد مناطق التشبع الشرائي فوق 70 أو التشبع البيعي تحت 30 قبل الانعكاسات السعرية.</li>
+          <li><strong>المتوسطات المتحركة EMA 50 &amp; EMA 200:</strong> قياس الاتجاه العام طويل وقصير الأجل للأونصة.</li>
+        </ul>
+        <h3>2. الوصول المباشر لصفحات المعادن</h3>
+        <p>تابع الآن <a href="/markets/gold-silver" class="text-amber-600 font-bold underline">بوابة تحليل الذهب والفضة</a>، أو انتقل مباشرة إلى <a href="/stocks/xauusd" class="text-amber-600 font-bold underline">صفحة تحليل الذهب XAUUSD</a> و<a href="/stocks/xagusd" class="text-amber-600 font-bold underline">صفحة تحليل الفضة XAGUSD</a> أو اسأل <a href="/chat" class="text-emerald-600 font-bold underline">الشات بوت AI</a>.</p>
+      `,
+      en: `
+        <p>Global spot <strong>Gold (XAUUSD)</strong> and <strong>Silver (XAGUSD)</strong> remain key hedging instruments across Egypt and the GCC. Quantitative indicators help filter out emotional noise when tracking USD ounce movements.</p>
+        <h3>1. Core Quantitative Gold Indicators</h3>
+        <ul>
+          <li><strong>Daily Pivot Levels:</strong> Objective S1/S2 support and R1/R2 resistance thresholds updated every session.</li>
+          <li><strong>RSI(14) &amp; MACD Momentum:</strong> Spotting overbought (&gt;70) and oversold (&lt;30) zones alongside trend crossovers.</li>
+          <li><strong>Moving Averages (EMA 50 &amp; 200):</strong> Confirming medium and long-term structural trend direction.</li>
+        </ul>
+        <h3>2. Explore Live Metal Profiles</h3>
+        <p>Visit the <a href="/markets/gold-silver" class="text-amber-600 font-bold underline">Gold &amp; Silver Hub</a>, inspect <a href="/stocks/xauusd" class="text-amber-600 font-bold underline">XAUUSD</a> and <a href="/stocks/xagusd" class="text-amber-600 font-bold underline">XAGUSD</a>, or ask the <a href="/chat" class="text-emerald-600 font-bold underline">AI Chatbot</a>.</p>
+      `
+    }
+  },
+
+  "saudi-tasi-telegram-stock-alerts-ai-guide": {
+    slug: "saudi-tasi-telegram-stock-alerts-ai-guide",
+    market: "tasi",
+    title: {
+      ar: "قنوات وتنبيهات الأسهم السعودية (تاسي) على تليجرام 2026: مقارنة التحليل الكمي بالذكاء الاصطناعي",
+      en: "Saudi TASI Telegram Stock Alerts 2026: Quantitative AI Scanning vs. Manual Channels"
+    },
+    subtitle: {
+      ar: "كيف تعتمد على إشارات السيولة ونقاط الدخول والخروج المحسوبة رقمياً في تداول بعيداً عن الجروبات العشوائية",
+      en: "Why systematic liquidity breakouts and automated risk levels outperform speculative Tadawul chat groups"
+    },
+    description: {
+      ar: "مقارنة شاملة لقنوات وتنبيهات الأسهم السعودية (تاسي) على تليجرام في 2026: الفرق بين المضاربة العشوائية ونظام TASI BOTS VIP للمضاربات القصيرة ومستويات الوقف.",
+      en: "Comprehensive 2026 guide to Saudi TASI Telegram alerts: comparing manual channels vs. TASI BOTS automated Short Swings and AI Scanner signals."
+    },
+    keywords: [
+      "قنوات توصيات الأسهم السعودية تليجرام",
+      "تنبيهات تاسي VIP",
+      "مضاربة الأسهم السعودية بالذكاء الاصطناعي",
+      "TASI BOTS",
+      "أفضل قناة أسهم سعودية"
+    ],
+    readingTime: { ar: "5 دقائق قراءة", en: "5 min read" },
+    publishedAt: "2026-11-22",
+    author: { ar: "فريق أبحاث تاسي — TASI BOTS", en: "TASI Research Team — TASI BOTS" },
+    faqs: [
+      {
+        question: {
+          ar: "كيف تعمل تنبيهات تاسي VIP في TASI BOTS؟",
+          en: "How do TASI BOTS VIP Saudi market alerts work?"
+        },
+        answer: {
+          ar: "يرصد النظام الأسهم السعودية التي تحقق اختراقات سعرية مع سيولة نسبية مرتفعة، ويرسل تفاصيل سعر الإغلاق المرجعي ومستوى وقف الخسارة ومناطق تأمين الصفقة لقناة تاسي VIP بالريال السعودي.",
+          en: "The engine scans Tadawul tickers for price breakouts backed by high relative volume and dispatches structured alerts in SAR with reference close, stop-loss, and breakeven rules to the VIP Telegram group."
+        }
+      },
+      {
+        question: {
+          ar: "ما تكلفة متابعة السوق السعودي تاسي على المنصة؟",
+          en: "What is the cost for Saudi TASI tools and VIP alerts?"
+        },
+        answer: {
+          ar: "تتوفر صفحات الأسهم والمؤشرات والأدلة مجاناً، بينما تبدأ الباقات المدفوعة للسوق السعودي من 10 ريال سعودي شهرياً للشات الذكي أو تيليجرام VIP.",
+          en: "Stock pages and guides are free, while paid Saudi plans start at 10 SAR/month for AI Chat or VIP Telegram."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <p>يبحث الكثير من المتداولين في <strong>السوق السعودي (تداول / تاسي)</strong> عن قنوات تليجرام تتابع حركة الأسهم القيادية وأسهم النمو لحظياً. الفارق الحقيقي بين القناة العشوائية والنظام الاحترافي هو <strong>وضوح الخطة الرقمية وإدارة المخاطر</strong>.</p>
+        <h3>1. معايير التنبيه الكمي المنضبط في تاسي</h3>
+        <ul>
+          <li><strong>انفجار السيولة الحقيقي:</strong> استبعاد التحركات الضعيفة والتركيز على الأسهم التي تتجاوز متوسط حجم التداول المرجعي.</li>
+          <li><strong>تحديد الوقف مسبقاً:</strong> معرفة مستوى وقف الخسارة وتأمين الصفقة قبل الافتتاح وليس بعد الهبوط.</li>
+          <li><strong>الحياد الخوارزمي:</strong> جميع القراءات لأغراض البحث والمتابعة الإحصائية دون تحيز.</li>
+        </ul>
+        <h3>2. أدوات السوق السعودي تاسي</h3>
+        <p>ابدأ باستعراض <a href="/stocks?market=tasi" class="text-emerald-600 font-bold underline">دليل أسهم السوق السعودي تاسي</a> و<a href="/scanner/ai?market=tasi" class="text-emerald-600 font-bold underline">رادار الذكاء الاصطناعي تاسي</a>، وتابع تحليل القياديات مثل <a href="/stocks/2222" class="text-emerald-600 font-bold underline">أرامكو 2222</a> و<a href="/stocks/1120" class="text-emerald-600 font-bold underline">الراجحي 1120</a>.</p>
+      `,
+      en: `
+        <p>Investors on the <strong>Saudi Exchange (Tadawul / TASI)</strong> increasingly look for structured Telegram alerts instead of noisy chat speculation. Quantitative alerts stand out through transparent risk thresholds and volume confirmation.</p>
+        <h3>1. Pillars of Systematic TASI Alerts</h3>
+        <ul>
+          <li><strong>Volume Confirmation:</strong> Filtering breakouts supported by above-average institutional liquidity.</li>
+          <li><strong>Pre-Defined Risk Levels:</strong> Clear reference close, stop-loss, and breakeven rules in SAR.</li>
+          <li><strong>Objective Analytics:</strong> Automated statistical signals free of emotional bias.</li>
+        </ul>
+        <h3>2. Explore Saudi TASI Tools</h3>
+        <p>Browse the <a href="/stocks?market=tasi" class="text-emerald-600 font-bold underline">TASI Stock Directory</a>, open the <a href="/scanner/ai?market=tasi" class="text-emerald-600 font-bold underline">Saudi AI Radar</a>, or inspect <a href="/stocks/2222" class="text-emerald-600 font-bold underline">Aramco (2222)</a> and <a href="/stocks/1120" class="text-emerald-600 font-bold underline">Al Rajhi (1120)</a>.</p>
+      `
+    }
+  },
+
+  "undervalued-saudi-tasi-stocks-fair-value-guide": {
+    slug: "undervalued-saudi-tasi-stocks-fair-value-guide",
+    market: "tasi",
+    title: {
+      ar: "حساب السعر العادل للأسهم السعودية وأرخص أسهم تاسي 2026 (معادلة جراهام ومضاعف الربحية)",
+      en: "Fair Value of Saudi TASI Stocks & Undervalued Screener 2026 (Graham Formula & P/E)"
+    },
+    subtitle: {
+      ar: "كيف تحدد الأسهم السعودية التي تتداول بخصم عن قيمتها العادلة بالريال السعودي دون الوقوع في فخاخ القيمة",
+      en: "How to identify undervalued Tadawul stocks in SAR using Graham intrinsic multiples and liquidity filters"
+    },
+    description: {
+      ar: "تعلم طريقة حساب السعر العادل للأسهم السعودية في تاسي 2026 باستخدام مضاعف الربحية P/E والقيمة الدفترية P/B، واستخدم حاسبة TASI BOTS لاكتشاف أرخص أسهم السوق السعودي.",
+      en: "Learn how to calculate Fair Value for Saudi TASI stocks in 2026 using P/E, P/B, and Graham multiples inside the TASI BOTS screener."
+    },
+    keywords: [
+      "السعر العادل للأسهم السعودية",
+      "أرخص أسهم تاسي 2026",
+      "مضاعف الربحية في السوق السعودي",
+      "تقييم الأسهم السعودية",
+      "حاسبة السعر العادل تداول"
+    ],
+    readingTime: { ar: "6 دقائق قراءة", en: "6 min read" },
+    publishedAt: "2026-11-22",
+    author: { ar: "وحدة التحليل المالي — TASI BOTS", en: "Fundamental Analytics — TASI BOTS" },
+    faqs: [
+      {
+        question: {
+          ar: "ما هي المعايير المستخدمة لحساب السعر العادل في السوق السعودي؟",
+          en: "Which metrics are used to estimate Fair Value for Saudi TASI stocks?"
+        },
+        answer: {
+          ar: "تعتمد الحاسبة على ربحية السهم EPS والقيمة الدفترية ومقارنة مكرر الربحية P/E بمتوسط القطاع في تداول مع مراعاة معادلة بنجامين جراهام.",
+          en: "The model blends EPS, Book Value, sector median P/E and P/B multiples, and Benjamin Graham's intrinsic valuation formula."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <p>مع تنوع القطاعات في <strong>السوق السعودي (تاسي)</strong> بين البنوك والطاقة والبتروكيماويات والتقنية والخدمات الصحية، يصعب تقييم كل شركة يدوياً. يوفر نموذج <strong>السعر العادل الكمي</strong> مقارنة فورية بين سعر السهم الحالي في تداول وقيمته الدفترية ومضاعف ربحيته.</p>
+        <h3>1. دمج التقييم الأساسي مع الزخم الفني</h3>
+        <p>وجود سهم بسعر أقل من القيمة العادلة لا يعني الصعود الفوري (فخ القيمة)؛ لذا يُفضل مراجعة <strong>السعر العادل</strong> جنباً إلى جنب مع مستويات الدعم والمقاومة وتقييم السيولة لأسهم مثل <a href="/stocks/2222" class="text-emerald-600 font-bold underline">أرامكو 2222</a> و<a href="/stocks/2010" class="text-emerald-600 font-bold underline">سابك 2010</a> و<a href="/stocks/1120" class="text-emerald-600 font-bold underline">مصرف الراجحي 1120</a>.</p>
+        <h3>2. جرب الحاسبة المجانية للسوق السعودي</h3>
+        <p>انتقل مباشرة إلى <a href="/fair-value?market=tasi" class="text-emerald-600 font-bold underline">حاسبة السعر العادل للسوق السعودي (TASI)</a> لاستعراض قائمة الأسهم المقيمة بأقل من قيمتها العادلة مع إمكانية الفرز حسب القطاع.</p>
+      `,
+      en: `
+        <p>Evaluating companies across Saudi Tadawul sectors manually takes hours of spreadsheet work. Automated <strong>Fair Value screening</strong> instantly compares current SAR prices against earnings power, book value, and sector medians.</p>
+        <h3>1. Pairing Value with Technical Timing</h3>
+        <p>Always combine intrinsic Fair Value with momentum and support zones—whether tracking <a href="/stocks/2222" class="text-emerald-600 font-bold underline">Aramco (2222)</a>, <a href="/stocks/2010" class="text-emerald-600 font-bold underline">SABIC (2010)</a>, or <a href="/stocks/1120" class="text-emerald-600 font-bold underline">Al Rajhi (1120)</a>.</p>
+        <h3>2. Open the Free TASI Fair Value Screener</h3>
+        <p>Explore live estimates in the <a href="/fair-value?market=tasi" class="text-emerald-600 font-bold underline">Saudi TASI Fair Value Calculator</a>.</p>
+      `
+    }
+  },
+
+  "uae-dfm-adx-qatar-qse-ai-sharia-stocks-guide": {
+    slug: "uae-dfm-adx-qatar-qse-ai-sharia-stocks-guide",
+    market: "tasi",
+    title: {
+      ar: "دليل تحليل أسهم الإمارات (دبي DFM وأبوظبي ADX) وبورصة قطر (QSE) بالذكاء الاصطناعي والأسهم الحلال 2026",
+      en: "UAE (DFM & ADX) and Qatar (QSE) AI Stock Analysis & Market Directory Guide 2026"
+    },
+    subtitle: {
+      ar: "تغطية شاملة بالذكاء الاصطناعي لأسهم دبي وأبوظبي وقطر بالدرهم الإماراتي والريال القطري مع الدعم والمقاومة",
+      en: "Complete AI technical analysis and support/resistance coverage for Dubai, Abu Dhabi, and Qatar equities in AED and QAR"
+    },
+    description: {
+      ar: "استكشف دليل تحليل أسهم الإمارات في سوق دبي المالي DFM وسوق أبوظبي ADX وأسهم بورصة قطر QSE بالذكاء الاصطناعي في 2026 مع المؤشرات الفنية والدعم والمقاومة.",
+      en: "Explore AI stock analysis for UAE DFM & ADX equities and Qatar Stock Exchange (QSE) in 2026 with daily RSI, MACD, and Pivot support/resistance levels."
+    },
+    keywords: [
+      "تحليل أسهم الإمارات DFM ADX",
+      "بورصة قطر QSE بالذكاء الاصطناعي",
+      "سهم إعمار والدار وأدنوك",
+      "سهم بنك قطر الوطني QNBK",
+      "الأسهم الخليجية بالذكاء الاصطناعي"
+    ],
+    readingTime: { ar: "5 دقائق قراءة", en: "5 min read" },
+    publishedAt: "2026-11-22",
+    author: { ar: "وحدة أبحاث الخليج — EGX BOTS", en: "GCC Research Unit — EGX BOTS" },
+    faqs: [
+      {
+        question: {
+          ar: "ما هي الأسواق الخليجية المغطاة في EGX BOTS؟",
+          en: "Which GCC stock exchanges are covered on EGX BOTS?"
+        },
+        answer: {
+          ar: "تغطي المنصة السوق السعودي (تاسي TASI)، سوق دبي المالي (DFM)، سوق أبوظبي للأوراق المالية (ADX)، وبورصة قطر (QSE) ببيانات تاريخية وتحديث يومي للمؤشرات الفنية.",
+          en: "EGX BOTS covers Saudi Tadawul (TASI), Dubai Financial Market (DFM), Abu Dhabi Securities Exchange (ADX), and Qatar Stock Exchange (QSE) with historical data and daily technical indicators."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <p>توفر منصة <strong>EGX BOTS</strong> تغطية كمية موحدة لأسواق المال الخليجية تشمل <strong>سوق دبي المالي (DFM)</strong> و<strong>سوق أبوظبي للأوراق المالية (ADX)</strong> بالدرهم الإماراتي، و<strong>بورصة قطر (QSE)</strong> بالريال القطري، إلى جانب السوق السعودي ومصر.</p>
+        <h3>1. سوق الأسهم الإماراتية (DFM &amp; ADX)</h3>
+        <p>تصفح <a href="/markets/uae" class="text-sky-600 font-bold underline">دليل أسهم الإمارات</a> لمتابعة قياديات السوق مثل إعمار العقارية، الدار العقارية، أدنوك للتوزيع، بنك أبوظبي الأول، وسالك مع قراءة يومية لمؤشر RSI ونقاط الدعم والمقاومة.</p>
+        <h3>2. بورصة قطر (QSE) وبوابة الأسواق</h3>
+        <p>استعرض <a href="/markets/qatar" class="text-rose-600 font-bold underline">دليل أسهم بورصة قطر</a> (مثل QNBK و IQCD و QIBK و QGTS)، أو تصفح <a href="/markets" class="text-emerald-600 font-bold underline">بوابة الأسواق العربية والخليجية الموحدة</a> واسأل الشات بوت مباشرة عن أي سهم خليجي.</p>
+      `,
+      en: `
+        <p><strong>EGX BOTS</strong> delivers unified quantitative stock coverage across the GCC, including <strong>DFM</strong> and <strong>ADX</strong> in AED as well as the <strong>Qatar Stock Exchange (QSE)</strong> in QAR alongside Saudi TASI and Egypt EGX.</p>
+        <h3>1. UAE Equities (Dubai DFM &amp; Abu Dhabi ADX)</h3>
+        <p>Explore the <a href="/markets/uae" class="text-sky-600 font-bold underline">UAE Stocks Directory</a> for daily RSI, MACD, and support/resistance levels across leading Dubai and Abu Dhabi listings.</p>
+        <h3>2. Qatar Stock Exchange (QSE) &amp; Regional Hub</h3>
+        <p>Visit the <a href="/markets/qatar" class="text-rose-600 font-bold underline">Qatar Stocks Directory</a> or open the unified <a href="/markets" class="text-emerald-600 font-bold underline">Regional &amp; GCC Markets Hub</a>.</p>
+      `
+    }
   }
 
 };

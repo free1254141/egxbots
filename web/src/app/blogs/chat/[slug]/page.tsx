@@ -1,8 +1,10 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getPublicMarketClient } from "@/lib/supabase/route-data";
 import { EgxOnlyGuard } from "@/contexts/MarketContext";
 
-export const revalidate = 86400; // 24h ISR: caches on Edge CDN, zero Vercel Lambda CPU and zero Supabase reads
+export const preferredRegion = "fra1";
+export const revalidate = 604800; // 7d ISR: cookie-free public read caches on Edge CDN with zero Vercel CPU
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
     const slug = (await params).slug;
@@ -29,8 +31,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     };
 }
 
-async function loadPost(slug: string) {
-    const supabase = await createSupabaseServerClient();
+const loadPost = cache(async (slug: string) => {
+    const supabase = getPublicMarketClient();
     const { data } = await supabase
         .from("shared_chat_posts")
         .select("slug, question, answer, title, created_at")
@@ -38,7 +40,7 @@ async function loadPost(slug: string) {
         .eq("is_published", true)
         .maybeSingle();
     return data;
-}
+});
 
 export default async function SharedChatPage({ params }: { params: Promise<{ slug: string }> }) {
     const slug = (await params).slug;

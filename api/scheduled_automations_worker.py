@@ -626,9 +626,54 @@ def _fetch_market_indicators_brief(
     return "\n\n".join(sections)
 
 
+_CUSTOM_RANKING_RE = re.compile(
+    r"(?:اعلى|أعلى|اقوى|أقوى|اكبر|أكبر|افضل|أفضل)\s+(?:\d+|عشر|عشرة|خمس|خمسة|ثلاث|ثلاثة|سبع|سبعة)",
+    re.IGNORECASE,
+)
+
+
+def _is_cacheable_automation_prompt(prompt: str) -> bool:
+    """Return True only when an automated prompt is generic & free of portfolio/custom ranking constraints."""
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    if any(w in lowered for w in ("محفظ", "اسهمي", "أسهمي", "مركزي", "مراكزي", "شرائي", "كاش", "رصيدي")):
+        return False
+    if _CUSTOM_RANKING_RE.search(text):
+        return False
+    return True
+
+
+def _record_cached_automation_usage() -> None:
+    """Record zero-token/zero-cost cached hit usage into thread-local storage."""
+    try:
+        from api.agentic_chat.pipeline import _finalize_usage_cost, _new_usage_accumulator
+        _AUTO_METRICS_TLS.last_usage = _finalize_usage_cost(_new_usage_accumulator(), cached=True)
+    except Exception:
+        pass
+
+
 def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") -> str:
     """Generates a professional stock market consultation using DeepSeek."""
     _AUTO_METRICS_TLS.last_usage = None
+    _AUTO_METRICS_TLS.last_cached = False
+    _AUTO_METRICS_TLS.last_cache_key = None
+
+    if _is_cacheable_automation_prompt(prompt):
+        try:
+            from api.agentic_chat.analysis_cache import build_analysis_cache_key, get_vip_analysis_cache
+            auto_cache_key = build_analysis_cache_key(prompt, market="EGX")
+            if auto_cache_key:
+                cached_hit = get_vip_analysis_cache(auto_cache_key, user_id=user_id, market="EGX")
+                if cached_hit and cached_hit.get("reply"):
+                    _AUTO_METRICS_TLS.last_cached = True
+                    _AUTO_METRICS_TLS.last_cache_key = auto_cache_key
+                    _record_cached_automation_usage()
+                    return str(cached_hit["reply"])
+        except Exception as cache_err:
+            logger.debug(f"[AUTOMATIONS_WORKER] Cache lookup skipped: {cache_err}")
+
     deepseek_key = os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or ""
     if not deepseek_key:
         return "أهلاً بك! تعذر الاتصال بمحرك الذكاء الاصطناعي حالياً لعدم توفر المفتاح. برجاء المراجعة مع الدعم الفني."
@@ -653,9 +698,9 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
     arabic_days = ("الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد")
     day_ar = arabic_days[now_cairo.weekday()]
     session_status_str = (
-        f"جلسة البورصة المصرية مفتوحة حالياً للتداول (10:00 ص – 2:30 م بتوقيت القاهرة) — التوقيت الآن: {day_ar} {now_cairo.strftime('%Y-%m-%d %H:%M')} القاهرة."
+        f"جلسة البورصة المصرية مفتوحة حالياً للتداول (10:00 ص – 2:30 م بتوقيت القاهرة) — التوقيت الآن: {day_ar} {now_cairo.strftime('%Y-%m-%d %H:00')} القاهرة."
         if in_trading_hours
-        else f"البورصة المصرية مغلقة حالياً (خارج ساعات التداول الرسمية 10:00 ص – 2:30 م الأحد–الخميس) — التوقيت الآن: {day_ar} {now_cairo.strftime('%Y-%m-%d %H:%M')} القاهرة."
+        else f"البورصة المصرية مغلقة حالياً (خارج ساعات التداول الرسمية 10:00 ص – 2:30 م الأحد–الخميس) — التوقيت الآن: {day_ar} {now_cairo.strftime('%Y-%m-%d %H:00')} القاهرة."
     )
 
     system_prompt = (
@@ -779,6 +824,8 @@ def _log_automation_to_chat_history(
     now_iso: str,
     latency_ms: Optional[int] = None,
     usage: Optional[Dict[str, Any]] = None,
+    cached: bool = False,
+    cache_key: Optional[str] = None,
 ) -> None:
     """Persists the scheduled consultation into ai_chat_sessions and ai_chat_messages using valid UUID auto_id."""
     try:
@@ -810,7 +857,10 @@ def _log_automation_to_chat_history(
         asst_meta: Dict[str, Any] = {
             "chat_source": "scheduled_automation",
             "engine": "deepseek-v3",
+            "cached": bool(cached),
         }
+        if cache_key:
+            asst_meta["cache_key"] = cache_key
         if latency_ms is not None:
             asst_meta["latency_ms"] = int(latency_ms)
         if isinstance(usage, dict) and usage:
@@ -916,6 +966,8 @@ def execute_single_automation(automation: Dict[str, Any], is_test: bool = False)
     reply_text = _generate_ai_consultation(prompt, user_name, user_id=user_id)
     auto_latency_ms = max(int((time.time() - _t_gen_start) * 1000), 1)
     auto_usage = getattr(_AUTO_METRICS_TLS, "last_usage", None)
+    auto_cached = bool(getattr(_AUTO_METRICS_TLS, "last_cached", False))
+    auto_cache_key = getattr(_AUTO_METRICS_TLS, "last_cache_key", None)
 
     # 5. Format Telegram Message
     telegram_message = (
@@ -960,6 +1012,8 @@ def execute_single_automation(automation: Dict[str, Any], is_test: bool = False)
         now_iso,
         latency_ms=auto_latency_ms,
         usage=auto_usage,
+        cached=auto_cached,
+        cache_key=auto_cache_key,
     )
 
     return {"ok": sent, "status": status, "chat_id": chat_id, "error": err}

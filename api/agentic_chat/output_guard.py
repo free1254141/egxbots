@@ -44,10 +44,22 @@ _LEAKED_FIELD_EXPR_RE = re.compile(
 _LEAKED_FIELD_LABELS: Dict[str, str] = {
     "has_active_recommendation": "التوصية المفتوحة",
     "support_1_is_distant": "بعد الدعم الهيكلي",
+    "fundamental_diagnosis": "التشخيص المالي",
     "is_sharia_compliant": "التوافق الشرعي",
+    "value_trap_warning": "تحذير فخ القيمة",
+    "upcoming_dividend": "التوزيع النقدي القادم",
+    "upcoming_events": "الأحداث القادمة ومواعيد النتائج",
     "king_ai_score": "تقييم الذكاء الاصطناعي",
     "data_is_stale": "قدم البيانات",
+    "fund_score": "التقييم المالي",
+    "vol_ratio": "السيولة النسبية",
+    "r_vol": "السيولة النسبية",
 }
+_REDUNDANT_PAREN_FIELD_RE = re.compile(
+    r"\s*\(\s*`?("
+    + "|".join(sorted((re.escape(k) for k in _LEAKED_FIELD_LABELS), key=len, reverse=True))
+    + r")`?\s*\)"
+)
 _ORDERED_FIELD_PATTERNS: List[Tuple[str, re.Pattern[str], str]] = [
     (name, re.compile(rf"`?\b{re.escape(name)}\b`?"), label)
     for name, label in sorted(_LEAKED_FIELD_LABELS.items(), key=lambda kv: len(kv[0]), reverse=True)
@@ -167,6 +179,12 @@ def verify_and_guard_reply(
     if _LEAKED_FIELD_EXPR_RE.search(guarded):
         guarded = _LEAKED_FIELD_EXPR_RE.sub("", guarded)
         warnings.append("internal_field_leaked")
+
+    for paren_match in list(_REDUNDANT_PAREN_FIELD_RE.finditer(guarded)):
+        fname = paren_match.group(1)
+        warnings.append(f"internal_field_leaked:{fname}")
+    if _REDUNDANT_PAREN_FIELD_RE.search(guarded):
+        guarded = _REDUNDANT_PAREN_FIELD_RE.sub("", guarded)
 
     for fname, fpat, flabel in _ORDERED_FIELD_PATTERNS:
         if fpat.search(guarded):

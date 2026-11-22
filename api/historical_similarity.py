@@ -1046,17 +1046,13 @@ def publish_similarity_report(report_data: Dict[str, Any], *, invalidate_web: bo
                 # Manual publication must also refresh the shared Vercel generation.
                 # The daily run handles its full invalidation once at completion.
                 def refresh_web():
-                    import urllib.request
-                    endpoint = os.getenv("REVALIDATE_URL") or (os.getenv("WEB_ORIGIN", "").rstrip("/") + "/api/revalidate")
-                    secret = os.getenv("REVALIDATE_SECRET") or os.getenv("ADMIN_SECRET_KEY")
-                    if not secret or not endpoint.startswith("https://"):
-                        return
+                    from api.cache_invalidation import invalidate_cache_tags, TAG_MARKET
                     try:
-                        request = urllib.request.Request(endpoint, data=json.dumps({
-                            "tags": ["daily-market-data"], "event_id": datetime.utcnow().isoformat() + "Z"
-                        }).encode(), method="POST", headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"})
-                        with urllib.request.urlopen(request, timeout=60) as response:
-                            print(f"[SIMILARITY] Web cache refreshed: HTTP {response.status}")
+                        res = invalidate_cache_tags([TAG_MARKET], timeout=60.0) or {}
+                        if res.get("error"):
+                            print(f"[SIMILARITY] Web cache refresh deferred: {res.get('error')}")
+                        elif res.get("invalidated"):
+                            print(f"[SIMILARITY] Web cache refreshed: HTTP {res.get('status', 200)}")
                     except Exception as error:
                         print(f"[SIMILARITY] Web cache refresh deferred: {type(error).__name__}")
                 threading.Thread(target=refresh_web, daemon=True).start()

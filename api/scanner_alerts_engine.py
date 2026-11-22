@@ -63,25 +63,25 @@ SCANNER_PROFILES = {
 
 SAUDI_SCANNER_PROFILES = {
     "volume_surge": {
-        "t1_pct": 3.8,
-        "t2_pct": 6.0,
-        "sl_pct": 3.5,
+        "t1_pct": 4.2,
+        "t2_pct": 6.5,
+        "sl_pct": 2.6,
         "max_sessions": 6,
         "be_lock_pct": 0.5,
         "title_ar": "السيولة الفائقة",
     },
     "breakout": {
-        "t1_pct": 4.5,
-        "t2_pct": 7.0,
-        "sl_pct": 3.5,
+        "t1_pct": 4.8,
+        "t2_pct": 7.5,
+        "sl_pct": 2.8,
         "max_sessions": 6,
         "be_lock_pct": 0.5,
         "title_ar": "اختراق فني",
     },
     "rsi_oversold": {
-        "t1_pct": 3.5,
-        "t2_pct": 5.5,
-        "sl_pct": 3.0,
+        "t1_pct": 3.8,
+        "t2_pct": 5.8,
+        "sl_pct": 2.4,
         "max_sessions": 5,
         "be_lock_pct": 0.5,
         "title_ar": "تشبع بيعي",
@@ -687,14 +687,17 @@ def step_scanner_lifecycle(
                 exit_price = effective_stop
             realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
             is_be = has_breakeven and (exit_price >= entry_price)
-            updated_sig.update({
+            sig_patch = {
                 "status": "target_hit" if is_be else "stopped_out",
                 "exit_price": exit_price,
                 "return_pct": realized_return,
                 "exit_date": action_date,
                 "exit_time": action_time,
                 "exit_reason": "حماية الأرباح / تفعيل وقف التعادل 🛡️" if is_be else "ضرب وقف الخسارة 🛑",
-            })
+            }
+            if is_be:
+                sig_patch["is_breakeven"] = realized_return == 0.0
+            updated_sig.update(sig_patch)
             if is_be:
                 hit_target_signals.append(updated_sig)
             else:
@@ -788,10 +791,14 @@ def compute_scanner_signals_kpis(
     sum_losses = abs(sum(float(s.get("return_pct") or 0.0) for s in closed_losses))
 
     decided_count = len(closed_wins) + len(closed_losses)
+    breakeven_count = sum(1 for s in final_closed if float(s.get("return_pct") or 0.0) == 0.0)
     win_rate = round((len(closed_wins) / decided_count) * 100, 1) if decided_count > 0 else 80.0
+    strict_win_rate = round((len(closed_wins) / len(final_closed)) * 100, 1) if final_closed else 80.0
     profit_factor = round(sum_wins / sum_losses, 2) if sum_losses > 0 else 4.5
     return {
         "win_rate_pct": win_rate,
+        "strict_win_rate_pct": strict_win_rate,
+        "breakeven_count": breakeven_count,
         "total_closed": len(final_closed),
         "total_active": len(final_active),
         "avg_win_pct": round(sum_wins / max(1, len(closed_wins)), 1) if closed_wins else 3.5,

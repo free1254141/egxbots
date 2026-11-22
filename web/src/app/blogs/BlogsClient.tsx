@@ -962,6 +962,42 @@ export default function BlogsPage() {
               title: isAr ? "الاستثمار العقاري أم البورصة المصرية في 2026؟ دليلك الذكي مع Ewan Bot و EGX BOTS" : "Real Estate vs. Egyptian Stocks 2026: AI Guide with Ewan Bot & EGX BOTS",
               desc: isAr ? "مقارنة العوائد والتحوط ضد التضخم، والبحث في 2,800+ كمبوند بدون سماسرة أو مكالمات مزعجة عبر إيوان بوت (ewanbot.com)." : "Comparing ROI and inflation hedging in Egypt, and scanning 2,800+ verified compounds with Ewanbot.",
             },
+            {
+              href: "/blogs/gold-silver-xauusd-ai-technical-analysis-guide",
+              market: "both",
+              badgeBg: "bg-[#FFE600]",
+              linkColor: "text-amber-600 dark:text-amber-400",
+              badge: isAr ? "الذهب والفضة" : "Gold & Silver",
+              title: isAr ? "تحليل الذهب اليوم (XAUUSD) والفضة بالذكاء الاصطناعي 2026" : "Gold (XAUUSD) & Silver (XAGUSD) AI Technical Analysis 2026",
+              desc: isAr ? "مستويات الدعم والمقاومة ومؤشرات RSI وMACD لأونصة الذهب والفضة بالدولار يومياً." : "Daily Pivot support/resistance and momentum readings for spot Gold and Silver.",
+            },
+            {
+              href: "/blogs/saudi-tasi-telegram-stock-alerts-ai-guide",
+              market: "tasi",
+              badgeBg: "bg-cyan-300",
+              linkColor: "text-cyan-700 dark:text-cyan-400",
+              badge: isAr ? "تنبيهات تاسي VIP" : "TASI Telegram VIP",
+              title: isAr ? "قنوات وتنبيهات الأسهم السعودية (تاسي) على تليجرام 2026" : "Saudi TASI Telegram Stock Alerts & AI Scanner 2026",
+              desc: isAr ? "مقارنة التحليل الكمي ونظام المضاربة القصيرة وإدارة الوقف في السوق السعودي بالريال." : "Quantitative Tadawul breakout alerts and automated risk-managed trading setups.",
+            },
+            {
+              href: "/blogs/undervalued-saudi-tasi-stocks-fair-value-guide",
+              market: "tasi",
+              badgeBg: "bg-orange-300",
+              linkColor: "text-orange-700 dark:text-orange-400",
+              badge: isAr ? "السعر العادل تاسي" : "TASI Fair Value",
+              title: isAr ? "حساب السعر العادل للأسهم السعودية وأرخص أسهم تاسي 2026" : "Fair Value of Saudi TASI Stocks & Undervalued Screener 2026",
+              desc: isAr ? "معادلة جراهام ومضاعف الربحية P/E لاكتشاف الأسهم السعودية المقيمة بأقل من قيمتها العادلة." : "Graham formula and P/E multiples to spot undervalued Saudi Tadawul equities.",
+            },
+            {
+              href: "/blogs/uae-dfm-adx-qatar-qse-ai-sharia-stocks-guide",
+              market: "tasi",
+              badgeBg: "bg-sky-300",
+              linkColor: "text-sky-700 dark:text-sky-400",
+              badge: isAr ? "الإمارات وقطر" : "UAE & Qatar",
+              title: isAr ? "دليل تحليل أسهم الإمارات (DFM & ADX) وبورصة قطر (QSE) 2026" : "UAE (DFM & ADX) and Qatar (QSE) AI Stock Analysis Guide 2026",
+              desc: isAr ? "تغطية يومية لأسهم دبي وأبوظبي وقطر مع مؤشرات الزخم ونقاط الدعم والمقاومة." : "Daily technical coverage for Dubai, Abu Dhabi, and Qatar listed companies.",
+            },
           ]
             .sort((a, b) => {
               const target = isSaudi ? "tasi" : "egx";

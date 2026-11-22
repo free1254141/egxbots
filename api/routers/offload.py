@@ -837,7 +837,7 @@ def _load_recommendations_bundle(market: str, exchange: str, limit: int) -> Dict
         rec_fields = (
             "id,batch_id,symbol,exchange,name,last_close,precision,signal,status,"
             "entry_price,target_price,stop_loss,is_public,created_at,updated_at,"
-            "exit_price,profit_loss_pct,top_reasons,rich_details"
+            "exit_price,profit_loss_pct,top_reasons,rich_details,adjustments"
         )
         qb = sb.table("scan_results").select(rec_fields).eq("is_public", True).eq("exchange", exchange)
         qb = qb.order("created_at", desc=True)
@@ -1103,6 +1103,7 @@ async def api_ai_bot_recommendations(
             "precision": _to_float(row.get("precision"), 0.0) if authenticated else None,
             "last_close": last_c if last_c > 0 else None,
             "top_reasons": row.get("top_reasons"),
+            "adjustments": row.get("adjustments") if isinstance(row.get("adjustments"), list) else [],
             **exit_reason,
         })
 

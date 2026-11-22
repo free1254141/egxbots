@@ -87,16 +87,22 @@ _MODELS_CACHE = BoundedTTLCache(max_entries=16, default_ttl=3600.0)
 _MODELS_SF = SingleFlight()
 _SCAN_SETTINGS_CACHE = BoundedTTLCache(max_entries=2, default_ttl=300.0)
 _SVG_CACHE = BoundedTTLCache(max_entries=128, default_ttl=_RUN_TO_RUN_TTL)
+_DISCLOSURES_PAGE_CACHE = BoundedTTLCache(max_entries=4, default_ttl=_RUN_TO_RUN_TTL)
+_DISCLOSURES_PAGE_SF = SingleFlight()
+_GCC_METALS_DIR_CACHE = BoundedTTLCache(max_entries=4, default_ttl=_RUN_TO_RUN_TTL)
+_GCC_METALS_DIR_SF = SingleFlight()
 
 _PUBLIC_TAG_TO_CACHES: Dict[str, Tuple[Tuple[str, BoundedTTLCache], ...]] = {
     "daily-symbols": (
         ("public_directory", _PUBLIC_DIR_CACHE),
+        ("gcc_metals_dir", _GCC_METALS_DIR_CACHE),
         ("public_stock_page", _PUBLIC_STOCK_PAGE_CACHE),
         ("macro", _MACRO_CACHE),
     ),
     "daily-market-data": (
         ("public_stock_page", _PUBLIC_STOCK_PAGE_CACHE),
         ("public_directory", _PUBLIC_DIR_CACHE),
+        ("gcc_metals_dir", _GCC_METALS_DIR_CACHE),
         ("fair_value", _FAIR_VALUE_CACHE),
         ("tech_dataset", _TECH_DATASET_CACHE),
         ("similarity", _SIMILARITY_CACHE),
@@ -120,8 +126,10 @@ _PUBLIC_TAG_TO_CACHES: Dict[str, Tuple[Tuple[str, BoundedTTLCache], ...]] = {
     ),
     "daily-public-reports": (
         ("reports_archive", _REPORTS_ARCHIVE_CACHE),
+        ("sitemap_posts", _SITEMAP_POSTS_CACHE),
     ),
     "daily-disclosures": (
+        ("disclosures_page", _DISCLOSURES_PAGE_CACHE),
         ("disclosure_svg", _SVG_CACHE),
     ),
 }
@@ -593,7 +601,21 @@ def _load_gcc_stock_page_data(clean_sym: str, exchanges: List[str]) -> Dict[str,
         except Exception:
             return []
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    def _read_gcc_disclosures():
+        try:
+            res = (
+                sb.table("egx_disclosures")
+                .select("id,symbol,disclosure_type,disclosure_date,title,ai_summary,sentiment")
+                .eq("symbol", clean_sym)
+                .order("disclosure_date", desc=True)
+                .limit(3)
+                .execute()
+            )
+            return getattr(res, "data", None) or []
+        except Exception:
+            return []
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
         f_meta = pool.submit(_read_gcc_meta)
         f_price = pool.submit(_read_gcc_table, "stock_prices", "symbol,exchange,date,open,high,low,close,volume,updated_at", "date", 1)
         f_tech = pool.submit(
@@ -605,18 +627,20 @@ def _load_gcc_stock_page_data(clean_sym: str, exchanges: List[str]) -> Dict[str,
         )
         f_hist = pool.submit(_read_gcc_table, "stock_prices", "date,open,high,low,close,volume", "date", 30)
         f_peers = pool.submit(_read_gcc_peers)
+        f_disc = pool.submit(_read_gcc_disclosures)
         meta_rows = f_meta.result()
         price_rows = f_price.result()
         tech_rows = f_tech.result()
         hist_rows = f_hist.result()
         peer_rows = f_peers.result()
+        disc_rows = f_disc.result()
 
     stock_row = meta_rows[0] if meta_rows else None
     latest_price = price_rows[0] if price_rows else None
     latest_tech = tech_rows[0] if tech_rows else None
     if not stock_row and not latest_price:
         return {
-            "snapshot": {"fundamentals": None, "latestPrice": None, "latestTech": None, "latestScan": None, "historicalPrices": []},
+            "snapshot": {"fundamentals": None, "latestPrice": None, "latestTech": None, "latestScan": None, "historicalPrices": [], "recentDisclosures": []},
             "related": {"basis": "directory", "stocks": []},
         }
 
@@ -653,6 +677,7 @@ def _load_gcc_stock_page_data(clean_sym: str, exchanges: List[str]) -> Dict[str,
             "latestTech": latest_tech,
             "latestScan": None,
             "historicalPrices": list(reversed(hist_rows)),
+            "recentDisclosures": disc_rows,
         },
         "related": _select_related_links(directory, clean_sym, sector),
     }
@@ -705,6 +730,15 @@ def _load_stock_page_data(symbol: str, market: str, explicit_exchange: Optional[
             )
             return getattr(res, "data", None) or []
 
+    def _read_recent_disclosures():
+        try:
+            q = sb.table("egx_disclosures").select("id,symbol,disclosure_type,disclosure_date,title,ai_summary,sentiment")
+            q = q.in_("symbol", candidates) if is_saudi else q.eq("symbol", clean_sym)
+            res = q.order("disclosure_date", desc=True).limit(3).execute()
+            return getattr(res, "data", None) or []
+        except Exception:
+            return []
+
     if sb is None:
         directory = _get_public_directory(market)
         return {
@@ -714,11 +748,12 @@ def _load_stock_page_data(symbol: str, market: str, explicit_exchange: Optional[
                 "latestTech": None,
                 "latestScan": None,
                 "historicalPrices": [],
+                "recentDisclosures": [],
             },
             "related": _select_related_links(directory, clean_sym, ""),
         }
 
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=7) as pool:
         f_fund = pool.submit(_read_one, "stock_fundamentals", "symbol,exchange,data,updated_at", "updated_at", 1)
         f_price = pool.submit(_read_one, "stock_prices", "symbol,exchange,date,open,high,low,close,volume,updated_at", "date", 1)
         f_tech = pool.submit(
@@ -731,12 +766,14 @@ def _load_stock_page_data(symbol: str, market: str, explicit_exchange: Optional[
         f_hist = pool.submit(_read_one, "stock_prices", "date,open,high,low,close,volume", "date", 30)
         f_scan = pool.submit(_read_one, "scan_results", "symbol,exchange,created_at,precision,signal,top_reasons", "created_at", 1)
         f_meta = pool.submit(_read_stock_meta)
+        f_disc = pool.submit(_read_recent_disclosures)
         fund_rows = f_fund.result()
         price_rows = f_price.result()
         tech_rows = f_tech.result()
         hist_rows = f_hist.result()
         scan_rows = f_scan.result()
         meta_rows = f_meta.result()
+        disc_rows = f_disc.result()
 
     raw_fund = fund_rows[0] if fund_rows else None
     latest_price = price_rows[0] if price_rows else None
@@ -785,6 +822,7 @@ def _load_stock_page_data(symbol: str, market: str, explicit_exchange: Optional[
             "latestTech": latest_tech,
             "latestScan": latest_scan,
             "historicalPrices": list(reversed(hist_rows)),
+            "recentDisclosures": disc_rows,
         },
         "related": related,
     }
@@ -3691,3 +3729,206 @@ async def api_market_dividends(
             "Vercel-Cache-Tag": "daily-market-data",
         },
     )
+
+
+_DISCLOSURE_PAGE_COLS = (
+    "id, symbol, company_name, disclosure_type, disclosure_date, title, "
+    "ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, "
+    "party_name, party_role, source_url, metadata"
+)
+_GCC_METALS_EXCHANGES = ("DFM", "ADX", "QSE", "COMMODITIES")
+
+
+def _load_disclosures_page_data() -> Dict[str, Any]:
+    sb = get_primary_supabase()
+    if sb is None:
+        return {
+            "items": [],
+            "allPool": [],
+            "stats": {"total": 0, "buys": 0, "sells": 0, "shareholding": 0},
+            "priceMap": {},
+        }
+
+    def _run_page():
+        return (
+            sb.table("egx_disclosures")
+            .select(_DISCLOSURE_PAGE_COLS, count="exact")
+            .order("disclosure_date", desc=True)
+            .order("created_at", desc=True)
+            .limit(24)
+            .execute()
+        )
+
+    def _run_pool():
+        return (
+            sb.table("egx_disclosures")
+            .select(_DISCLOSURE_PAGE_COLS)
+            .order("disclosure_date", desc=True)
+            .limit(2000)
+            .execute()
+        )
+
+    def _run_prices():
+        return sb.table("stock_technical_indicators").select("symbol, close, change_pct").limit(350).execute()
+
+    def _run_fundamentals():
+        return sb.table("stock_fundamentals").select("symbol, data").limit(350).execute()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_page = pool.submit(_run_page)
+        f_pool = pool.submit(_run_pool)
+        f_prices = pool.submit(_run_prices)
+        f_fund = pool.submit(_run_fundamentals)
+        page_res = f_page.result()
+        pool_res = f_pool.result()
+        prices_res = f_prices.result()
+        fund_res = f_fund.result()
+
+    all_disclosures = list(getattr(pool_res, "data", None) or [])
+    items = list(getattr(page_res, "data", None) or [])
+
+    price_map: Dict[str, Dict[str, Any]] = {}
+    for row in getattr(prices_res, "data", None) or []:
+        sym = str(row.get("symbol") or "").strip().upper()
+        if sym and row.get("close") is not None:
+            close_val = float(row["close"])
+            price_map[sym] = {
+                "close": close_val,
+                "change_pct": float(row["change_pct"]) if row.get("change_pct") is not None else 0.0,
+            }
+
+    for row in getattr(fund_res, "data", None) or []:
+        sym = str(row.get("symbol") or "").strip().upper()
+        raw_data = row.get("data")
+        if isinstance(raw_data, str):
+            try:
+                raw_data = json.loads(raw_data)
+            except Exception:
+                raw_data = None
+        if not sym or not isinstance(raw_data, dict):
+            continue
+        mc = raw_data.get("marketCap")
+        if isinstance(mc, (int, float)) and not isinstance(mc, bool) and mc > 0:
+            if sym in price_map:
+                price_map[sym]["market_cap"] = mc
+                if price_map[sym]["close"] > 0:
+                    price_map[sym]["total_shares"] = round(mc / price_map[sym]["close"])
+            else:
+                price_map[sym] = {
+                    "close": 0.0,
+                    "change_pct": 0.0,
+                    "market_cap": mc,
+                }
+
+    total = getattr(page_res, "count", None)
+    if total is None:
+        total = len(all_disclosures)
+    buys = sum(1 for d in all_disclosures if d.get("action_type") == "buy" or d.get("sentiment") == "bullish")
+    sells = sum(1 for d in all_disclosures if d.get("action_type") == "sell" or d.get("sentiment") == "bearish")
+    shareholding = sum(
+        1
+        for d in all_disclosures
+        if d.get("disclosure_type") == "major_shareholders" or d.get("stake_after") is not None
+    )
+
+    return {
+        "items": items,
+        "allPool": all_disclosures,
+        "stats": {
+            "total": int(total),
+            "buys": buys,
+            "sells": sells,
+            "shareholding": shareholding,
+        },
+        "priceMap": price_map,
+    }
+
+
+@router.get("/api/public/disclosures-page-data")
+async def api_public_disclosures_page_data():
+    """Cached initial payload for SSR /disclosures page (excludes unused raw_content)."""
+    found, cached = _DISCLOSURES_PAGE_CACHE.get("egx")
+    if not found:
+        cached = _DISCLOSURES_PAGE_SF.do("egx", _load_disclosures_page_data)
+        if cached.get("allPool") or cached.get("items"):
+            _DISCLOSURES_PAGE_CACHE.set("egx", cached, ttl=_RUN_TO_RUN_TTL)
+    return JSONResponse(cached, headers=_daily_headers("daily-disclosures"))
+
+
+def _load_gcc_metals_directory_with_prices() -> List[Dict[str, Any]]:
+    sb = get_market_supabase("tasi")
+    if sb is None:
+        return []
+
+    exchanges = list(_GCC_METALS_EXCHANGES)
+
+    def _run_stocks():
+        return (
+            sb.table("stocks")
+            .select("symbol,exchange,name,name_ar,sector,currency,updated_at")
+            .in_("exchange", exchanges)
+            .eq("is_active", True)
+            .order("symbol", desc=False)
+            .limit(500)
+            .execute()
+        )
+
+    def _run_indicators():
+        return (
+            sb.table("stock_technical_indicators")
+            .select("symbol,exchange,close,change_pct,rsi_14,date")
+            .in_("exchange", exchanges)
+            .limit(500)
+            .execute()
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_stocks = pool.submit(_run_stocks)
+        f_ind = pool.submit(_run_indicators)
+        stocks_res = f_stocks.result()
+        ind_res = f_ind.result()
+
+    ind_map: Dict[str, Dict[str, Any]] = {}
+    for row in getattr(ind_res, "data", None) or []:
+        ex = str(row.get("exchange") or "").strip().upper()
+        sym = str(row.get("symbol") or "").strip().upper()
+        if sym:
+            ind_map[f"{ex}:{sym}"] = row
+
+    by_sym: Dict[str, Dict[str, Any]] = {}
+    for row in getattr(stocks_res, "data", None) or []:
+        sym = str(row.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        ex = str(row.get("exchange") or "").strip()
+        ind = ind_map.get(f"{ex.upper()}:{sym}") or {}
+        entry: Dict[str, Any] = {
+            "symbol": sym,
+            "name": str(row.get("name") or sym).strip(),
+            "sector": str(row.get("sector") or "").strip(),
+            "marketCap": None,
+            "exchange": ex,
+            "currency": str(row.get("currency") or "USD").strip(),
+            "close": float(ind["close"]) if ind.get("close") is not None else None,
+            "changePct": float(ind["change_pct"]) if ind.get("change_pct") is not None else None,
+            "rsi14": float(ind["rsi_14"]) if ind.get("rsi_14") is not None else None,
+            "priceDate": str(ind["date"])[:10] if ind.get("date") else None,
+        }
+        if row.get("name_ar"):
+            entry["nameAr"] = str(row["name_ar"]).strip()
+        if row.get("updated_at"):
+            entry["updatedAt"] = str(row["updated_at"])
+        by_sym[sym] = entry
+
+    return sorted(by_sym.values(), key=lambda x: x["symbol"])
+
+
+@router.get("/api/public/gcc-metals-directory")
+async def api_public_gcc_metals_directory():
+    """Cached GCC (UAE/Qatar) & Metals directory with latest prices/RSI."""
+    found, cached = _GCC_METALS_DIR_CACHE.get("all")
+    if not found:
+        cached = _GCC_METALS_DIR_SF.do("all", _load_gcc_metals_directory_with_prices)
+        if cached:
+            _GCC_METALS_DIR_CACHE.set("all", cached, ttl=_RUN_TO_RUN_TTL)
+    return JSONResponse({"stocks": cached}, headers=_daily_headers("daily-symbols"))

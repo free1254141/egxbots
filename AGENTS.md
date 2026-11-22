@@ -74,6 +74,7 @@ These instructions apply to the entire repository, including AI assistants, revi
 - Tool executions must always query Supabase directly with explicit column projections and strict `limit()` clauses.
 - Public read-only tool results (`get_stock`, `get_market`, `get_recommendations`, `get_technical_scan`, `get_news`, `get_fair_value`, `get_sharia_cleanser`, ...) are cached per Cairo trading day in `web/src/lib/ai/tool-result-cache.ts`. Never add portfolio, alert, automation or live-quote tools to that allowlist: they read `userId` or must stay intraday. Disable the cache with `TOOL_RESULT_CACHE=off` if it ever misbehaves.
 - Detailed architecture, Python backend engine (`api/agentic_chat/`), and historical reviews are in `docs/chatbot-python-agentic-architecture-2026-11-10.md`, `docs/chatbot-current-architecture.md`, and `docs/chatbot-agentic-architecture-2026-10-08.md`.
+- **Mandatory Chat Audit Workflow (`"راجع الشات"`):** Whenever the user asks to review or audit the chatbot (`"راجع الشات"` / `"راجع ردود الشات"`), ALWAYS execute the full protocol in `.agent/skills/chat-audit/SKILL.md` (logic & math accuracy, `guard_warnings`, user corrections/complaints, VIP & DeepSeek Prefix Cache rates, token/USD cost, latency percentiles, recent commit impact, and P1/P2/P3 fix backlog — using `scripts/audit_chat_cost_and_latency.py` and targeted table queries, NEVER `query_logs`) and record the dated findings in `docs/CHAT_COST_TOKEN_LATENCY_TRACKER.md` strictly locally without pushing to Git or Hugging Face unless explicitly authorized.
 
 ## Google Search Console & SEO / GEO Intelligence
 
@@ -102,7 +103,7 @@ To stay comfortably inside Vercel Hobby limits (Fluid Active CPU, Fast Origin Tr
 ### 2. Algorithmic Performance & Smart Caching
 - **Bounded LRU + TTL + SingleFlight (`api/perf_utils.py`):** Protect every hot backend read path with `BoundedTTLCache` (O(1) `OrderedDict` LRU eviction, bounded memory, automatic TTL expiry) paired with `SingleFlight` request coalescing so concurrent burst traffic collapses into one upstream query.
 - **Parallel Independent I/O:** Use `ThreadPoolExecutor` / `asyncio.gather` whenever an endpoint needs multiple independent reads (e.g. `user/quota`: profile + subscriptions + usage counters + founding-member count in parallel).
-- **Debounced Revalidation (`api/cache_invalidation.py`):** Deduplicate cache tags and respect `REVALIDATE_COOLDOWN_SECONDS` (default `120s`) before calling Vercel `/api/revalidate` so clustered pipeline steps never trigger redundant ISR rebuilds.
+- **Debounced Revalidation (`api/cache_invalidation.py`):** Deduplicate cache tags and respect `REVALIDATE_COOLDOWN_SECONDS` (default `900s`) before calling Vercel `/api/revalidate` so clustered pipeline steps never trigger redundant ISR rebuilds. All jobs and publish actions MUST call `api/cache_invalidation.py` (`invalidate_cache_tags` / `invalidate_daily_cache`), never raw `/api/revalidate` HTTP requests.
 - **Edge HTTP Caching Headers:** Public unauthenticated daily payloads MUST return `Cache-Control: public, s-maxage=900, stale-while-revalidate=3600` (with appropriate `Vary` when entitlement affects output); authenticated or user-specific payloads MUST return `Cache-Control: private, no-store, max-age=0`.
 
 ### 3. Compact Database Queries & Smart Projections
@@ -114,6 +115,13 @@ To stay comfortably inside Vercel Hobby limits (Fluid Active CPU, Fast Origin Tr
 - **Verified Identity Only (`resolve_verified_viewer`):** Never trust client-supplied `is_pro`, `user_id`, or `tier` query/body flags on HF endpoints. Extract bearer tokens or `@supabase/ssr` cookies via `api/agentic_chat/auth_guard.py`, verify via Supabase Auth (`get_user` cached briefly by SHA-256 token hash), and verify active entitlement (`subscriptions` table + `paymentsEnabled` gate).
 - **Timing-Safe Secrets & Input Sanitization:** Compare internal keys (`x-admin-key`) with `hmac.compare_digest` (failing closed when unset), verify webhook signatures (`svix` HMAC on Resend webhooks), and validate ticker/exchange/metadata keys with strict regex allowlists.
 - **Per-User Isolation:** Never mix user-specific quota, portfolio, or unlocked PRO fields into shared public cache keys.
+
+### 5. Mandatory ISR & Zero-CPU Anti-Regression Checklist
+- **Cookie-Free Public ISR Pages:** Never call `createSupabaseServerClient()`, `cookies()`, or `headers()` inside public ISR pages (`export const revalidate = ...`) — reading cookies forces Next.js dynamic SSR on every visit and disables Edge/ISR caching. Always use `getPublicMarketClient()` or `fetchHfPublicJson()` wrapped with `React.cache()`.
+- **Single-Region Pinning (`fra1`):** Every public ISR page (`revalidate = 604800`) MUST declare `export const preferredRegion = "fra1";` so all regions share one Data Cache / KV namespace instead of cold-rebuilding per edge region.
+- **Offload Heavy Public Aggregations to HF:** Never query multi-hundred-row Supabase tables directly from Vercel SSR (`disclosures`, `fair-value`, `stock-directory`, `gcc-metals-directory`, `reports-archive`); serve cached endpoints from `api/routers/offload_public.py` (`BoundedTTLCache` + `SingleFlight`) via `fetchHfPublicJson()`, and never select unused large columns (e.g., `raw_content`).
+- **Centralized Debounced Revalidation:** Never bypass `api/cache_invalidation.py` with direct `/api/revalidate` calls; preserve `REVALIDATE_COOLDOWN_SECONDS` (default `900s`) debouncing and avoid `revalidatePath("/", "layout")` on routine updates.
+- **Full Multi-Market Pre-rendering & Edge Redirects:** `generateStaticParams()` on dynamic SEO routes (e.g., `/stocks/[symbol]`) MUST cover all active markets (EGX + TASI via weekly directory caches), and canonical suffix redirects (`.sr`/`.sa`/`.tadawul`) MUST live in `web/next.config.js` `redirects()` at 0 Vercel CPU.
 
 ## 💳 Subscription Tiers, Capability Isolation & Payment/FRA Architecture
 

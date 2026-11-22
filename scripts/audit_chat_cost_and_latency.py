@@ -2,10 +2,12 @@
 
 Usage:
     python scripts/audit_chat_cost_and_latency.py
-    python scripts/audit_chat_cost_and_latency.py --limit 400 --update-doc
+    python scripts/audit_chat_cost_and_latency.py --limit 1000 --update-doc
+    python scripts/audit_chat_cost_and_latency.py --limit 1000 --since 2026-11-21T17:32:00Z
 """
 
 import argparse
+from collections import Counter
 import os
 import re
 import statistics
@@ -38,6 +40,8 @@ EST_DYNAMIC_BEFORE_TOKENS = 1900  # includes seconds-changing date_context + red
 EST_DYNAMIC_AFTER_TOKENS = 1550   # hourly bucket date_context + no get_stock_levels duplication
 
 DEFAULT_DOC_PATH = ROOT_DIR / "docs" / "CHAT_COST_TOKEN_LATENCY_TRACKER.md"
+QUALITY_LOG_START = "<!-- QUALITY_AUDIT_LOG_START -->"
+QUALITY_LOG_END = "<!-- QUALITY_AUDIT_LOG_END -->"
 
 
 def _percentile(sorted_vals: List[float], pct: float) -> float:
@@ -55,12 +59,14 @@ def _percentile(sorted_vals: List[float], pct: float) -> float:
 def _latency_stats(values: List[int]) -> Dict[str, Any]:
     clean = sorted(float(v) for v in values if v is not None and v > 0)
     if not clean:
-        return {"count": 0, "avg_ms": 0, "median_ms": 0, "p90_ms": 0}
+        return {"count": 0, "avg_ms": 0, "median_ms": 0, "p90_ms": 0, "p95_ms": 0, "max_ms": 0}
     return {
         "count": len(clean),
         "avg_ms": int(round(sum(clean) / len(clean))),
         "median_ms": int(round(statistics.median(clean))),
         "p90_ms": int(round(_percentile(clean, 0.90))),
+        "p95_ms": int(round(_percentile(clean, 0.95))),
+        "max_ms": int(round(clean[-1])),
     }
 
 
@@ -120,10 +126,14 @@ def summarize_cohort(rows: List[Dict[str, Any]], is_after: bool) -> Dict[str, An
     est_total_comp = 0.0
 
     meas_cost_sum = 0.0
+    meas_max_cost = 0.0
     meas_prompt_sum = 0
     meas_comp_sum = 0
     meas_hit_sum = 0
     meas_miss_sum = 0
+
+    guard_warning_rows = 0
+    guard_warning_counts: Counter = Counter()
 
     for r in rows:
         meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
@@ -133,6 +143,12 @@ def summarize_cohort(rows: List[Dict[str, Any]], is_after: bool) -> Dict[str, An
             lat_int = int(lat)
         except Exception:
             lat_int = 0
+
+        gw_list = meta.get("guard_warnings") if isinstance(meta.get("guard_warnings"), list) else []
+        if gw_list:
+            guard_warning_rows += 1
+            for w in gw_list:
+                guard_warning_counts[str(w)] += 1
 
         content = str(r.get("content") or "")
         char_lengths.append(len(content))
@@ -158,14 +174,17 @@ def summarize_cohort(rows: List[Dict[str, Any]], is_after: bool) -> Dict[str, An
             or usage.get("cost_usd") is not None
             or usage.get("vip_response_cached") is True
         ):
+            row_cost = float(usage.get("cost_usd") or 0.0)
+            if row_cost > meas_max_cost:
+                meas_max_cost = row_cost
             measured_usage_rows.append(r)
-            meas_cost_sum += float(usage.get("cost_usd") or 0.0)
+            meas_cost_sum += row_cost
             meas_prompt_sum += int(usage.get("prompt_tokens") or 0)
             meas_comp_sum += int(usage.get("completion_tokens") or 0)
             meas_hit_sum += int(usage.get("prompt_cache_hit_tokens") or 0)
             meas_miss_sum += int(usage.get("prompt_cache_miss_tokens") or 0)
 
-            est_total_cost += float(usage.get("cost_usd") or 0.0)
+            est_total_cost += row_cost
             est_total_prompt += float(usage.get("prompt_tokens") or 0)
             est_total_comp += float(usage.get("completion_tokens") or 0)
         else:
@@ -178,10 +197,14 @@ def summarize_cohort(rows: List[Dict[str, Any]], is_after: bool) -> Dict[str, An
     for src, s_rows in sorted(by_source.items(), key=lambda kv: -len(kv[1])):
         s_lats = []
         s_cached = 0
+        s_cost_sum = 0.0
         for sr in s_rows:
             sm = sr.get("metadata") if isinstance(sr.get("metadata"), dict) else {}
             if bool(sm.get("cached")):
                 s_cached += 1
+            su = sm.get("usage") if isinstance(sm.get("usage"), dict) else None
+            if su and su.get("cost_usd") is not None:
+                s_cost_sum += float(su.get("cost_usd") or 0.0)
             sl = sr.get("latency_ms") or sm.get("latency_ms") or 0
             if sl:
                 try:
@@ -194,6 +217,7 @@ def summarize_cohort(rows: List[Dict[str, Any]], is_after: bool) -> Dict[str, An
             "count": len(s_rows),
             "cached": s_cached,
             "cache_rate_pct": round((s_cached / len(s_rows)) * 100.0, 1) if s_rows else 0.0,
+            "measured_cost_sum_usd": round(s_cost_sum, 6),
         }
 
     avg_chars = int(round(sum(char_lengths) / len(char_lengths))) if char_lengths else 0
@@ -232,23 +256,51 @@ def summarize_cohort(rows: List[Dict[str, Any]], is_after: bool) -> Dict[str, An
         # Strictly measured rows with `metadata.usage`
         "measured_count": meas_n,
         "measured_live_count": len(meas_live_rows),
+        "measured_total_cost_usd": round(meas_cost_sum, 6) if meas_n else 0.0,
+        "measured_max_cost_usd": round(meas_max_cost, 6) if meas_n else 0.0,
         "measured_avg_cost_usd": (meas_cost_sum / meas_n) if meas_n else None,
         "measured_avg_prompt_tokens": int(round(meas_prompt_sum / meas_n)) if meas_n else None,
         "measured_avg_comp_tokens": int(round(meas_comp_sum / meas_n)) if meas_n else None,
         "measured_prefix_cache_hit_pct": meas_hit_pct if meas_prompt_sum > 0 else None,
+        # Deterministic output guardrail stats
+        "guard_warning_rows": guard_warning_rows,
+        "guard_warning_counts": dict(guard_warning_counts.most_common()),
     }
 
 
-def fetch_chat_rows(limit: int = 400) -> List[Dict[str, Any]]:
+def _get_supabase_client():
     from supabase import create_client
 
     url = os.environ["SUPABASE_URL"]
     key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    sb = create_client(url, key)
+    return create_client(url, key)
+
+
+def fetch_chat_rows(limit: int = 1000, since_utc: Optional[str] = None) -> List[Dict[str, Any]]:
+    sb = _get_supabase_client()
+    q = (
+        sb.table("ai_chat_messages")
+        .select("id,session_id,role,latency_ms,metadata,created_at,content")
+        .eq("role", "assistant")
+    )
+    if since_utc:
+        q = q.gte("created_at", since_utc)
+    res = (
+        q.order("created_at", desc=True)
+        .limit(min(max(int(limit), 10), 1000))
+        .execute()
+    )
+    return res.data or []
+
+
+def fetch_before_baseline_rows(limit: int = 200) -> List[Dict[str, Any]]:
+    """Fallback query for pre-cutoff baseline rows once post-update rows exceed fetch limit."""
+    sb = _get_supabase_client()
     res = (
         sb.table("ai_chat_messages")
         .select("id,session_id,role,latency_ms,metadata,created_at,content")
         .eq("role", "assistant")
+        .lt("created_at", UPDATE_CUTOFF_UTC)
         .order("created_at", desc=True)
         .limit(min(max(int(limit), 10), 1000))
         .execute()
@@ -279,7 +331,21 @@ def _extract_existing_snapshots(doc_path: Path) -> List[str]:
     return rows
 
 
-def render_markdown(before: Dict[str, Any], after: Dict[str, Any], existing_snapshots: List[str]) -> str:
+def _extract_existing_quality_log(doc_path: Path) -> str:
+    if not doc_path.exists():
+        return ""
+    text = doc_path.read_text(encoding="utf-8")
+    if QUALITY_LOG_START not in text or QUALITY_LOG_END not in text:
+        return ""
+    return text.split(QUALITY_LOG_START, 1)[1].split(QUALITY_LOG_END, 1)[0].strip()
+
+
+def render_markdown(
+    before: Dict[str, Any],
+    after: Dict[str, Any],
+    existing_snapshots: List[str],
+    existing_quality_log: str = "",
+) -> str:
     now_cairo = datetime.now(CAIRO_TZ)
     today_label = now_cairo.strftime("%Y-%m-%d %H:%M")
 
@@ -315,6 +381,14 @@ def render_markdown(before: Dict[str, Any], after: Dict[str, Any], existing_snap
             )
         return "\n".join(lines)
 
+    guard_line = ""
+    if after.get("guard_warning_rows", 0) > 0:
+        gw_pairs = ", ".join(f"`{k}`×{v}" for k, v in (after.get("guard_warning_counts") or {}).items())
+        guard_line = (
+            f"\n- **تدخلات الحارس الحتمي (`output_guard`):** `{after['guard_warning_rows']}` رد "
+            f"({gw_pairs})"
+        )
+
     meas_section_after = (
         f"- **الصفوف المقاسة فعلياً (`metadata.usage`):** `{after['measured_count']}` رد "
         f"(`{after['measured_live_count']}` رد LLM مباشر)\n"
@@ -322,9 +396,17 @@ def render_markdown(before: Dict[str, Any], after: Dict[str, Any], existing_snap
         f"Output `{after['measured_avg_comp_tokens']:,}` | "
         f"**Prefix Cache Hit:** `{after_prefix_hit}`\n"
         f"- **متوسط التكلفة المقاسة/رد:** `${after['measured_avg_cost_usd']:.6f}` "
-        f"(`~${after['measured_avg_cost_usd'] * 1000:.3f}` لكل 1,000 رد)"
+        f"(`~${after['measured_avg_cost_usd'] * 1000:.3f}` لكل 1,000 رد | "
+        f"إجمالي العينة: `${after['measured_total_cost_usd']:.4f}` | أعلى رد: `${after['measured_max_cost_usd']:.5f}`)"
+        f"{guard_line}"
         if after["measured_count"] > 0
         else "- **الصفوف المقاسة فعلياً (`metadata.usage`):** `0` حتى الآن — تم تفعيل التسجيل الدقيق في `pipeline.py` و`router.py` و`native_telegram_vip_chat.py`، وسيبدأ الامتلاء التلقائي فور نشر الكود واستقبال ردود جديدة."
+    )
+
+    quality_body = (
+        existing_quality_log.strip()
+        if existing_quality_log and existing_quality_log.strip()
+        else "*لا توجد مراجعات نوعية مسجلة بعد — اتبع [chat-audit SKILL](../.agent/skills/chat-audit/SKILL.md) لإضافة مراجعة جديدة.*"
     )
 
     return f"""# 📊 متابعة تكلفة الشات واستهلاك التوكن وزمن الرد (قبل وبعد التحديث)
@@ -333,7 +415,7 @@ def render_markdown(before: Dict[str, Any], after: Dict[str, Any], existing_snap
 > **نقطة الفصل المرجعية (Update Cutoff):** `2026-11-17 21:11 القاهرة` (`{UPDATE_CUTOFF_UTC} UTC` — كوميت `94105490` / HF `0fd31aad`)
 > **أداة التحديث الدوري (كل يومين):**
 > ```bash
-> python scripts/audit_chat_cost_and_latency.py --update-doc
+> python scripts/audit_chat_cost_and_latency.py --limit 1000 --update-doc
 > ```
 
 ---
@@ -351,7 +433,7 @@ def render_markdown(before: Dict[str, Any], after: Dict[str, Any], existing_snap
 
 | المؤشر | قبل التحديث (`< 2026-11-17 21:11`) | بعد التحديث (`>= 2026-11-17 21:11`) | الفرق / الملاحظة |
 |---|---:|---:|---|
-| **النطاق الزمني (UTC)** | `{before['window_start_utc']}` → `{before['window_end_utc']}` | `{after['window_start_utc']}` → `{after['window_end_utc']}` | عينة آخر 400 رد مساعد |
+| **النطاق الزمني (UTC)** | `{before['window_start_utc']}` → `{before['window_end_utc']}` | `{after['window_start_utc']}` → `{after['window_end_utc']}` | عينة: قبل {before['total']} / بعد {after['total']} رد |
 | **إجمالي الردود** | {before['total']} | {after['total']} | — |
 | **ردود VIP Cache (0 توكن)** | {before['cached_count']} ({before['cache_hit_pct']}%) | {after['cached_count']} ({after['cache_hit_pct']}%) | تزيد مع تكرار أسئلة اليوم |
 | **ردود LLM المباشرة** | {before['live_count']} | {after['live_count']} | — |
@@ -395,7 +477,7 @@ def render_markdown(before: Dict[str, Any], after: Dict[str, Any], existing_snap
 ---
 
 ## 4. سجل المتابعة الدوري (كل يومين)
-*يتم تحديث هذا الجدول تلقائياً عند تشغيل `python scripts/audit_chat_cost_and_latency.py --update-doc`.*
+*يتم تحديث هذا الجدول تلقائياً عند تشغيل `python scripts/audit_chat_cost_and_latency.py --limit 1000 --update-doc`.*
 
 <!-- SNAPSHOT_HISTORY_START -->
 | التاريخ (القاهرة) | ردود ما بعد التحديث | نسبة VIP Cache | متوسط الزمن (الكل) | متوسط الزمن (LLM مباشر) | صفوف `usage` المقاسة | نسبة Prefix Hit المقاسة | متوسط التكلفة/رد | التكلفة / 1,000 رد |
@@ -405,23 +487,113 @@ def render_markdown(before: Dict[str, Any], after: Dict[str, Any], existing_snap
 
 ---
 
-## 5. قائمة المراجعة الدورية (كل يومين)
-1. شغّل: `python scripts/audit_chat_cost_and_latency.py --update-doc`
-2. راجع عمود **نسبة Prefix Hit المقاسة**: يجب أن يكون أعلى من **65%–75%** في الردود المباشرة؛ لو انخفض، تأكد من عدم إدراج قيم متغيرة في `AGENTIC_SYSTEM_PROMPT` أو `date_context`.
-3. راجع عمود **نسبة VIP Cache**: الأسئلة الشائعة اليومية («حلل سهم X»، «وضع السوق»، «التوصيات») يجب أن ترفع النسبة تدريجياً فتُخدم بـ **0 توكن** وبزمن `< 0.5s`.
-4. راقب **متوسط زمن الرد (LLM مباشر)** لكل قناة (`web_chat` مقابل `telegram_private`) للتأكد من عدم تراجع سرعة أدوات Supabase أو DeepSeek.
+## 5. قائمة المراجعة الدورية (عند طلب «راجع الشات» أو كل يومين)
+1. شغّل نافذة الفحص التراكمي/الحديث: `python scripts/audit_chat_cost_and_latency.py --limit 1000 --since <LAST_DEPLOY_UTC>` ثم حدّث الوثيقة: `python scripts/audit_chat_cost_and_latency.py --limit 1000 --update-doc`
+2. اتبع البروتوكول الكامل في [chat-audit SKILL](../.agent/skills/chat-audit/SKILL.md) (فحص منطقية الردود، تدخلات `output_guard`، شكاوى المستخدمين، الكاش، التكلفة، الزمن، وأثر الكوميتات).
+3. راجع عمود **نسبة Prefix Hit المقاسة**: يجب أن يكون أعلى من **65%–75%** في الردود المباشرة؛ لو انخفض، تأكد من عدم إدراج قيم متغيرة في `AGENTIC_SYSTEM_PROMPT` أو `date_context`.
+4. راجع عمود **نسبة VIP Cache**: الأسئلة الشائعة اليومية («حلل سهم X»، «وضع السوق»، «التوصيات»، «الفرص البديلة») يجب أن ترفع النسبة تدريجياً فتُخدم بـ **0 توكن** وبزمن `< 0.5s`.
+5. راقب **متوسط زمن الرد (LLM مباشر)** و**أعلى 10 ردود تكلفة** لكل قناة (`web_chat` مقابل `telegram_private` و`scheduled_automation`) لمنع تضخم التوكن في جلسات المحفظة الطويلة.
+
+---
+
+## 6. سجل المراجعة النوعية والمنطقية وأثر التعديلات
+*يُحفظ هذا القسم تلقائياً عند تشغيل `--update-doc`. اتبع [chat-audit SKILL](../.agent/skills/chat-audit/SKILL.md) لإضافة مراجعة جديدة دون حذف السجلات السابقة.*
+
+{QUALITY_LOG_START}
+{quality_body}
+{QUALITY_LOG_END}
 """
+
+
+def print_window_report(window_rows: List[Dict[str, Any]], since_label: str) -> None:
+    st = summarize_cohort(window_rows, is_after=True)
+    l_all = st["latency_all"]
+    l_cached = st["latency_cached"]
+    l_live = st["latency_live"]
+    print(
+        f"\n[WINDOW since={since_label}] total={st['total']} "
+        f"(UTC {st['window_start_utc']} -> {st['window_end_utc']})"
+    )
+    print(
+        f"  VIP Cache: {st['cached_count']}/{st['total']} ({st['cache_hit_pct']}%) | "
+        f"measured_usage={st['measured_count']} | "
+        f"prefix_hit={st['measured_prefix_cache_hit_pct']}%"
+    )
+    print(
+        f"  Cost (measured): total=${st['measured_total_cost_usd']:.5f} | "
+        f"avg_all=${st['avg_cost_usd']:.5f} (${st['cost_per_1k_usd']:.3f}/1k) | "
+        f"max=${st['measured_max_cost_usd']:.5f}"
+    )
+    print(
+        f"  Latency ALL   : avg={l_all['avg_ms']}ms | p50={l_all['median_ms']}ms | "
+        f"p90={l_all['p90_ms']}ms | p95={l_all['p95_ms']}ms | max={l_all['max_ms']}ms"
+    )
+    print(
+        f"  Latency CACHED: n={l_cached['count']} avg={l_cached['avg_ms']}ms | "
+        f"p50={l_cached['median_ms']}ms | max={l_cached['max_ms']}ms"
+    )
+    print(
+        f"  Latency LIVE  : n={l_live['count']} avg={l_live['avg_ms']}ms | "
+        f"p50={l_live['median_ms']}ms | p95={l_live['p95_ms']}ms | max={l_live['max_ms']}ms"
+    )
+    print(f"  Guard warnings: rows={st['guard_warning_rows']} | counts={st['guard_warning_counts']}")
+    print("  By source:")
+    for src, sdata in st["by_source"].items():
+        print(
+            f"    - {src}: n={sdata['count']} | cached={sdata['cached']} ({sdata['cache_rate_pct']}%) | "
+            f"cost=${sdata['measured_cost_sum_usd']:.5f} | avg_lat={sdata['avg_ms']}ms"
+        )
+
+    def _row_cost(r: Dict[str, Any]) -> float:
+        m = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+        u = m.get("usage") if isinstance(m.get("usage"), dict) else {}
+        return float(u.get("cost_usd") or 0.0)
+
+    def _row_lat(r: Dict[str, Any]) -> int:
+        m = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+        try:
+            return int(r.get("latency_ms") or m.get("latency_ms") or 0)
+        except Exception:
+            return 0
+
+    print("  Top 5 most expensive:")
+    for r in sorted(window_rows, key=_row_cost, reverse=True)[:5]:
+        m = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+        u = m.get("usage") if isinstance(m.get("usage"), dict) else {}
+        print(
+            f"    * {str(r.get('created_at') or '')[:19]} | ${ _row_cost(r):.5f} | "
+            f"in={u.get('prompt_tokens')} out={u.get('completion_tokens')} | "
+            f"lat={_row_lat(r)}ms | src={m.get('chat_source')} | "
+            f"key={m.get('cache_key')} | gw={m.get('guard_warnings')}"
+        )
+
+    print("  Top 5 slowest:")
+    for r in sorted(window_rows, key=_row_lat, reverse=True)[:5]:
+        m = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+        print(
+            f"    * {str(r.get('created_at') or '')[:19]} | lat={_row_lat(r)}ms | "
+            f"${_row_cost(r):.5f} | src={m.get('chat_source')} | cached={m.get('cached')} | "
+            f"key={m.get('cache_key')} | gw={m.get('guard_warnings')}"
+        )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit chat cost, tokens, and latency before vs after update.")
-    parser.add_argument("--limit", type=int, default=400, help="Number of recent assistant rows to inspect (max 1000).")
+    parser.add_argument("--limit", type=int, default=1000, help="Number of recent assistant rows to inspect (max 1000).")
+    parser.add_argument("--since", type=str, default=None, help="Optional ISO UTC cutoff for window audit report (e.g. 2026-11-21T17:32:00Z).")
     parser.add_argument("--update-doc", action="store_true", help="Write/update docs/CHAT_COST_TOKEN_LATENCY_TRACKER.md")
     parser.add_argument("--doc-path", type=str, default=str(DEFAULT_DOC_PATH), help="Target markdown doc path")
     args = parser.parse_args()
 
+    if args.since and not args.update_doc:
+        window_rows = fetch_chat_rows(limit=args.limit, since_utc=args.since)
+        print_window_report(window_rows, args.since)
+        return
+
     rows = fetch_chat_rows(limit=args.limit)
     before_rows = [r for r in rows if str(r.get("created_at") or "") < UPDATE_CUTOFF_UTC]
+    if not before_rows:
+        before_rows = fetch_before_baseline_rows(limit=200)
     after_rows = [r for r in rows if str(r.get("created_at") or "") >= UPDATE_CUTOFF_UTC]
 
     before_stats = summarize_cohort(before_rows, is_after=False)
@@ -439,14 +611,20 @@ def main() -> None:
         f"avg_lat={after_stats['latency_all']['avg_ms']}ms | "
         f"live_avg={after_stats['latency_live']['avg_ms']}ms | "
         f"measured_rows={after_stats['measured_count']} | "
+        f"prefix_hit={after_stats['measured_prefix_cache_hit_pct']}% | "
         f"est_cost/1k=${after_stats['cost_per_1k_usd']:.3f}"
     )
+
+    if args.since:
+        window_rows = [r for r in rows if str(r.get("created_at") or "") >= args.since]
+        print_window_report(window_rows, args.since)
 
     if args.update_doc:
         doc_p = Path(args.doc_path)
         doc_p.parent.mkdir(parents=True, exist_ok=True)
         existing_snaps = _extract_existing_snapshots(doc_p)
-        md = render_markdown(before_stats, after_stats, existing_snaps)
+        existing_quality = _extract_existing_quality_log(doc_p)
+        md = render_markdown(before_stats, after_stats, existing_snaps, existing_quality)
         doc_p.write_text(md, encoding="utf-8")
         print(f"Updated doc: {doc_p}")
 

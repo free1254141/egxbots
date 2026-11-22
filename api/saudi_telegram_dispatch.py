@@ -291,6 +291,8 @@ def build_saudi_short_swings_vip_entry_message(
     ]
     for t in trades:
         sym = t.get("symbol", "")
+        clean_sym = str(sym).strip().upper().removesuffix(".SR")
+        sym_link = f"[{clean_sym}]({origin}/stocks/{clean_sym.lower()})" if clean_sym else sym
         name = t.get("name_ar") or t.get("name") or sym
         close_ref = float(t.get("reference_close") or t.get("entry_price") or t.get("current_price") or 0.0)
         sl_price = float(t.get("trailing_stop") or t.get("stop_loss") or (close_ref * 0.96))
@@ -299,7 +301,7 @@ def build_saudi_short_swings_vip_entry_message(
         sector = t.get("sector", "عام")
         lines.extend(
             [
-                f"🔹 *{name}* (`{sym}`) — قطاع {sector}",
+                f"🔹 *{name}* ({sym_link}) — قطاع {sector}",
                 f"  • *سعر الإغلاق المرجعي:* `{close_ref:.2f}` ر.س",
                 "  • *نقطة الدخول المقترحة:* مع افتتاح جلسة الغد (شرط عدم الافتتاح بفجوة > 2.0%)",
                 f"  • *الوقف الحالي:* `{sl_price:.2f}` ر.س (`{sl_pct:.1f}%`) | الوقف المبدئي -4%",
@@ -331,6 +333,8 @@ def build_saudi_short_swings_vip_exit_message(
     ]
     for e in exits:
         sym = e.get("symbol", "")
+        clean_sym = str(sym).strip().upper().removesuffix(".SR")
+        sym_link = f"[{clean_sym}]({origin}/stocks/{clean_sym.lower()})" if clean_sym else sym
         name = e.get("name_ar") or e.get("name") or sym
         ret = float(e.get("return_pct") or 0.0)
         entry = float(e.get("entry_price") or 0.0)
@@ -341,7 +345,7 @@ def build_saudi_short_swings_vip_exit_message(
         icon = "🟢" if ret > 0 else "🔴"
         lines.extend(
             [
-                f"{icon} *{name}* (`{sym}`):",
+                f"{icon} *{name}* ({sym_link}):",
                 f"  • *النتيجة:* `{sign}{ret:.2f}%`",
                 f"  • *الدخول:* `{entry:.2f}` ر.س | *الخروج:* `{exit_p:.2f}` ر.س",
                 f"  • *مدة الاحتفاظ:* `{days}` جلسات | *السبب:* {reason}",
@@ -374,9 +378,11 @@ def build_saudi_short_swings_vip_update_message(
     for trade in trades:
         name = trade.get("name_ar") or trade.get("name") or trade.get("symbol")
         sym = trade.get("symbol", "")
+        clean_sym = str(sym).strip().upper().removesuffix(".SR")
+        sym_link = f"[{clean_sym}]({origin}/stocks/{clean_sym.lower()})" if clean_sym else sym
         lines.extend(
             [
-                f"🔹 *{name}* (`{sym}`)",
+                f"🔹 *{name}* ({sym_link})",
                 f"• السعر المسجل: `{float(trade.get('current_price') or 0):.2f}` ر.س",
                 f"• دخول النموذج: `{float(trade.get('entry_price') or 0):.2f}` ر.س",
                 _format_trade_pnl_line(trade),

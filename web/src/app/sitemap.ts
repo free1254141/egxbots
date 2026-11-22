@@ -117,6 +117,26 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.90,
     },
     {
+      url: `${baseUrl}/blogs/gold-silver-xauusd-ai-technical-analysis-guide`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/saudi-tasi-telegram-stock-alerts-ai-guide`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/undervalued-saudi-tasi-stocks-fair-value-guide`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/uae-dfm-adx-qatar-qse-ai-sharia-stocks-guide`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
       url: `${baseUrl}/news`,
       changeFrequency: 'hourly',
       priority: 0.8,

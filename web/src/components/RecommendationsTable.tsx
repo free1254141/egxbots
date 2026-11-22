@@ -623,7 +623,23 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         if (isLandingPage && !user) {
             router.push("/scanner/backtests");
         } else {
-            setSelectedRow(row);
+            const base = row?.id != null
+                ? recommendations.find(r => r?.id != null && String(r.id) === String(row.id))
+                : undefined;
+            setSelectedRow(base ? {
+                ...base,
+                ...row,
+                created_at: base.created_at || row.created_at,
+                top_reasons: row.top_reasons ?? base.top_reasons ?? null,
+                rich_details: row.rich_details ?? base.rich_details ?? null,
+                adjustments: (Array.isArray(row.adjustments) && row.adjustments.length > 0)
+                    ? row.adjustments
+                    : (Array.isArray(base.adjustments) ? base.adjustments : []),
+                exit_reason: row.exit_reason || base.exit_reason || null,
+                exit_reason_ar: row.exit_reason_ar || base.exit_reason_ar || null,
+                exit_reason_en: row.exit_reason_en || base.exit_reason_en || null,
+                updated_at: row.updated_at || row._calendarEventAt || base.updated_at || row.created_at,
+            } : row);
         }
     };
 

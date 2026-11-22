@@ -33,11 +33,11 @@ def reset_revalidation_cooldown() -> None:
 
 
 def _cooldown_seconds() -> float:
-    raw = (os.getenv("REVALIDATE_COOLDOWN_SECONDS") or "120").strip()
+    raw = (os.getenv("REVALIDATE_COOLDOWN_SECONDS") or "900").strip()
     try:
         return max(0.0, float(raw))
     except ValueError:
-        return 120.0
+        return 900.0
 
 TAG_MARKET = "daily-market-data"
 TAG_NEWS = "daily-news-data"

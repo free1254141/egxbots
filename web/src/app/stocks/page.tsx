@@ -2,6 +2,7 @@ import { Metadata } from "next";
 import { getPublicStockDirectory, getPublicTasiStockDirectory } from "@/lib/seo/stock-directory";
 import StocksClient from "./StocksClient";
 
+export const preferredRegion = "fra1";
 export const revalidate = 604800; // Weekend-proof ISR; invalidated on inventory change (daily-symbols)
 
 export const metadata: Metadata = {

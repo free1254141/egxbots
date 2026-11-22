@@ -152,14 +152,14 @@ def _compact_history_content(content: Any, *, is_recent: bool) -> str:
     older turns compact to cut multi-turn uncached prompt token costs.
     """
     text = str(content or "")
-    max_len = 2800 if is_recent else 700
+    max_len = 2200 if is_recent else 550
     if len(text) <= max_len:
         return text
     if is_recent:
-        head_len, tail_len = 1500, 1250
+        head_len, tail_len = 1200, 950
         sep = "\n[...تم اختصار الوسط للاحتفاظ ببداية ونهاية الرد...]\n"
     else:
-        head_len, tail_len = 420, 260
+        head_len, tail_len = 330, 200
         sep = "\n...\n"
     return f"{text[:head_len].rstrip()}{sep}{text[-tail_len:].lstrip()}"
 
@@ -378,25 +378,119 @@ def _collect_structured_outputs(
         ]
 
 
+_KEEP_NULL_LLM_KEYS = frozenset({
+    "purification_rate_pct",
+    "fair_value",
+    "close",
+    "stop_loss",
+    "support_1",
+    "resistance_1",
+    "dividend_yield",
+    "pe_ratio",
+})
+
+
+def _compact_llm_value(val: Any, *, trim_diag: bool = False) -> Any:
+    """Recursively remove UI-only payloads, redundant nulls, and bulky nested diagnosis arrays."""
+    if isinstance(val, dict):
+        out: Dict[str, Any] = {}
+        for k, v in val.items():
+            if k == "_ui_chart":
+                continue
+            if v is None and k not in _KEEP_NULL_LLM_KEYS:
+                continue
+            if trim_diag and k == "fundamental_diagnosis" and isinstance(v, dict):
+                diag_clean = _compact_llm_value(v, trim_diag=False)
+                for list_k in ("strengths", "weaknesses", "risks", "details"):
+                    if isinstance(diag_clean.get(list_k), list) and len(diag_clean[list_k]) > 2:
+                        diag_clean[list_k] = diag_clean[list_k][:2]
+                out[k] = diag_clean
+            else:
+                out[k] = _compact_llm_value(v, trim_diag=trim_diag)
+        return out
+    if isinstance(val, list):
+        return [_compact_llm_value(item, trim_diag=trim_diag) for item in val]
+    return val
+
+
 def _strip_ui_only_fields_for_llm(result: Any) -> Any:
-    """Strip client-only chart payloads before serializing tool output to the LLM (saves tokens)."""
+    """Strip client-only chart payloads and redundant nulls before serializing tool output to the LLM."""
     if not isinstance(result, dict):
         return result
     stocks = result.get("stocks")
-    if not isinstance(stocks, list):
-        return result
-    sanitized_stocks = []
-    changed = False
-    for item in stocks:
-        if isinstance(item, dict) and "_ui_chart" in item:
-            copy_item = {k: v for k, v in item.items() if k != "_ui_chart"}
-            sanitized_stocks.append(copy_item)
-            changed = True
+    trim_diag = isinstance(stocks, list) and len(stocks) >= 5
+    return _compact_llm_value(result, trim_diag=trim_diag)
+
+
+def _normalize_sym_for_dedupe(raw_sym: Any) -> str:
+    txt = str(raw_sym or "").strip()
+    if not txt:
+        return ""
+    try:
+        from api.stock_aliases import resolve_stock_symbol
+        resolved = resolve_stock_symbol(txt)
+        if resolved:
+            return str(resolved).strip().upper().replace(".CA", "")
+    except Exception:
+        pass
+    return txt.upper().replace(".CA", "")
+
+
+def _dedupe_redundant_levels_calls(
+    prepared_calls: List[Tuple[int, str, Dict[str, Any]]],
+) -> Tuple[List[Tuple[int, str, Dict[str, Any]]], Dict[int, Dict[str, Any]]]:
+    """
+    Eliminate duplicate get_stock_levels calls when get_stock covers the same symbol(s) in the round.
+    Preserves tool_call indices via short_circuit_results so DeepSeek tool_call_id protocol holds.
+    """
+    covered_syms = set()
+    for _, fn_name, fn_args in prepared_calls:
+        if fn_name != "get_stock" or not isinstance(fn_args, dict):
+            continue
+        if isinstance(fn_args.get("symbol"), str):
+            norm = _normalize_sym_for_dedupe(fn_args["symbol"])
+            if norm:
+                covered_syms.add(norm)
+        if isinstance(fn_args.get("symbols"), list):
+            for s in fn_args["symbols"]:
+                norm = _normalize_sym_for_dedupe(s)
+                if norm:
+                    covered_syms.add(norm)
+
+    if not covered_syms:
+        return list(prepared_calls), {}
+
+    active_calls: List[Tuple[int, str, Dict[str, Any]]] = []
+    short_circuits: Dict[int, Dict[str, Any]] = {}
+    already_note = {
+        "status": "already_included_in_get_stock",
+        "note": "Support, resistance, stop-loss, and exact distance percentages are already included inside get_stock in this round.",
+    }
+
+    for idx, fn_name, fn_args in prepared_calls:
+        if fn_name != "get_stock_levels" or not isinstance(fn_args, dict):
+            active_calls.append((idx, fn_name, fn_args))
+            continue
+
+        raw_list = fn_args.get("symbols")
+        raw_single = fn_args.get("symbol")
+        if isinstance(raw_list, list) and raw_list:
+            remaining = [s for s in raw_list if _normalize_sym_for_dedupe(s) not in covered_syms]
+            if not remaining:
+                short_circuits[idx] = already_note
+            elif len(remaining) < len(raw_list):
+                active_calls.append((idx, fn_name, {**fn_args, "symbols": remaining}))
+            else:
+                active_calls.append((idx, fn_name, fn_args))
+        elif isinstance(raw_single, str) and raw_single.strip():
+            if _normalize_sym_for_dedupe(raw_single) in covered_syms:
+                short_circuits[idx] = already_note
+            else:
+                active_calls.append((idx, fn_name, fn_args))
         else:
-            sanitized_stocks.append(item)
-    if not changed:
-        return result
-    return {**result, "stocks": sanitized_stocks}
+            active_calls.append((idx, fn_name, fn_args))
+
+    return active_calls, short_circuits
 
 
 def _append_tool_results(
@@ -413,7 +507,7 @@ def _append_tool_results(
     for tc, result in zip(tool_calls, tool_results):
         tc_id = tc.get("id", f"call_{int(time.time() * 1000)}")
         if isinstance(result, Exception):
-            content_str = json.dumps({"status": "error", "message": str(result)}, ensure_ascii=False)
+            content_str = json.dumps({"status": "error", "message": str(result)}, ensure_ascii=False, separators=(",", ":"))
         else:
             _collect_structured_outputs(
                 result,
@@ -422,7 +516,11 @@ def _append_tool_results(
                 visuals_data,
                 acc_fallback_rows=acc_fallback_rows,
             )
-            content_str = json.dumps(_strip_ui_only_fields_for_llm(result), ensure_ascii=False)
+            content_str = json.dumps(
+                _strip_ui_only_fields_for_llm(result),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
 
         formatted_messages.append({
             "role": "tool",
@@ -957,11 +1055,11 @@ async def _run_agentic_chat_stream_impl(
         if user_rules_prompt:
             formatted_messages.append({"role": "system", "content": user_rules_prompt})
 
-    # Add bounded conversation history (last 8 turns: recent 2 preserve head+tail up to 2800 chars, older compact to 700 chars)
+    # Add bounded conversation history (last 6 turns: recent 2 preserve head+tail up to 2200 chars, older compact to 550 chars)
     has_conversation_history = False
     history_start_idx = len(formatted_messages)
     if history and isinstance(history, list):
-        trimmed_history = history[-8:]
+        trimmed_history = history[-6:]
         n_hist = len(trimmed_history)
         for h_idx, msg in enumerate(trimmed_history):
             role = msg.get("role", "user")
@@ -1223,7 +1321,7 @@ async def _run_agentic_chat_stream_impl(
             "content": (
                 f"بيانات السوق الموثقة المستخرجة فعلياً من قاعدة البيانات لسهم {fast_sym} "
                 f"(نتائج {', '.join(t_name for t_name, _ in fast_tool_specs)}):\n"
-                f"{json.dumps(fast_ctx_payload, ensure_ascii=False)}\n"
+                f"{json.dumps(fast_ctx_payload, ensure_ascii=False, separators=(',', ':'))}\n"
                 f"تم تنفيذ جميع الأدوات المطلوبة بنجاح. {fast_mode_note}"
             ),
         }
@@ -1496,14 +1594,14 @@ async def _run_agentic_chat_stream_impl(
                         fn_args = apply_user_rules_to_tool_args(fn_name, fn_args, user_rules)
                     prepared_calls.append((idx, fn_name, fn_args))
 
-                pf_calls = [c for c in prepared_calls if c[1] == "manage_portfolio"]
+                active_prepared_calls, results_by_idx = _dedupe_redundant_levels_calls(prepared_calls)
+                pf_calls = [c for c in active_prepared_calls if c[1] == "manage_portfolio"]
                 if len(pf_calls) > 1:
                     # Run mutating manage_portfolio ops sequentially first, then read-only/view ops
                     pf_writes = [c for c in pf_calls if str(c[2].get("operation") or "view").strip().lower() not in ("view", "get")]
                     tool_default_mkt = effective_market if not is_cross_market else ui_exch
                     pf_reads = [c for c in pf_calls if str(c[2].get("operation") or "view").strip().lower() in ("view", "get")]
-                    other_calls = [c for c in prepared_calls if c[1] != "manage_portfolio"]
-                    results_by_idx: Dict[int, Any] = {}
+                    other_calls = [c for c in active_prepared_calls if c[1] != "manage_portfolio"]
                     for idx, fn_name, fn_args in pf_writes:
                         try:
                             results_by_idx[idx] = await dispatch_tool(
@@ -1529,7 +1627,7 @@ async def _run_agentic_chat_stream_impl(
                     sig_to_first_idx: Dict[str, int] = {}
                     unique_calls: List[Tuple[int, str, Dict[str, Any]]] = []
                     dup_map: Dict[int, int] = {}
-                    for idx, fn_name, fn_args in prepared_calls:
+                    for idx, fn_name, fn_args in active_prepared_calls:
                         is_mutating = fn_name in ("manage_portfolio", "manage_automations", "manage_user_preferences")
                         sig = None if is_mutating else f"{fn_name}:{json.dumps(fn_args, sort_keys=True, ensure_ascii=False)}"
                         if sig and sig in sig_to_first_idx:
@@ -1538,24 +1636,26 @@ async def _run_agentic_chat_stream_impl(
                             if sig:
                                 sig_to_first_idx[sig] = idx
                             unique_calls.append((idx, fn_name, fn_args))
-                    unique_results = await asyncio.gather(
-                        *[
-                            dispatch_tool(
-                                fn_name,
-                                fn_args,
-                                user_id=user_id,
-                                user_prompt=message,
-                                default_market=tool_default_mkt,
-                            )
-                            for _, fn_name, fn_args in unique_calls
-                        ],
-                        return_exceptions=True,
-                    )
-                    res_by_idx: Dict[int, Any] = {idx: r for (idx, _, _), r in zip(unique_calls, unique_results)}
+                    if unique_calls:
+                        unique_results = await asyncio.gather(
+                            *[
+                                dispatch_tool(
+                                    fn_name,
+                                    fn_args,
+                                    user_id=user_id,
+                                    user_prompt=message,
+                                    default_market=tool_default_mkt,
+                                )
+                                for _, fn_name, fn_args in unique_calls
+                            ],
+                            return_exceptions=True,
+                        )
+                        for (idx, _, _), r in zip(unique_calls, unique_results):
+                            results_by_idx[idx] = r
                     tool_results = [
                         {"status": "duplicate_omitted", "note": "Identical call already returned in this round."}
                         if i in dup_map
-                        else res_by_idx[i]
+                        else results_by_idx[i]
                         for i in range(len(prepared_calls))
                     ]
                 t_tools = time.time() - t_tools_start

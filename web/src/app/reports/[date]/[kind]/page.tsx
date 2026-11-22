@@ -4,6 +4,7 @@ import BrandedPageHeader from '@/components/BrandedPageHeader';
 import { getPublicReports, reportNames, reportUrl, type PublicReport } from '@/lib/social/public-reports';
 import { EgxOnlyGuard } from '@/contexts/MarketContext';
 
+export const preferredRegion = 'fra1';
 export const revalidate = 604800;
 export const dynamicParams = true;
 // Pre-build existing reports at deploy time (0 runtime Vercel CPU on historical crawls);

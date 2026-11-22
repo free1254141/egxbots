@@ -412,6 +412,17 @@ export async function POST(request: Request) {
       // ignore
     }
 
+    // Revoke telegram_link +10 bonus credits so the paywall enforces immediately when the 3-day trial expires
+    try {
+      await client
+        .from("chat_bonus_credits")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("source", "telegram_link");
+    } catch {
+      // ignore
+    }
+
     // Activation telemetry powers the trial funnel AND anti-abuse window checks.
     try {
       await client.from("user_activity_events").insert({

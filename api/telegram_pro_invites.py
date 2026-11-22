@@ -19,7 +19,7 @@ def pro_chat_id() -> str:
 
 
 def saudi_pro_chat_id() -> str:
-    return os.getenv("SAUDI_TELEGRAM_PRO_CHAT_ID", "-1004397045436").strip()
+    return os.getenv("SAUDI_TELEGRAM_PRO_CHAT_ID", "").strip()
 
 
 def _bot_token() -> str:
@@ -498,6 +498,7 @@ def revoke_expired_pro_members() -> int:
         print(f"[TELEGRAM_PRO] revocation tracking unavailable: {exc}")
 
     removed = 0
+    unreachable_chats: Set[str] = set()
     until = int(datetime.now(timezone.utc).timestamp()) + 60
     for uid, member_ids in telegram_targets.items():
         for member_id in member_ids:
@@ -505,6 +506,8 @@ def revoke_expired_pro_members() -> int:
                 continue
             all_succeeded = True
             for chat_id in target_chats:
+                if chat_id in unreachable_chats:
+                    continue
                 try:
                     member = telegram_api("getChatMember", {"chat_id": chat_id, "user_id": member_id})
                     status = str((member.get("result") or {}).get("status") or "")
@@ -519,6 +522,13 @@ def revoke_expired_pro_members() -> int:
                         )
                         removed += 1
                 except Exception as exc:
+                    err_low = str(exc).lower()
+                    if any(tok in err_low for tok in ("member not found", "user not found", "participant_id_invalid")):
+                        continue
+                    if "chat not found" in err_low and len(target_chats) > 1 and chat_id != pro_chat_id():
+                        unreachable_chats.add(chat_id)
+                        print(f"[TELEGRAM_PRO] skipping unreachable secondary VIP chat {chat_id}: {exc}")
+                        continue
                     all_succeeded = False
                     print(f"[TELEGRAM_PRO] failed to revoke VIP access for {member_id} in {chat_id}: {exc}")
             if all_succeeded:

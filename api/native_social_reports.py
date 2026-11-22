@@ -113,6 +113,36 @@ def _calculate_stock_levels(symbol: str, date_str: str, current_close: float) ->
 
     return {"support": round(support, 2), "resistance": round(resistance, 2)}
 
+def _sync_stock_report_to_shared_chat_posts(
+    date_str: str,
+    ar_date: str,
+    symbol: str,
+    content: str,
+) -> None:
+    """Publish verified daily stock analysis into shared_chat_posts (/blogs/chat/[slug]) for SEO."""
+    clean_sym = str(symbol or "").strip().upper()
+    if not clean_sym or not str(content or "").strip():
+        return
+    slug = f"egx-{clean_sym.lower()}-analysis-{date_str}"
+    title = f"تحليل سهم {clean_sym} اليوم ({ar_date}): نقاط الدعم والمقاومة ومؤشر RSI"
+    question = f"ما هو التحليل الفني ونقاط الدعم والمقاومة لسهم {clean_sym} في البورصة المصرية لجلسة {ar_date}؟"
+    try:
+        _supabase_request(
+            "shared_chat_posts?on_conflict=slug",
+            method="POST",
+            payload={
+                "slug": slug,
+                "title": title,
+                "question": question,
+                "answer": content,
+                "is_published": True,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"[SOCIAL_PY] shared_chat_posts sync skipped for {clean_sym}: {exc}")
+
+
 def generate_native_social_report(kind: str, date_str: str, job_run_id: str, force: bool = False) -> Dict[str, Any]:
     """Generates a verified social report natively in Python and persists to Supabase."""
     ar_date = format_arabic_date(date_str)
@@ -380,6 +410,8 @@ def generate_native_social_report(kind: str, date_str: str, job_run_id: str, for
 
     ok = _supabase_request("daily_social_reports", method="POST", payload=payload)
     if ok is not None:
+        if kind == "stock" and symbol:
+            _sync_stock_report_to_shared_chat_posts(date_str, ar_date, symbol, content)
         logger.info(f"[SOCIAL_PY] Report '{kind}' generated and saved to Supabase natively with evidence & validation.")
         return {"status": "ready", "kind": kind, "symbol": symbol, "date": date_str}
     else:

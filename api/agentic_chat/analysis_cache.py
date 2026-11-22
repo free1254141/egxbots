@@ -737,7 +737,7 @@ _PURE_STOCK_QUERY_WORDS = {
         # Neutral polite/connector filler words
         "عايز", "عاوز", "اريد", "ابغى", "هات", "اعطني", "وريني", "قولي", "لي", "ممكن",
         "هل", "ما", "ايه", "كام", "كم", "رايك", "رأيك", "في", "فى", "عن", "من", "مع", "على", "الى", "ل", "و", "هو", "هي",
-        "النهارده", "النهاردة", "اليوم", "حاليا", "الان", "الآن", "دلوقتي", "الجديد", "اخر", "احدث",
+        "النهارده", "النهاردة", "اليوم", "حاليا", "حالا", "حالاً", "الان", "الآن", "دلوقتي", "الجديد", "اخر", "احدث",
         "مصر", "مصري", "المصري", "المصرية", "السعودي", "سعودي", "السعودية", "تداول", "تاسي", "قطر", "قطري", "الامارات", "اماراتي", "دبي", "ابوظبي",
         "egx", "tasi", "tadawul", "qse", "dfm", "adx", "ca", "sr", "sa", "qa", "qe", "du", "ad", "kw",
         "stock", "analyze", "analysis", "price", "of", "news", "financial", "technical", "dividend", "dividends", "fair", "value",
@@ -921,9 +921,33 @@ def build_analysis_cache_key(
     if found_sym and has_non_sym_number and re.search(r"(?:سهم|اسهم|جنيه|ريال|درهم|زكاه|تطهير|حساب|احسب|مبلغ)", norm):
         return None
 
-    # Canonical recommendation prompts without a specific stock symbol (block if narrowed by constraints)
+    # Canonical recommendation & conversational market prompts (only when no stock symbol or comparison is present)
     if not found_sym and not has_scope_constraint and any(
-        k in norm for k in (" رشح لي ", " رشحلي ", " فرص شراء ", " فرصه شراء ", " افضل فرص الشراء ")
+        k in norm
+        for k in (
+            " وضع السوق الان ",
+            " اداء السوق ",
+            " رايك في السوق ",
+            " رايك في اداء السوق ",
+            " السوق الان ",
+            " السوق دلوقتي ",
+        )
+    ):
+        return "vip_market_summary"
+
+    if not found_sym and not has_scope_constraint and any(
+        k in norm
+        for k in (
+            " رشح لي ",
+            " رشحلي ",
+            " فرص شراء ",
+            " فرصه شراء ",
+            " افضل فرص الشراء ",
+            " افضل سهم للدخول ",
+            " افضل سهم للشراء ",
+            " احسن سهم للدخول ",
+            " ترشيح فرص بديله ",
+        )
     ):
         return "vip_open_recommendations"
 

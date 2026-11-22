@@ -1530,8 +1530,14 @@ def _compute_stock_context_metrics(
     if support_1:
         dist_s1_pct = round(((support_1 - close) / close) * 100.0, 2)
         metrics["dist_to_support_pct"] = dist_s1_pct
+    dist_sl_pct: Optional[float] = None
+    if stop_loss and stop_loss > 0:
+        dist_sl_pct = round(((stop_loss - close) / close) * 100.0, 2)
+        metrics["dist_to_stop_loss_pct"] = dist_sl_pct
+    dist_r1_pct: Optional[float] = None
     if resistance_1:
-        metrics["dist_to_resistance_pct"] = round(((resistance_1 - close) / close) * 100.0, 2)
+        dist_r1_pct = round(((resistance_1 - close) / close) * 100.0, 2)
+        metrics["dist_to_resistance_pct"] = dist_r1_pct
     if resistance_1 and stop_loss and resistance_1 > close > stop_loss:
         risk = close - stop_loss
         reward = resistance_1 - close
@@ -1563,6 +1569,21 @@ def _compute_stock_context_metrics(
                 t_reward = resistance_1 - close
                 if t_risk > 0:
                     metrics["tactical_risk_reward"] = round(t_reward / t_risk, 2)
+
+    dist_parts: List[str] = []
+    if support_1 and dist_s1_pct is not None:
+        dist_parts.append(f"الدعم الأول ({support_1}): {dist_s1_pct:+.2f}%")
+    if stop_loss and dist_sl_pct is not None:
+        dist_parts.append(f"وقف الخسارة ({stop_loss}): {dist_sl_pct:+.2f}%")
+    if metrics.get("tactical_support") and metrics.get("dist_to_tactical_support_pct") is not None:
+        dist_parts.append(f"الدعم العملي القريب ({metrics['tactical_support']}): {metrics['dist_to_tactical_support_pct']:+.2f}%")
+    if metrics.get("tactical_stop_loss") and metrics.get("dist_to_tactical_stop_pct") is not None:
+        dist_parts.append(f"وقف الخسارة العملي ({metrics['tactical_stop_loss']}): {metrics['dist_to_tactical_stop_pct']:+.2f}%")
+    if resistance_1 and dist_r1_pct is not None:
+        dist_parts.append(f"المقاومة الأولى ({resistance_1}): {dist_r1_pct:+.2f}%")
+    if dist_parts:
+        metrics["levels_distance_ar"] = " | ".join(dist_parts)
+
     return metrics
 
 
@@ -3215,6 +3236,15 @@ def _sync_get_stock_levels_for_market(
                 "signal_date": str(r.get("created_at") or "")[:10],
             }
 
+        lvl_ctx = _compute_stock_context_metrics(
+            close=close,
+            ema_50=None,
+            ema_200=None,
+            vwap_20=None,
+            support_1=support_1,
+            resistance_1=resistance_1,
+            stop_loss=stop_loss,
+        )
         levels.append({
             "symbol": sym,
             "market": ui_mkt,
@@ -3232,6 +3262,7 @@ def _sync_get_stock_levels_for_market(
             "entry_zone": entry_zone,
             "has_active_recommendation": has_rec,
             "active_recommendation": rec_data,
+            **lvl_ctx,
         })
     return levels
 

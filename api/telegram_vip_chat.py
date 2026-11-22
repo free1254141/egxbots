@@ -133,6 +133,14 @@ def _get_normalized_arabic_stock_names() -> List[str]:
     return sorted(names, key=len, reverse=True)
 
 
+_NON_TICKER_TOPIC_WORDS = frozenset({
+    "SHARIA", "HALAL", "ZAKAT", "HELP", "START", "MENU", "NEWS", "PRICE", "PRICES",
+    "STOCK", "STOCKS", "MARKET", "DAILY", "WEEKLY", "SCAN", "ACCUM", "RECS", "TRAPS",
+    "VALUE", "FAIR", "GOLD", "SILVER", "BUY", "SELL", "HOLD", "TOP", "BEST", "VIP",
+    "PRO", "BOT", "EGX", "TASI", "CHAT", "PORTFOLIO", "DIVIDENDS",
+})
+
+
 def detect_topic_query_intent(text: str) -> Optional[Tuple[str, str]]:
     """
     Normalize and classify a user message in Topic 1680 (ARTORO).
@@ -152,8 +160,14 @@ def detect_topic_query_intent(text: str) -> Optional[Tuple[str, str]]:
     norm_cleaned = _norm_ar(cleaned)
 
     # 1. Check if text is a bare EGX Ticker (e.g. "ASCM", "PHDC", "COMI", "FWRY", "ASCM.CA")
+    # Never expand slash commands or reserved capability words like /sharia or SHARIA into "حلل سهم SHARIA".
     token = re.sub(r"[^\w\.]", "", cleaned).upper().replace(".CA", "")
-    if re.match(r"^[A-Z0-9]{2,6}$", token) and len(cleaned.split()) <= 2:
+    if (
+        not cleaned.startswith("/")
+        and re.match(r"^[A-Z0-9]{2,6}$", token)
+        and token not in _NON_TICKER_TOPIC_WORDS
+        and len(cleaned.split()) <= 2
+    ):
         return ("stock", f"حلل سهم {token}")
 
     # 2. Check for comparison intent ("قارن بين X و Y", "مقارنة X و Y", "أيهما أفضل")
@@ -2178,6 +2192,8 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
                 query_text = "أفضل الأسهم حسب المسح الفني والمؤشرات"
             elif cmd_lower in ("/portfolio", "portfolio"):
                 query_text = "حلل محفظتي الاستثمارية بالتفصيل"
+            elif cmd_lower in ("/sharia", "sharia"):
+                query_text = "ما هي الأسهم المتوافقة مع الشريعة الإسلامية (مؤشر EGX33) اليوم؟"
             else:
                 detected = detect_topic_query_intent(cleaned_input)
                 if detected:

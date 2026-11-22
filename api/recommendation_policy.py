@@ -7,6 +7,8 @@ from math import isfinite
 
 POLICY_VERSION = "fixed_barriers_v2"
 MAX_ENTRY_CLOSE_MISMATCH = 0.02
+MAX_STOP_LOSS_DISTANCE = 0.10
+MAX_CORPORATE_ACTION_DROP = 0.25
 
 
 def positive(value):
@@ -17,18 +19,22 @@ def positive(value):
         return None
 
 
-def valid_candidate(row, minimum_rr=1.5):
-    return candidate_assessment(row, minimum_rr)["accepted"]
+def valid_candidate(row, minimum_rr=1.5, max_stop_pct=MAX_STOP_LOSS_DISTANCE):
+    return candidate_assessment(row, minimum_rr=minimum_rr, max_stop_pct=max_stop_pct)["accepted"]
 
 
-def candidate_assessment(row, minimum_rr=1.5):
+def candidate_assessment(row, minimum_rr=1.5, max_stop_pct=MAX_STOP_LOSS_DISTANCE):
     entry, target, stop = (positive(row.get(key)) for key in ("last_close", "target_price", "stop_loss"))
     result = dict(symbol=row.get("symbol"), entry=entry, target=target, stop=stop,
                   minimum_rr=minimum_rr, risk_reward=None, accepted=False)
     if entry is None or target is None or stop is None or not stop < entry < target:
         return {**result, "reason": "invalid_price_geometry"}
+    stop_dist = (entry - stop) / entry
     rr = (target - entry) / (entry - stop)
-    return {**result, "risk_reward": round(rr, 6), "accepted": rr >= minimum_rr,
+    result = {**result, "risk_reward": round(rr, 6), "stop_distance_pct": round(stop_dist * 100, 4)}
+    if max_stop_pct is not None and stop_dist > max_stop_pct + 1e-6:
+        return {**result, "accepted": False, "reason": "stop_loss_too_wide"}
+    return {**result, "accepted": rr >= minimum_rr,
             "reason": "accepted" if rr >= minimum_rr else "risk_reward_below_minimum"}
 
 
@@ -102,7 +108,8 @@ def price_basis_matches(entry, signal_close, tolerance=MAX_ENTRY_CLOSE_MISMATCH)
 def evaluate_bars(*, entry, target, stop, bars, entry_date, cursor, max_sessions=None,
                   trail_pct=None, trail_trigger_pct=5.0, sector_risk_by_date=None,
                   recommendation_sector=None, recommendation_symbol=None,
-                  weak_symbols_by_date=None, profit_protection=None):
+                  weak_symbols_by_date=None, profit_protection=None,
+                  max_corporate_action_drop=MAX_CORPORATE_ACTION_DROP):
     """Process new bars in order; adjustments take effect on the NEXT bar.
 
     A cursor is a market-data date, never a row's last modification timestamp.
@@ -117,14 +124,16 @@ def evaluate_bars(*, entry, target, stop, bars, entry_date, cursor, max_sessions
     if trail_pct is not None and not 0 < trail_pct < 1:
         raise ValueError("trail_pct must be between zero and one")
     by_date = {str(bar.get("date", ""))[:10]: bar for bar in bars}
+    prior_bars = sorted((d for d in by_date if d <= entry_date), key=str)
+    prior_close = positive(by_date[prior_bars[-1]].get("close")) if prior_bars else None
+    if prior_close is None:
+        prior_close = entry
     session_dates = sorted(day for day in by_date if day > entry_date and
                            (by_date[day].get("volume") is None or float(by_date[day]["volume"]) > 0))
     result = dict(status="open", exit_price=None, exit_reason=None, closed_on=None,
                   stop_loss=stop, cursor=cursor, last_close=None, sessions_held=0,
                   profit_loss_pct=None, adjustments=[])
     for session, day in enumerate(session_dates, 1):
-        if day <= cursor:
-            continue
         bar = by_date[day]
         high, low, close = (positive(bar.get(key)) for key in ("high", "low", "close"))
         opening = positive(bar.get("open"))
@@ -132,6 +141,25 @@ def evaluate_bars(*, entry, target, stop, bars, entry_date, cursor, max_sessions
             raise ValueError(f"Invalid OHLC on {day}")
         if bar.get("open") is not None and (opening is None or not low <= opening <= high):
             raise ValueError(f"Invalid opening price on {day}")
+        if (
+            max_corporate_action_drop is not None
+            and prior_close is not None
+            and prior_close > 0
+            and (
+                (close / prior_close - 1.0) <= -max_corporate_action_drop
+                or (
+                    opening is not None
+                    and (opening / prior_close - 1.0) <= -max_corporate_action_drop
+                    and (close / prior_close - 1.0) <= -0.20
+                )
+            )
+        ):
+            raise ValueError(
+                f"Unadjusted corporate action discontinuity on {day}: prior_close={prior_close} -> open={opening}, close={close}"
+            )
+        prior_close = close
+        if day <= cursor:
+            continue
         result.update(cursor=day, last_close=close, sessions_held=session)
         exit_price, reason = None, None
         if low <= stop:

@@ -689,6 +689,38 @@ export default function Footer() {
                     • {isAr ? "الاستثمار العقاري vs البورصة في مصر: دليل Ewan Bot و EGX BOTS" : "Real Estate vs. Stocks in Egypt: Ewanbot & EGX BOTS Guide"}
                   </Link>
                 </li>
+                <li>
+                  <Link
+                    href="/blogs/gold-silver-xauusd-ai-technical-analysis-guide"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "تحليل الذهب اليوم (XAUUSD) والفضة بالذكاء الاصطناعي 2026" : "Gold (XAUUSD) & Silver AI Technical Analysis Guide"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/saudi-tasi-telegram-stock-alerts-ai-guide"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-cyan-600 dark:hover:text-cyan-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "قنوات وتنبيهات الأسهم السعودية (تاسي) على تليجرام 2026" : "Saudi TASI Telegram Alerts & AI Scanning Guide"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/undervalued-saudi-tasi-stocks-fair-value-guide"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-orange-600 dark:hover:text-orange-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "السعر العادل للأسهم السعودية وأرخص أسهم تاسي 2026" : "Saudi TASI Fair Value & Undervalued Stocks Guide"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/uae-dfm-adx-qatar-qse-ai-sharia-stocks-guide"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "دليل تحليل أسهم الإمارات (DFM & ADX) وبورصة قطر (QSE)" : "UAE (DFM & ADX) & Qatar (QSE) AI Stocks Guide"}
+                  </Link>
+                </li>
               </ul>
             </div>
           </div>

@@ -865,12 +865,37 @@ class TelegramBot:
                     except Exception as e:
                         self._log(f"Could not record telegram_linked event: {e}")
 
-                    # Prevent multi-account bonus farming: 1 Telegram account = max one +10 bonus
-                    if prior_tg_uid:
+                    # Prevent multi-account bonus farming & post-trial bonus stacking:
+                    # 1 Telegram account = max one +10 bonus, and users who claimed a Pro trial
+                    # already received 3 days (350 msgs) so they do not keep an extra +10 telegram_link bonus.
+                    has_claimed_trial = False
+                    if not prior_tg_uid:
                         try:
-                            supabase.table("chat_bonus_credits").delete().eq("user_id", uid).eq("source", "telegram_link").eq("credits_used", 0).execute()
+                            tr_chk = (
+                                supabase.table("subscription_trials")
+                                .select("user_id")
+                                .eq("user_id", uid)
+                                .limit(1)
+                                .execute()
+                            )
+                            has_claimed_trial = bool(tr_chk and tr_chk.data)
+                            if not has_claimed_trial:
+                                sub_tr_chk = (
+                                    supabase.table("subscriptions")
+                                    .select("id")
+                                    .eq("user_id", uid)
+                                    .eq("provider", "trial")
+                                    .limit(1)
+                                    .execute()
+                                )
+                                has_claimed_trial = bool(sub_tr_chk and sub_tr_chk.data)
+                        except Exception:
+                            has_claimed_trial = False
+                    if prior_tg_uid or has_claimed_trial:
+                        try:
+                            supabase.table("chat_bonus_credits").delete().eq("user_id", uid).eq("source", "telegram_link").execute()
                         except Exception as e:
-                            self._log(f"Could not revoke duplicate telegram_link bonus: {e}")
+                            self._log(f"Could not revoke telegram_link bonus: {e}")
                     try:
                         supabase.table("bot_subscriptions").update(
                             {"telegram_chat_id": str(chat_id)}

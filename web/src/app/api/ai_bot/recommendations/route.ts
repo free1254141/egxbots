@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
       ? Math.min(Math.floor(requestedLimit), 200)
       : 50;
   const recommendationFields =
-    "id,batch_id,symbol,exchange,name,last_close,precision,signal,status,entry_price,target_price,stop_loss,is_public,created_at,updated_at,exit_price,profit_loss_pct,top_reasons,rich_details";
+    "id,batch_id,symbol,exchange,name,last_close,precision,signal,status,entry_price,target_price,stop_loss,is_public,created_at,updated_at,exit_price,profit_loss_pct,top_reasons,rich_details,adjustments";
   
   try {
     const market =
@@ -274,6 +274,7 @@ export async function GET(req: NextRequest) {
       // delay expires, visible recommendations can safely include their data.
       last_close: toNumber(row.last_close, 0) > 0 ? toNumber(row.last_close, 0) : null,
       top_reasons: row.top_reasons,
+      adjustments: Array.isArray(row.adjustments) ? row.adjustments : [],
       ...exitReason,
       };
     });

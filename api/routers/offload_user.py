@@ -3657,6 +3657,17 @@ async def post_subscription_trial(request: Request):
         return JSONResponse({"ok": False, "error": (rpc_data or {}).get("error"), "message": (rpc_data or {}).get("message")}, status_code=400, headers=_PRIVATE_NO_STORE)
 
     _VIEWER_PLAN_CACHE.delete(uid)
+    # Revoke telegram_link +10 bonus credits when user activates the 3-day Pro trial
+    # (the trial itself is the reward for linking Telegram, preventing a 10-msg post-expiry paywall bypass)
+    try:
+        sb.table("chat_bonus_credits").delete().eq("user_id", uid).eq("source", "telegram_link").execute()
+    except Exception:
+        pass
+    try:
+        from api.routers.offload import _QUOTA_CACHE
+        _QUOTA_CACHE.delete(uid)
+    except Exception:
+        pass
     try:
         sb.table("user_activity_events").insert(
             {

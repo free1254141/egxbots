@@ -1726,8 +1726,10 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
                     profit_protection=management,
                 )
         except (ValueError, TypeError) as error:
+            err_text = str(error)
+            reason_code = "corporate_action_discontinuity" if "corporate action" in err_text.lower() else "invalid_ohlc"
             print(f"[EVALUATE] Invalid data for {symbol}: {error}; leaving checkpoint unchanged.")
-            block(rec, "invalid_ohlc", details)
+            block(rec, reason_code, details)
             continue
         if health != 'verified' and outcome['status'] == 'open':
             # Verified historical exits remain executable on their actual bar;
@@ -2366,30 +2368,20 @@ def _revalidate_recommendation_cache() -> bool:
     publications bypass that path, so their rows would stay invisible behind the
     shared Supabase query cache until the next scheduled run.
     """
-    import urllib.request
+    from api.cache_invalidation import invalidate_cache_tags, TAG_RECOMMENDATIONS
 
-    base = (
-        os.getenv("NEXT_PUBLIC_SITE_URL")
-        or os.getenv("WEBSITE_URL")
-        or "https://egxbots.com"
-    ).rstrip("/")
-    secret = (
-        os.getenv("REVALIDATE_SECRET")
-        or os.getenv("ADMIN_SECRET_KEY")
-        or os.getenv("CRON_SECRET")
-    )
-    if not secret:
-        print("[RECOMMENDATIONS] Cache revalidation skipped: no secret configured.")
+    res = invalidate_cache_tags([TAG_RECOMMENDATIONS], timeout=45.0) or {}
+    if res.get("error"):
+        print(f"[RECOMMENDATIONS] Cache revalidation failed: {res.get('error')}")
         return False
-    url = f"{base}/api/revalidate?secret={secret}&tag=daily-recommendations"
-    try:
-        request = urllib.request.Request(url, method="POST", headers={"User-Agent": "EGX-Daily-Bot/1.0"})
-        with urllib.request.urlopen(request, timeout=45) as response:
-            print(f"[RECOMMENDATIONS] Cache revalidated with status {response.status}.")
-            return True
-    except Exception as error:
-        print(f"[RECOMMENDATIONS] Cache revalidation failed: {error}")
+    if res.get("reason") == "cooldown":
+        print("[RECOMMENDATIONS] Cache revalidation debounced by cooldown.")
+        return True
+    if res.get("skipped"):
+        print("[RECOMMENDATIONS] Cache revalidation skipped: endpoint or secret not configured.")
         return False
+    print(f"[RECOMMENDATIONS] Cache revalidated with status {res.get('status', 200)}.")
+    return True
 
 
 def apply_council_confirmation_boost(results, primary_model=None):
@@ -2516,10 +2508,23 @@ async def generate_daily_recommendations(
         print(f"[RECOMMENDATION_DECISION] {json.dumps(audit, ensure_ascii=False)}")
         return 0 if not preview_only else {"preview": True, "reason_code": code, "reason": reason, "candidates": []}
 
-    daily_limit = max(1, min(5, int(os.getenv("PUBLIC_RECOMMENDATION_DAILY_LIMIT", "4"))))
+    daily_limit = max(1, min(5, int(os.getenv("PUBLIC_RECOMMENDATION_DAILY_LIMIT", "2"))))
     rolling_limit = max(1, min(30, int(os.getenv("PUBLIC_RECOMMENDATION_ROLLING_LIMIT", "20"))))
     open_limit = max(1, min(20, int(os.getenv("PUBLIC_RECOMMENDATION_OPEN_LIMIT", "10"))))
     max_sessions = max(1, int(os.getenv("PUBLIC_RECOMMENDATION_MAX_HOLD_SESSIONS", "20")))
+    market_gate = should_reject_new_buys()
+    is_market_stressed = bool(market_gate.get("blocked"))
+    if is_market_stressed:
+        if run_context is not None:
+            run_context.update(market_gate)
+        reason_txt = market_gate.get("reason") or "تم تعليق توصيات الشراء الجديدة مؤقتاً بسبب ضعف اتجاه السوق العام."
+        audit["market_mode"] = "blocked"
+        audit["market_gate_reason"] = reason_txt
+        if not preview_only:
+            audit.update(reason_code="market_gate_blocked", reason=reason_txt, technical_block=False)
+            _mark_daily_cache_payload("recommendation_decision_audit", audit)
+            print(f"[RECOMMENDATIONS] Broad-market gate active ({reason_txt}) -> Blocking new BUY recommendations.")
+            return 0
     try:
         _init_supabase()
         now_utc = dt.datetime.now(dt.timezone.utc)
@@ -2540,14 +2545,6 @@ async def generate_daily_recommendations(
     except Exception as capacity_error:
         print(f"[RECOMMENDATIONS] Capacity check unavailable: {capacity_error}")
         return no_buy("capacity_check_unavailable", "تعذر التحقق من سعة التوصيات؛ تم إيقاف الشراء احترازيًا لخطأ تقني، وليس بسبب تقييم سلبي للسوق.")
-    market_gate = should_reject_new_buys()
-    is_market_stressed = bool(market_gate.get("blocked"))
-    if is_market_stressed:
-        if run_context is not None:
-            run_context.update(market_gate)
-        print(f"[RECOMMENDATIONS] Broad-market gate active: {market_gate.get('reason')} -> Switching to Adaptive Defensive Mode.")
-        audit["market_mode"] = "adaptive_defensive"
-        audit["market_gate_reason"] = market_gate.get("reason")
     resolved_model = "model_EGX.bin"
     
     # ── Load EGX30 index data unconditionally for trend check and adaptive selection ──
@@ -2660,7 +2657,7 @@ async def generate_daily_recommendations(
         council_model=council_model,
         validator_model=validator_model,
         bulk_cache_ttl_seconds=bulk_cache_ttl_seconds,
-        allow_blocked_gate=True,
+        allow_blocked_gate=bool(preview_only),
     )
     
     results = scan_resp.get("results", [])

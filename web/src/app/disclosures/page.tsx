@@ -4,7 +4,10 @@ import { createClient } from "@supabase/supabase-js";
 import DisclosuresClient, { DisclosuresInitialStats } from "./DisclosuresClient";
 import type { DisclosureItem } from "@/lib/disclosures-analytics";
 import { analyzeDisclosures, DisclosuresAnalyticsResult, SymbolPriceInfo } from "@/lib/disclosures-analytics";
+import { DAILY_CACHE_TAGS } from "@/lib/cache/daily";
+import { fetchHfPublicJson } from "@/lib/hf-public-read";
 
+export const preferredRegion = "fra1";
 export const revalidate = 604800; // 7-day weekend-proof ISR; invalidated via /api/revalidate
 
 export const metadata: Metadata = {
@@ -62,6 +65,25 @@ async function getInitialDisclosuresData(): Promise<{
   analytics: DisclosuresAnalyticsResult;
   priceMap: Record<string, SymbolPriceInfo>;
 }> {
+  const hf = await fetchHfPublicJson<{
+    items?: DisclosureItem[];
+    allPool?: DisclosureItem[];
+    stats?: DisclosuresInitialStats;
+    priceMap?: Record<string, SymbolPriceInfo>;
+  }>("/api/public/disclosures-page-data", 604800, 5000, [DAILY_CACHE_TAGS.disclosures]);
+  if (hf && Array.isArray(hf.allPool) && hf.allPool.length > 0) {
+    const priceMap = hf.priceMap || {};
+    const analytics = analyzeDisclosures(hf.allPool, priceMap);
+    const items = Array.isArray(hf.items) ? hf.items : hf.allPool.slice(0, INITIAL_PAGE_SIZE);
+    const stats = hf.stats || {
+      total: hf.allPool.length,
+      buys: hf.allPool.filter((d) => d.action_type === "buy" || d.sentiment === "bullish").length,
+      sells: hf.allPool.filter((d) => d.action_type === "sell" || d.sentiment === "bearish").length,
+      shareholding: hf.allPool.filter((d) => d.disclosure_type === "major_shareholders" || d.stake_after != null).length,
+    };
+    return { items, allPool: hf.allPool, stats, analytics, priceMap };
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const supabaseKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -84,7 +106,7 @@ async function getInitialDisclosuresData(): Promise<{
     supabase
       .from("egx_disclosures")
       .select(
-        "id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata",
+        "id, symbol, company_name, disclosure_type, disclosure_date, title, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata",
         { count: "exact" }
       )
       .order("disclosure_date", { ascending: false })
@@ -93,7 +115,7 @@ async function getInitialDisclosuresData(): Promise<{
     supabase
       .from("egx_disclosures")
       .select(
-        "id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata"
+        "id, symbol, company_name, disclosure_type, disclosure_date, title, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata"
       )
       .order("disclosure_date", { ascending: false })
       .limit(2000),

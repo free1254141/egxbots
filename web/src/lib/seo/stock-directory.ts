@@ -155,7 +155,16 @@ export const getPublicTasiStockDirectoryWeekly = unstable_cache(
 
 const GCC_METALS_EXCHANGES = ['DFM', 'ADX', 'QSE', 'COMMODITIES'] as const;
 
-async function fetchGccMetalsDirectoryUncached(): Promise<TasiStockDirectoryEntry[]> {
+async function fetchGccMetalsDirectoryUncached(tags?: string[]): Promise<TasiStockDirectoryEntry[]> {
+    const hf = await fetchHfPublicJson<{ stocks?: GccMarketStockRow[] }>(
+        '/api/public/gcc-metals-directory',
+        604800,
+        5000,
+        tags
+    );
+    if (Array.isArray(hf?.stocks) && hf.stocks.length > 0) {
+        return hf.stocks;
+    }
     try {
         const client = getMarketSupabaseClient('tasi');
         const { data, error } = await client
@@ -188,7 +197,7 @@ async function fetchGccMetalsDirectoryUncached(): Promise<TasiStockDirectoryEntr
 }
 
 export const getPublicGccMetalsDirectory = unstable_cache(
-    () => fetchGccMetalsDirectoryUncached(),
+    () => fetchGccMetalsDirectoryUncached([DAILY_CACHE_TAGS.symbols]),
     ['public-gcc-metals-directory-v1'],
     { revalidate: 604800, tags: [DAILY_CACHE_TAGS.symbols] }
 );
@@ -208,6 +217,15 @@ export interface GccMarketStockRow extends TasiStockDirectoryEntry {
 
 export const getPublicGccMetalsDirectoryWithPrices = unstable_cache(
     async (): Promise<GccMarketStockRow[]> => {
+        const hf = await fetchHfPublicJson<{ stocks?: GccMarketStockRow[] }>(
+            '/api/public/gcc-metals-directory',
+            604800,
+            5000,
+            [DAILY_CACHE_TAGS.symbols]
+        );
+        if (Array.isArray(hf?.stocks) && hf.stocks.length > 0) {
+            return hf.stocks;
+        }
         try {
             const client = getMarketSupabaseClient('tasi');
             const [stocks, indRes] = await Promise.all([

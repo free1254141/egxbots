@@ -167,3 +167,33 @@ def test_daily_evaluator_closes_using_hf_archive_when_supabase_has_no_prices(
     else:
         assert recommendation["status"] == "open"
         assert "exit_price" not in recommendation
+
+
+def test_unadjusted_corporate_action_drop_is_blocked_instead_of_false_stop_hit():
+    bars = [
+        dict(date="2026-11-18", open=0.553, high=0.608, low=0.553, close=0.608, volume=87617719),
+        dict(date="2026-11-19", open=0.382596, high=0.392035, low=0.361201, close=0.388889, volume=208352862),
+        dict(date="2026-11-22", open=0.389, high=0.426, low=0.365, close=0.401, volume=133705269),
+    ]
+    with pytest.raises(ValueError, match="Unadjusted corporate action discontinuity"):
+        evaluate_bars(
+            entry=0.608,
+            target=0.790,
+            stop=0.517,
+            bars=bars,
+            entry_date="2026-11-18",
+            cursor="2026-11-18",
+        )
+
+
+def test_wide_stop_loss_above_10_pct_is_rejected():
+    from api.recommendation_policy import candidate_assessment
+
+    wide = candidate_assessment(dict(symbol="INEG", last_close=100, target_price=135, stop_loss=85))
+    assert not wide["accepted"]
+    assert wide["reason"] == "stop_loss_too_wide"
+    assert wide["stop_distance_pct"] == 15.0
+
+    within_limit = candidate_assessment(dict(symbol="COMI", last_close=100, target_price=120, stop_loss=90))
+    assert within_limit["accepted"]
+    assert within_limit["reason"] == "accepted"

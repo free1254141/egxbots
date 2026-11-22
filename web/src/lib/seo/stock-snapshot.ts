@@ -9,13 +9,41 @@ import {
 import { SAUDI_STOCK_NAMES_AR } from '@/lib/saudi-stocks';
 import { fetchHfPublicJson } from '@/lib/hf-public-read';
 
+export type StockDisclosureItem = {
+    id?: string;
+    symbol?: string;
+    disclosure_type?: string;
+    disclosure_date?: string;
+    title?: string;
+    ai_summary?: string;
+    sentiment?: string;
+};
+
 export type PublicStockSnapshotData = {
     fundamentals: any;
     latestPrice: any;
     latestTech: any;
     latestScan: any;
     historicalPrices: any[];
+    recentDisclosures?: StockDisclosureItem[];
 };
+
+async function readSafeDisclosures(client: any, symOrCandidates: string | string[]): Promise<StockDisclosureItem[]> {
+    try {
+        let q = client
+            .from('egx_disclosures')
+            .select('id,symbol,disclosure_type,disclosure_date,title,ai_summary,sentiment');
+        if (Array.isArray(symOrCandidates)) {
+            q = q.in('symbol', symOrCandidates);
+        } else {
+            q = q.eq('symbol', symOrCandidates);
+        }
+        const res = await q.order('disclosure_date', { ascending: false }).limit(3);
+        return Array.isArray(res?.data) ? res.data : [];
+    } catch {
+        return [];
+    }
+}
 
 export type PublicStockPageBundle = {
     snapshot: PublicStockSnapshotData;
@@ -56,12 +84,13 @@ const getPublicEgxStockSnapshot = cache(unstable_cache(async (symbol: string): P
     const client = getPublicMarketClient();
     const read = (table: string, fields: string, order: string, limit: number) => client.from(table).select(fields)
         .eq('exchange', 'EGX').eq('symbol', symbol).order(order, { ascending: false }).limit(limit);
-    const [fund, price, tech, history, scan] = await Promise.all([
+    const [fund, price, tech, history, scan, recentDisclosures] = await Promise.all([
         read('stock_fundamentals', 'symbol,exchange,data,updated_at', 'updated_at', 1),
         read('stock_prices', 'symbol,exchange,date,open,high,low,close,volume,updated_at', 'date', 1),
         read('stock_technical_indicators', 'symbol,exchange,date,close,change_pct,adx_14,rsi_14,macd,macd_signal,ema_50,ema_200,sma_50,sma_200,calculated_at', 'date', 1),
         read('stock_prices', 'date,open,high,low,close,volume', 'date', 30),
         read('scan_results', 'symbol,exchange,created_at,precision,signal,top_reasons', 'created_at', 1),
+        readSafeDisclosures(client, symbol),
     ]);
     if (fund.error) throw new Error('Unable to load public stock fundamentals');
     if (price.error) throw new Error('Unable to verify public stock existence');
@@ -75,7 +104,8 @@ const getPublicEgxStockSnapshot = cache(unstable_cache(async (symbol: string): P
 
     return { fundamentals: egxFund, latestPrice: egxLatestPrice,
         latestTech: tech.data?.[0] || null, latestScan: scan.data?.[0] || null,
-        historicalPrices: [...(history.data || [])].reverse() };
+        historicalPrices: [...(history.data || [])].reverse(),
+        recentDisclosures };
 }, ['public-egx-stock-snapshot-v3'], { revalidate: 604800 }));
 
 const GCC_METALS_EXCHANGES = ['DFM', 'ADX', 'QSE', 'COMMODITIES'] as const;
@@ -86,7 +116,7 @@ async function getPublicGccMetalsStockSnapshot(symbol: string, preferredExchange
         ? [preferredExchange.toUpperCase()]
         : [...GCC_METALS_EXCHANGES];
     const client = getMarketSupabaseClient('tasi');
-    const [stockRes, priceRes, techRes, histRes] = await Promise.all([
+    const [stockRes, priceRes, techRes, histRes, recentDisclosures] = await Promise.all([
         client
             .from('stocks')
             .select('symbol,exchange,country,currency,name,name_ar,sector,updated_at')
@@ -114,6 +144,7 @@ async function getPublicGccMetalsStockSnapshot(symbol: string, preferredExchange
             .eq('symbol', cleanSymbol)
             .order('date', { ascending: false })
             .limit(30),
+        readSafeDisclosures(client, cleanSymbol),
     ]);
 
     const stockRow = stockRes.data?.[0] as any;
@@ -140,6 +171,7 @@ async function getPublicGccMetalsStockSnapshot(symbol: string, preferredExchange
         latestTech: techRes.error ? null : (techRes.data?.[0] || null),
         latestScan: null,
         historicalPrices: histRes.error ? [] : [...(histRes.data || [])].reverse(),
+        recentDisclosures,
     };
 }
 
@@ -174,13 +206,14 @@ const getPublicTasiStockSnapshot = cache(unstable_cache(async (symbol: string): 
             .limit(1);
     };
 
-    const [fund, price, tech, history, scan, stockMeta] = await Promise.all([
+    const [fund, price, tech, history, scan, stockMeta, recentDisclosures] = await Promise.all([
         readOrdered('stock_fundamentals', 'symbol,exchange,data,updated_at', 'updated_at', 1),
         readOrdered('stock_prices', 'symbol,exchange,date,open,high,low,close,volume,updated_at', 'date', 1),
         readOrdered('stock_technical_indicators', 'symbol,exchange,date,close,change_pct,adx_14,rsi_14,macd,macd_signal,ema_50,ema_200,sma_50,sma_200', 'date', 1),
         readOrdered('stock_prices', 'date,open,high,low,close,volume', 'date', 30),
         readOrdered('scan_results', 'symbol,exchange,created_at,precision,signal,top_reasons', 'created_at', 1),
         stocksQuery(),
+        readSafeDisclosures(client, candidates),
     ]);
 
     if (fund.error && stockMeta.error) throw new Error('Unable to load public TASI stock fundamentals');
@@ -219,6 +252,7 @@ const getPublicTasiStockSnapshot = cache(unstable_cache(async (symbol: string): 
         latestTech: tech.error ? null : (tech.data?.[0] || null),
         latestScan: scan.error ? null : (scan.data?.[0] || null),
         historicalPrices: history.error ? [] : [...(history.data || [])].reverse(),
+        recentDisclosures,
     };
 }, ['public-tasi-stock-snapshot-v2'], { revalidate: 604800 }));
 
@@ -228,6 +262,7 @@ const EMPTY_SNAPSHOT: PublicStockSnapshotData = {
     latestTech: null,
     latestScan: null,
     historicalPrices: [],
+    recentDisclosures: [],
 };
 
 const getCachedStockPageBundle = cache(unstable_cache(async (symbol: string, market: MarketMode, preferredExchange = ''): Promise<PublicStockPageBundle> => {
