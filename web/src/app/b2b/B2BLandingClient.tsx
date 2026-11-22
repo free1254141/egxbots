@@ -273,6 +273,7 @@ export default function B2BLandingClient() {
             <Link
               href="/b2b/dashboard"
               className="inline-flex items-center gap-1.5 bg-black text-white px-3 py-1 rounded-lg hover:bg-zinc-900 transition-colors"
+              prefetch={false}
             >
               <span>{isAr ? "فتح لوحة تحكم البوت ←" : "Open B2B Dashboard →"}</span>
             </Link>
@@ -344,6 +345,7 @@ export default function B2BLandingClient() {
               <Link
                 href="/b2b/dashboard"
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-400 hover:text-emerald-400 px-2 py-2 transition-colors"
+                prefetch={false}
               >
                 <span>{isAr ? "لديك رخصة بالفعل؟ افتح لوحة التحكم" : "Already licensed? Dashboard"}</span>
                 <ArrowRight className={`w-3.5 h-3.5 ${isAr ? "rotate-180" : ""}`} />
@@ -687,6 +689,7 @@ export default function B2BLandingClient() {
                         ? "bg-emerald-500 hover:bg-emerald-400 text-black"
                         : "bg-zinc-900 hover:bg-black text-white dark:bg-white dark:text-black"
                     }`}
+                    prefetch={false}
                   >
                     <Rocket className="w-4 h-4" />
                     <span>{isAr ? `اشترك الآن (${formatPrice(tier.amount_egp)})` : `Subscribe (${formatPrice(tier.amount_egp)})`}</span>
@@ -762,7 +765,7 @@ export default function B2BLandingClient() {
               : "Our B2B infrastructure delivers technical indicators, valuation metrics, Sharia screening, and automated disclosure summaries strictly as analytical software tools."}
           </p>
           <div className="pt-1">
-            <Link href="/legal-status" className="text-xs font-black text-emerald-700 dark:text-emerald-400 hover:underline">
+            <Link href="/legal-status" className="text-xs font-black text-emerald-700 dark:text-emerald-400 hover:underline" prefetch={false}>
               {isAr ? "اطلع على صفحة الوضع القانوني وإخلاء المسؤولية ←" : "View Legal Status & Disclaimer ←"}
             </Link>
           </div>
@@ -868,6 +871,7 @@ export default function B2BLandingClient() {
                 href="/b2b/dashboard"
                 onClick={() => setTrialModal(null)}
                 className="font-black text-emerald-600 dark:text-emerald-400 hover:underline"
+                prefetch={false}
               >
                 {isAr ? "الانتقال للوحة التحكم وتعديل التوقيع ←" : "Open B2B Dashboard →"}
               </Link>

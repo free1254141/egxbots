@@ -8,6 +8,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { StockDividendItem } from "@/lib/market/dividends-server";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 interface HeldPositionLite {
   symbol: string;
@@ -55,7 +56,7 @@ export default function PortfolioDividendsCard({
 
   useEffect(() => {
     let active = true;
-    fetch("/api/market/dividends?market=egx")
+    hfPublicFetch("/api/market/dividends?market=egx", undefined, { cacheTtlMs: 300_000 })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (active && Array.isArray(d?.dividends)) {
@@ -131,6 +132,7 @@ export default function PortfolioDividendsCard({
         <Link
           href="/dividends"
           className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-black border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 hover:bg-[#FFE600] hover:text-black transition-colors"
+          prefetch={false}
         >
           <span>{isAr ? "تقويم الكوبونات (4 أسواق)" : "4-Market Calendar"}</span>
           <ArrowUpRight className="w-3.5 h-3.5" />
@@ -219,6 +221,7 @@ export default function PortfolioDividendsCard({
                 key={`${m.symbol}-${m.ex_date}`}
                 href={`/stocks/${m.symbol}`}
                 className="p-2.5 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 hover:border-black dark:hover:border-[#FFE600] transition-colors"
+                prefetch={false}
               >
                 <div className="flex items-center gap-1.5">
                   <StockLogo symbol={m.symbol} size="sm" className="h-5 w-5 rounded-md" />

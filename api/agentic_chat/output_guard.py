@@ -65,6 +65,16 @@ _ORDERED_FIELD_PATTERNS: List[Tuple[str, re.Pattern[str], str]] = [
     for name, label in sorted(_LEAKED_FIELD_LABELS.items(), key=lambda kv: len(kv[0]), reverse=True)
 ]
 
+_AUTOMATION_NO_QUOTA_LINE_RE = re.compile(
+    r"^[^\n]*(?:الأتمتة\s+المجدولة|الاتمتة\s+المجدولة|الاتوميشن|Scheduled\s+Automations)[^\n]*"
+    r"(?:مش\s+بتاكل|لا\s+تأكل|لا\s+تاكل|لا\s+تستهلك|مش\s+بتستهلك|مش\s+بتتحسب|لا\s+تحتسب|لا\s+تُحتسب|لا\s+تخصم|مش\s+بتخصم|بدون\s+استهلاك)[^\n]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_AUTOMATION_QUOTA_CORRECTION_LINE = (
+    "- **الأتمتة المجدولة (Scheduled Automations)** — ⚠️ **تستهلك من الكوتة** "
+    "(كل تقرير مجدول يتنفذ تلقائياً يخصم رسالة واحدة `1` من كوتة الشات الشهرية الموحدة)."
+)
+
 
 def _collect_ground_truth(
     tool_payloads: List[Dict[str, Any]],
@@ -190,6 +200,11 @@ def verify_and_guard_reply(
         if fpat.search(guarded):
             guarded = fpat.sub(flabel, guarded)
             warnings.append(f"internal_field_leaked:{fname}")
+
+    if _AUTOMATION_NO_QUOTA_LINE_RE.search(guarded):
+        guarded = _AUTOMATION_NO_QUOTA_LINE_RE.sub(_AUTOMATION_QUOTA_CORRECTION_LINE, guarded)
+        warnings.append("automation_quota_misstatement_fixed")
+        block_cache = True
 
     return {
         "reply": guarded,

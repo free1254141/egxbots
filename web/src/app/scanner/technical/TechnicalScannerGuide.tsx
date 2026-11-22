@@ -27,7 +27,7 @@ export default function TechnicalScannerGuide() {
         <nav aria-label={ar ? 'أدلة وأدوات التحليل' : 'Market guides and analysis tools'} className="mb-5 flex flex-wrap gap-x-5 gap-y-2 text-sm font-medium text-amber-700 dark:text-amber-300">
             {[['/stocks', ar ? 'دليل الأسهم' : 'Stock directory'], ['/reports', ar ? 'التقارير اليومية' : 'Daily reports'],
                 ['/scanner/backtests', ar ? 'التشابه التاريخي' : 'Historical similarity']]
-                .map(([href, label]) => <Link key={href} href={href} className="underline underline-offset-4 hover:text-amber-500">{label}</Link>)}
+                .map(([href, label]) => <Link key={href} href={href} className="underline underline-offset-4 hover:text-amber-500" prefetch={false}>{label}</Link>)}
         </nav>
     </section>;
 }

@@ -379,3 +379,87 @@ def test_scanner_lifecycle_stop_checked_conservatively_before_target_and_gap_dow
     assert closed[0]["status"] == "stopped_out"
     assert closed[0]["exit_price"] == pytest.approx(95.0, abs=0.01)
     assert closed[0]["return_pct"] == pytest.approx(-5.0, abs=0.05)
+
+
+def test_scanner_lifecycle_rebases_when_confirmed_and_freezes_when_unconfirmed():
+    """Confirmed corporate action rebases scanner levels & stays active; unconfirmed extreme gap freezes without fake stop or target drop."""
+    existing = [{
+        "id": "INEG_2026-11-18_volume_surge",
+        "symbol": "INEG",
+        "scanner_type": "volume_surge",
+        "entry_price": 20.0,
+        "entry_date": "2026-11-18",
+        "target_1": 20.9,
+        "stop_loss": 19.4,
+        "stop_loss_pct": 3.0,
+        "current_price": 20.0,
+        "highest_price": 20.2,
+        "lowest_price": 19.8,
+        "sessions_count": 1,
+        "max_sessions": 4,
+    }]
+    # Confirmed corporate action -> rebases entry/target/stop (factor=12.6/20=0.63) and stays active
+    active_c, closed_c, hits_c, stops_c = step_scanner_lifecycle(
+        existing,
+        [],
+        {"INEG": {"open": 12.5, "high": 12.7, "low": 12.45, "close": 12.6}},
+        final_vol=[],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-19",
+        action_date="2026-11-19",
+        action_time="14:30",
+        now_iso="2026-11-19T12:30:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+        confirmed_action_dates={"INEG": ["2026-11-19"]},
+    )
+    assert len(active_c) == 1
+    assert active_c[0]["entry_price"] == pytest.approx(12.6, abs=0.05)
+    assert active_c[0]["target_1"] == pytest.approx(13.17, abs=0.05)
+    assert active_c[0]["stop_loss"] == pytest.approx(12.22, abs=0.05)
+    assert active_c[0]["rebased_factor"] == pytest.approx(0.63, abs=0.01)
+    assert closed_c == [] and hits_c == [] and stops_c == []
+
+    # Unconfirmed discontinuity -> freezes with original barriers, no stop-out, no blind target reduction
+    active_u, closed_u, hits_u, stops_u = step_scanner_lifecycle(
+        existing,
+        [],
+        {"INEG": {"open": 12.5, "high": 12.7, "low": 12.45, "close": 12.6}},
+        final_vol=[],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-19",
+        action_date="2026-11-19",
+        action_time="14:30",
+        now_iso="2026-11-19T12:30:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+        confirmed_action_dates=None,
+    )
+    assert len(active_u) == 1
+    assert active_u[0]["entry_price"] == 20.0
+    assert active_u[0]["target_1"] == 20.9
+    assert active_u[0]["stop_loss"] == 19.4
+    assert active_u[0]["sessions_count"] == 2
+    assert closed_u == [] and hits_u == [] and stops_u == []
+
+    # Frozen signal still expires cleanly once max_sessions is reached
+    active_exp, closed_exp, hits_exp, stops_exp = step_scanner_lifecycle(
+        [{**active_u[0], "sessions_count": 3}],
+        [],
+        {"INEG": {"open": 12.5, "high": 12.7, "low": 12.45, "close": 12.6}},
+        final_vol=[],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-23",
+        action_date="2026-11-23",
+        action_time="14:30",
+        now_iso="2026-11-23T12:30:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+        confirmed_action_dates=None,
+    )
+    assert active_exp == [] and hits_exp == [] and stops_exp == []
+    assert len(closed_exp) == 1
+    assert closed_exp[0]["status"] == "expired"

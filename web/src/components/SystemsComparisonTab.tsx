@@ -128,6 +128,7 @@ export default function SystemsComparisonTab({
     const calcMedium = (period: "august" | "september" | "full_year"): SystemMetric => {
       const closed = mediumRows.filter((r) => {
         const s = (r.status || "").toLowerCase();
+        if (s === "cancelled") return false;
         return s === "win" || s === "loss" || r.profit_loss_pct != null;
       });
 
@@ -411,6 +412,7 @@ export default function SystemsComparisonTab({
               <Link
                 href="/pricing"
                 className="inline-flex items-center gap-1.5 px-4 py-2 border-2 border-black bg-black text-[#FFE600] text-xs font-black shadow-[2px_2px_0px_#000] hover:bg-zinc-800 transition-all"
+                prefetch={false}
               >
                 <Zap className="w-3.5 h-3.5 text-amber-400" />
                 <span>{isAr ? "فتح كافة الأنظمة فوراً (PRO)" : "Unlock All Systems (PRO)"}</span>

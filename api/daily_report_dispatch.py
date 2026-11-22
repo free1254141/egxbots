@@ -312,6 +312,52 @@ def _offer_html() -> str:
 _OFFER_HTML = _offer_html()
 
 
+def _fair_value_lines(limit: int = 3) -> str:
+    """Build dynamic fair-value discount lines matching the live /fair-value platform data."""
+    try:
+        from api.routers.offload_public import _get_fair_value
+
+        payload = _get_fair_value("egx") or {}
+        stocks = list(payload.get("stocks") or [])
+        undervalued = [
+            row
+            for row in stocks
+            if isinstance(row, dict)
+            and str(row.get("status") or "").lower() == "undervalued"
+            and float(row.get("discountPct") or 0) > 0
+        ]
+        # Prefer widely-followed liquid names first while keeping strict discount sorting
+        preferred = {"HRHO", "AUTO", "OCPH", "COMI", "SWDY", "TMGH", "ETEL", "EFID", "ORWE", "FWRY"}
+        undervalued.sort(
+            key=lambda r: (
+                1 if str(r.get("symbol") or "").upper() in preferred else 0,
+                float(r.get("discountPct") or 0),
+            ),
+            reverse=True,
+        )
+        selected = undervalued[:limit]
+        if selected:
+            lines: List[str] = []
+            for row in selected:
+                sym = _esc(str(row.get("symbol") or "").upper())
+                name_ar = _esc(row.get("nameAr") or sym)
+                disc = round(float(row.get("discountPct") or 0))
+                upside = round(float(row.get("upsidePct") or 0))
+                close_px = _fmt_num(row.get("currentPrice"))
+                fv_px = _fmt_num(row.get("fairValue"))
+                lines.append(
+                    f"• <b>{sym} ({name_ar}):</b> خصم {disc}% (+{upside}% صعود متوقع | السعر {close_px} ← القيمة العادلة {fv_px} ج.م)."
+                )
+            return "\n".join(lines)
+    except Exception:
+        pass
+    return (
+        "• <b>HRHO:</b> خصم 39% (+65% صعود متوقع).\n"
+        "• <b>AUTO:</b> خصم 38% ومضاعف ربحية منخفض.\n"
+        "• <b>OCPH:</b> خصم 28% مع تدفقات نقدية قوية."
+    )
+
+
 def build_vip_html(s: Dict[str, Any]) -> str:
     from jobs.send_vip_telegram_daily_report import build_consensus_section
     us, sp, up = s["unusual_stat"], s["springs_stat"], s["upthrusts_stat"]
@@ -331,9 +377,7 @@ def build_vip_html(s: Dict[str, Any]) -> str:
         f"━━━━━━━━━━━━━━━━━━━\n🟢 <b>مصائد الدببة (Spring) — ارتداد تجميعي:</b>\n{_bear_lines(s, 4)}\n\n"
         f"🔴 <b>مصائد الثيران (Upthrust) — تجنب الشراء عند القمم:</b>\n{_bull_lines(s, 3)}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n💎 <b>ثالثاً: فرص الأسهم بأقل من قيمتها العادلة:</b>\n"
-        f"• <b>HRHO:</b> خصم 39% (+65% صعود متوقع).\n"
-        f"• <b>OCPH:</b> خصم 28% مع تدفقات نقدية قوية.\n"
-        f"• <b>AUTO:</b> خصم 38% ومضاعف ربحية منخفض.\n\n"
+        f"{_fair_value_lines(3)}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n📑 <b>رابعاً: رادار إفصاحات الشركات وتعاملات الداخليين:</b>\n"
         f"{_disclosures_lines(s, 4)}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n💰 <b>خامساً: نشرة الكوبونات القادمة والحالة المالية لكل سهم:</b>\n"

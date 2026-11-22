@@ -116,6 +116,7 @@ export default function UnusualActivity() {
               width={20}
               height={20}
               className="h-5 w-5 object-contain"
+              unoptimized
             />
           </span>
           <Activity className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />

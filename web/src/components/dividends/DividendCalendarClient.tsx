@@ -188,6 +188,7 @@ export default function DividendCalendarClient({
           <Link
             href="/profile#portfolio"
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0_0_#000] transition-all shrink-0"
+            prefetch={false}
           >
             <Sparkles className="w-4 h-4" />
             <span>{isAr ? "كوبونات محفظتي والإشعارات" : "My Portfolio Dividends"}</span>
@@ -209,6 +210,7 @@ export default function DividendCalendarClient({
                     ? "bg-[#FFE600] text-black border-black shadow-[2px_2px_0_0_#000]"
                     : "bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700 hover:border-black dark:hover:border-white"
                 }`}
+                prefetch={false}
               >
                 <MarketFlagIcon market={mk} />
                 <span>{isAr ? m.shortAr : m.shortEn}</span>
@@ -329,7 +331,7 @@ export default function DividendCalendarClient({
                       className="hover:bg-amber-500/5 dark:hover:bg-zinc-900/80 transition-colors"
                     >
                       <td className="p-3 whitespace-nowrap">
-                        <Link href={href} className="inline-flex items-center gap-2.5 group">
+                        <Link href={href} className="inline-flex items-center gap-2.5 group" prefetch={false}>
                           <StockLogo symbol={item.symbol} size="sm" className="h-7 w-7 rounded-lg" />
                           <div>
                             <div className="font-black text-zinc-950 dark:text-white group-hover:text-amber-600 dark:group-hover:text-[#FFE600] inline-flex items-center gap-1">

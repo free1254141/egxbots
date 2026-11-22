@@ -55,7 +55,7 @@ from supabase import Client, create_client
 
 from api.egx30_fetcher import get_market_regime
 from api.model_utils import align_pandas_categories_to_booster, get_primary_booster, reset_nested_boosters
-from api.recommendation_policy import candidate_assessment, evaluate_bars, profit_protection_stop
+from api.recommendation_policy import CorporateActionDiscontinuity, candidate_assessment, evaluate_bars, profit_protection_stop
 from api.stock_ai import add_technical_indicators
 from api.strategy_engine import StrategyEngine
 from api.strict_quality_labeler import StrictQualityLabeler
@@ -822,16 +822,19 @@ def _simulate_slice_trades(
                 continue
 
             bars_win = bars_dict[sym][max(0, pos - 35) : pos + max_sessions + 35]
-            outcome = evaluate_bars(
-                entry=close_v,
-                target=target_v,
-                stop=stop_v,
-                bars=bars_win,
-                entry_date=d_str,
-                cursor=d_str,
-                max_sessions=max_sessions,
-                profit_protection=SAUDI_PROFIT_PROTECTION_POLICY,
-            )
+            try:
+                outcome = evaluate_bars(
+                    entry=close_v,
+                    target=target_v,
+                    stop=stop_v,
+                    bars=bars_win,
+                    entry_date=d_str,
+                    cursor=d_str,
+                    max_sessions=max_sessions,
+                    profit_protection=SAUDI_PROFIT_PROTECTION_POLICY,
+                )
+            except CorporateActionDiscontinuity:
+                continue
             if outcome["status"] in ("win", "loss"):
                 pl_pct = float(outcome["profit_loss_pct"])
                 trades.append({

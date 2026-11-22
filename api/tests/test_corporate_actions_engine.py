@@ -57,6 +57,16 @@ class TestClassification:
     def test_generic_market_headline_is_not_an_action(self):
         assert classify_corporate_action("البورصة المصرية تغلق مرتفعة 1%") is None
 
+    @pytest.mark.parametrize("title, expected_type", [
+        ("اليوم.. نهاية حق اكتتاب زيادة رأسمال المجموعة المتكاملة - جريدة البورصة", "rights_issue"),
+        ("البورصة تحدد 0.28 جنيه سعر فتح حق اكتتاب المجموعة المتكاملة للأعمال الهندسية في 24 نوفمبر 2026", "rights_issue"),
+        ("عمومية المتكاملة للأعمال الهندسية تقر زيادة رأسمالها إلى 90 مليون جنيه - جريدة المال", "capital_increase"),
+    ])
+    def test_singular_arabic_rights_and_capital_increase_headlines(self, title, expected_type):
+        res = classify_corporate_action(title)
+        assert res is not None
+        assert res["action_type"] == expected_type
+
 
 class TestRelevanceGate:
     def test_generic_article_is_not_stored_for_unrelated_symbol(self):

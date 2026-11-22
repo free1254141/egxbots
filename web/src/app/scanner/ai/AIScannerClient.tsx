@@ -175,6 +175,7 @@ export default function AIScannerClient() {
               <Link
                 href="/scanner/backtests"
                 className="inline-flex items-center gap-2 border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 px-6 py-3.5 text-sm font-black text-zinc-900 dark:text-white shadow-[4px_4px_0_0_#000] dark:shadow-[4px_4px_0_0_#fff] transition hover:translate-y-0.5 hover:shadow-none sm:text-base"
+                prefetch={false}
               >
                 <LineChart className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
                 <span>
@@ -187,6 +188,7 @@ export default function AIScannerClient() {
               <Link
                 href="/scanner/technical"
                 className="inline-flex items-center gap-2 border-2 border-black dark:border-white bg-white dark:bg-zinc-950 px-5 py-3.5 text-sm font-black text-zinc-800 dark:text-zinc-200 shadow-[4px_4px_0_0_#000] dark:shadow-[4px_4px_0_0_#fff] transition hover:translate-y-0.5 hover:shadow-none"
+                prefetch={false}
               >
                 <Search className="h-4 w-4 text-amber-500" />
                 <span>
@@ -412,6 +414,7 @@ export default function AIScannerClient() {
               <Link
                 href="/stocks"
                 className="inline-flex items-center gap-2 border-2 border-black bg-white px-6 py-3.5 text-sm font-black text-black shadow-[4px_4px_0_0_#000] transition hover:translate-y-0.5 hover:shadow-none sm:text-base"
+                prefetch={false}
               >
                 <span>
                   {isAr

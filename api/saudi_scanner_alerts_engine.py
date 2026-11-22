@@ -20,6 +20,7 @@ from api.scanner_alerts_engine import (
     calculate_trade_plan,
     compute_scanner_signals_kpis,
     evaluate_scanner_candidates,
+    resolve_confirmed_action_dates_for_active,
     step_scanner_lifecycle,
 )
 from api.web_origin import get_web_origin
@@ -223,6 +224,14 @@ def execute_saudi_scanner_alerts_native(
         current_closed = list(state.get("closed_signals") or existing_public.get("closed_signals") or [])
     prev_active_ids = {str(s.get("id") or f"{s.get('symbol')}_{s.get('entry_date')}_{s.get('scanner_type')}") for s in current_active}
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+    confirmed_action_dates = resolve_confirmed_action_dates_for_active(
+        sb,
+        current_active,
+        latest_by_symbol,
+        as_of_date=as_of_date,
+        action_date=riyadh["date_str"],
+        exchange="TADAWUL",
+    )
 
     (
         still_active,
@@ -244,6 +253,7 @@ def execute_saudi_scanner_alerts_native(
         intraday_live=True,
         allow_new_entries=allow_new_entries,
         exchange="TADAWUL",
+        confirmed_action_dates=confirmed_action_dates,
     )
 
     newly_hit_targets = [s for s in hit_target_signals if s.get("exit_date") == riyadh["date_str"]]

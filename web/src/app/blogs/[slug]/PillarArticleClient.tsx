@@ -79,6 +79,7 @@ export default function PillarArticleClient({ article }: PillarArticleClientProp
           <Link
             href="/blogs"
             className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1"
+            prefetch={false}
           >
             <span>{isAr ? "العودة للمدونة" : "Back to Blog"}</span>
             {isAr ? <ArrowLeft className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
@@ -112,6 +113,7 @@ export default function PillarArticleClient({ article }: PillarArticleClientProp
           <Link
             href={scannerHref}
             className="whitespace-nowrap px-6 py-3 bg-black text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 font-black text-sm border-2 border-black dark:border-white shadow-[3px_3px_0px_0px_#f59e0b] transition-all flex items-center gap-2 shrink-0"
+            prefetch={false}
           >
             <span>{isAr ? "فتح الرادار مجاناً" : "Open Radar Free"}</span>
             {isAr ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
@@ -194,12 +196,14 @@ export default function PillarArticleClient({ article }: PillarArticleClientProp
             <Link
               href={scannerHref}
               className="px-8 py-3.5 bg-black text-white hover:bg-zinc-800 font-black text-base border-2 border-black shadow-[4px_4px_0px_0px_#fff] transition-all"
+              prefetch={false}
             >
               {isAr ? "جرب الرادار الآن مجاناً" : "Try Radar Free Now"}
             </Link>
             <Link
               href={pricingHref}
               className="px-8 py-3.5 bg-white text-black hover:bg-zinc-100 font-black text-base border-2 border-black shadow-[4px_4px_0px_0px_#000] transition-all"
+              prefetch={false}
             >
               {isAr ? "باقات البرمجيات وتنبيهات تليجرام" : "SaaS Plans & Telegram Alerts"}
             </Link>

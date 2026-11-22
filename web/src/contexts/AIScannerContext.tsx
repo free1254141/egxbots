@@ -1020,7 +1020,9 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             const positionMetaOf = (position: any) =>
                 position?.metadata && typeof position.metadata === "object" ? position.metadata : {};
 
-            const mapped = (scanData as any[]).map((row: any) => {
+            const mapped = (scanData as any[])
+                .filter((row: any) => String(row?.status || "").toLowerCase() !== "cancelled")
+                .map((row: any) => {
                 if (row.identity_locked === true) {
                     return {
                         id: row.id,

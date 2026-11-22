@@ -606,6 +606,7 @@ export function VoiceCallModal({
                                     height={128}
                                     className="w-full h-full object-contain p-2"
                                     priority
+                                    unoptimized
                                 />
                             </div>
                         </div>

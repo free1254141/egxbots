@@ -14,7 +14,7 @@ const getCachedDailyCounts = unstable_cache(
     const pageSize = 1000;
     for (let offset = 0; ; offset += pageSize) {
       const { data, error } = await db.from("scan_results")
-        .select("created_at")
+        .select("created_at,status")
         .eq("is_public", true)
         .eq("exchange", "EGX")
         .gte("created_at", `${from}T00:00:00`)
@@ -23,6 +23,7 @@ const getCachedDailyCounts = unstable_cache(
       if (error) throw error;
       const rows = data || [];
       for (const row of rows) {
+        if (String((row as any).status || "").toLowerCase() === "cancelled") continue;
         const date = String(row.created_at || "").slice(0, 10);
         if (/^\d{4}-\d{2}-\d{2}$/.test(date)) dailyCounts[date] = (dailyCounts[date] || 0) + 1;
       }

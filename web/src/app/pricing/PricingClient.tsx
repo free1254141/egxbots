@@ -1411,6 +1411,7 @@ export default function PricingClient() {
                 <Link
                   href={(b2bDashboardUrl || "/b2b/dashboard").replace(/^https?:\/\/[^/]+/, "") || "/b2b/dashboard"}
                   className="flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-500 hover:bg-emerald-600 text-black font-black py-3.5 px-6 uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-sm"
+                  prefetch={false}
                 >
                   <ExternalLink className="w-4 h-4" />
                   {isAr ? "فتح لوحة تحكم القنوات (B2B) وتفعيل البوت" : "Open B2B Dashboard & Connect Bot"}
@@ -1419,6 +1420,7 @@ export default function PricingClient() {
                 <Link
                   href="/chat"
                   className="flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-sky-500 hover:bg-sky-400 text-black font-black py-3.5 px-6 uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-sm"
+                  prefetch={false}
                 >
                   <MessageSquare className="w-4 h-4" />
                   {isAr ? "ابدأ استخدام الشات الذكي الآن (350 استفساراً/شهر)" : "Start Using AI Chat Now (350/mo)"}
@@ -1449,6 +1451,7 @@ export default function PricingClient() {
                     <Link
                       href="/chat"
                       className="flex items-center justify-center gap-2 border-2 border-black dark:border-white bg-sky-500 hover:bg-sky-400 text-black font-black py-2.5 px-4 uppercase tracking-wider text-xs"
+                      prefetch={false}
                     >
                       <MessageSquare className="w-3.5 h-3.5" />
                       {isAr ? "افتح الشات الذكي الآن (350 استفساراً/شهر)" : "Open AI Chat Now (350/mo)"}
@@ -1565,7 +1568,7 @@ export default function PricingClient() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 sm:p-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981]">
             <div className="flex items-center gap-3 sm:gap-4">
               <div className="shrink-0 border-2 border-black dark:border-white bg-white p-1.5 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-                <Image src="/favicon_io/apple-touch-icon.png" alt={brandName} width={36} height={36} className="h-8 w-8 object-contain" />
+                <Image src="/favicon_io/apple-touch-icon.png" alt={brandName} width={36} height={36} className="h-8 w-8 object-contain" unoptimized />
               </div>
               <div>
                 <span className="inline-block border-2 border-black bg-amber-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-black">
@@ -3329,6 +3332,7 @@ export default function PricingClient() {
                 <Link
                   href="/legal-status"
                   className="inline-flex items-center gap-1.5 text-xs font-black text-amber-800 dark:text-amber-400 hover:text-amber-950 dark:hover:text-amber-300 transition-colors"
+                  prefetch={false}
                 >
                   <span>{isAr ? "اقرأ بيان الموقف القانوني والتنظيمي الكامل للمنصة ←" : "Read our full Legal & Regulatory Compliance Statement →"}</span>
                 </Link>
@@ -3433,6 +3437,7 @@ export default function PricingClient() {
               <Link
                 href="/affiliate"
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-300 dark:border-zinc-700 py-2.5 px-4 text-xs font-black bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all text-center"
+                prefetch={false}
               >
                 <span>{isAr ? "صفحة نظام الأفلييت (25%) ←" : "Affiliate Program Details →"}</span>
               </Link>
@@ -3496,6 +3501,7 @@ export default function PricingClient() {
                   href="/b2b/dashboard"
                   onClick={() => setB2bTrialModal(null)}
                   className="font-black text-emerald-600 dark:text-emerald-400 hover:underline"
+                  prefetch={false}
                 >
                   {isAr ? "الانتقال إلى لوحة تحكم البوت (B2B Dashboard) ←" : "Go to B2B Dashboard ←"}
                 </Link>

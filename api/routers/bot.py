@@ -1824,8 +1824,8 @@ def get_recommendations(is_landing: bool = False, limit: int = 200, force_refres
         if is_landing:
             query = query.eq("is_public", True)
             
-        res = query.order("created_at", desc=True).limit(limit).execute()
-        data = res.data or []
+        res = query.order("created_at", desc=True).limit(limit + 10).execute()
+        data = [r for r in (res.data or []) if str(r.get("status") or "").lower() != "cancelled"][:limit]
         
         # Cache the result
         RECOMMENDATIONS_CACHE["data"] = data

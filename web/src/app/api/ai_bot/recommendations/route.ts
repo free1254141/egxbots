@@ -74,11 +74,13 @@ export async function GET(req: NextRequest) {
       .eq("is_public", true)
       .eq("exchange", exchange);
     const { data, error } = await (market === "tasi"
-      ? recommendationsQuery.order("created_at", { ascending: false }).order("precision", { ascending: false }).limit(limit)
-      : recommendationsQuery.order("created_at", { ascending: false }).limit(limit));
+      ? recommendationsQuery.order("created_at", { ascending: false }).order("precision", { ascending: false }).limit(limit + 10)
+      : recommendationsQuery.order("created_at", { ascending: false }).limit(limit + 10));
     if (error) throw error;
 
-    let visibleData: any[] = data || [];
+    let visibleData: any[] = (data || [])
+      .filter((row: any) => String(row.status || "").toLowerCase() !== "cancelled")
+      .slice(0, limit);
     // Quote refresh is independent of trade evaluation. Never replace closed
     // exit prices, and never infer a current quote from an old recommendation.
     const openSymbols = [...new Set(visibleData.filter(row => row.status === "open").map(row => row.symbol))];

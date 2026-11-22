@@ -437,6 +437,7 @@ export default function ScheduledAutomationsCard({
           <Link
             href="/pricing"
             className="px-4 py-2 border-2 border-black bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0"
+            prefetch={false}
           >
             {isAr ? "الترقية إلى Pro" : "Upgrade to Pro"}
           </Link>

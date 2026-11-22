@@ -1157,6 +1157,9 @@ async function executeRawTool(
                 .from("scan_results")
                 .select("id,symbol,signal,entry_price,target_price,stop_loss,exit_price,profit_loss_pct,status,created_at,updated_at")
                 .order("created_at", { ascending: false })).limit(300);
+            const filteredMatchingRows = (allMatchingRows || []).filter(
+                (r: any) => String(r?.status || "").toLowerCase() !== "cancelled"
+            );
 
             const { count: totalCount } = await applyFilters(supabase
                 .from("scan_results")
@@ -1354,7 +1357,7 @@ async function executeRawTool(
                 })
                 : [];
 
-            const rawAllRows = allMatchingRows || [];
+            const rawAllRows = filteredMatchingRows;
             const allRows = shariaOnly
                 ? rawAllRows.filter((r: any) => isShariaCompliant(r.symbol))
                 : rawAllRows;

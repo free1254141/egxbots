@@ -3,6 +3,7 @@ import type { SimilarityReport } from "@/lib/historical-similarity";
 import type { PortfolioPerformance } from "@/lib/portfolio-performance";
 import { TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 import { fetchUserQuotaCached } from "@/lib/user-quota-client";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 export async function fetchPortfolioPerformance(signal?: AbortSignal): Promise<PortfolioPerformance> {
   const response = await fetch("/api/portfolio/performance", { cache: "no-store", signal });
@@ -15,7 +16,7 @@ export async function fetchHistoricalSimilarity(symbol?: string, sameContext = f
   if (symbol) params.set("symbol", symbol);
   else params.set("view", "summary");
   if (sameContext) params.set("context", "matched");
-  const response = await fetch(`/api/scan/similarity/published?${params}`, { signal });
+  const response = await hfPublicFetch(`/api/scan/similarity/published?${params}`, { signal }, { cacheTtlMs: 120_000 });
   if (!response.ok) throw new Error(`Similarity report unavailable (${response.status})`);
   return response.json();
 }
@@ -84,7 +85,7 @@ export async function fetchUnusualActivity(
     market === "tasi" || market === "egx" || market === "uae" || market === "qatar"
       ? market
       : resolveStoredSearchMarket();
-  const response = await fetch(`/api/scan/unusual-activity?market=${resolvedMarket}`, { signal });
+  const response = await hfPublicFetch(`/api/scan/unusual-activity?market=${resolvedMarket}`, { signal }, { cacheTtlMs: 120_000 });
   if (!response.ok) throw new Error(`Unusual activity request failed: ${response.status}`);
   return response.json();
 }
@@ -717,7 +718,9 @@ export async function searchSymbols(
 
   async function doFetch(url: string) {
 
-    return await fetch(url, { signal });
+    return url.startsWith("/")
+      ? await hfPublicFetch(url, { signal }, { cacheTtlMs: 300_000 })
+      : await fetch(url, { signal });
 
   }
 
@@ -1421,7 +1424,7 @@ export async function scanTech(filter: TechFilter, signal?: AbortSignal): Promis
 
   async function doFetch(url: string) {
 
-    return await fetch(url, {
+    const init: RequestInit = {
 
       method: "POST",
 
@@ -1492,7 +1495,9 @@ export async function scanTech(filter: TechFilter, signal?: AbortSignal): Promis
 
       signal: signal
 
-    });
+    };
+
+    return url.startsWith("/") ? await hfPublicFetch(url, init) : await fetch(url, init);
 
   }
 
@@ -2282,8 +2287,8 @@ export interface PublicMarketOverview {
 export async function getPublicMarketOverview(signal?: AbortSignal): Promise<PublicMarketOverview> {
   const market = resolveStoredBrowserMarket();
   const [statusResponse, breadthResponse] = await Promise.all([
-    fetch(`/api/market/status?market=${market}`, { signal }),
-    fetch(`/api/market/breadth?market=${market}`, { signal }),
+    hfPublicFetch(`/api/market/status?market=${market}`, { signal }, { cacheTtlMs: 60_000 }),
+    hfPublicFetch(`/api/market/breadth?market=${market}`, { signal }, { cacheTtlMs: 60_000 }),
   ]);
   const [status, breadth] = await Promise.all([
     statusResponse.ok ? statusResponse.json() : null,

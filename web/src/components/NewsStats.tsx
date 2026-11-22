@@ -19,6 +19,7 @@ import {
 } from "recharts";
 import { Loader2, TrendingUp, BarChart3, PieChart as PieIcon, LineChart as LineIcon } from "lucide-react";
 import { useMarket } from "@/contexts/MarketContext";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 interface StatsData {
     summary: {
@@ -155,7 +156,7 @@ export default function NewsStats({
                 if (monthFilter) params.append("month", monthFilter);
                 if (period) params.append("period", period);
                 params.append("sector", activeSectorName);
-                const res = await fetch(`/api/scan/news/stats?${params.toString()}`);
+                const res = await hfPublicFetch(`/api/scan/news/stats?${params.toString()}`, undefined, { cacheTtlMs: 120_000 });
                 if (res.ok) {
                     const data = await res.json();
                     if (!cancelled) setSectorTimeline(data.sectorTimeline || null);

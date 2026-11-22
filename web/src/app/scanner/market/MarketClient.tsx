@@ -7,6 +7,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { buildHeatmapSnapshotFromRows } from "@/lib/heatmapSnapshot";
 import { getStockHref } from "@/lib/stock-href";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import {
     Loader2, RefreshCw, Landmark,
     ArrowUpRight, ArrowDownRight, AlertTriangle, AlertCircle,
@@ -1276,7 +1277,7 @@ export default function MarketClient() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch(`/api/market/status?market=${reqMarket}`);
+            const res = await hfPublicFetch(`/api/market/status?market=${reqMarket}`, undefined, { cacheTtlMs: 60_000 });
             if (!res.ok) {
                 throw new Error(`Failed to load market data (Status ${res.status})`);
             }
@@ -1293,7 +1294,7 @@ export default function MarketClient() {
     const fetchBreadthData = async (reqMarket = market) => {
         setBreadthLoading(true);
         try {
-            const res = await fetch(`/api/market/breadth?market=${reqMarket}`);
+            const res = await hfPublicFetch(`/api/market/breadth?market=${reqMarket}`, undefined, { cacheTtlMs: 60_000 });
             if (res.ok) {
                 const data = await res.json();
                 if (activeMarketRef.current === reqMarket) setBreadthData(data);

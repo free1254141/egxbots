@@ -43,6 +43,7 @@ export default function BrandedPageHeader({
           width={176}
           height={176}
           className="h-28 w-28 object-contain md:h-40 md:w-40"
+          unoptimized
         />
       </div>
       <div className="relative flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
@@ -53,6 +54,7 @@ export default function BrandedPageHeader({
             width={40}
             height={40}
             className="h-10 w-10 object-contain"
+            unoptimized
           />
         </div>
         <div className="min-w-0 flex-1">

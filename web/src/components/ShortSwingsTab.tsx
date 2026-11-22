@@ -722,6 +722,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
               <Link
                 href="/pricing"
                 className="h-10 px-4 border-2 border-black bg-black hover:bg-zinc-900 text-[#FFE600] font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                prefetch={false}
               >
                 <Crown className="w-3.5 h-3.5 text-[#FFE600]" />
                 <span>ترقية الحساب إلى PRO</span>
@@ -882,6 +883,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
           <Link
             href="/pricing"
             className="inline-flex shrink-0 items-center justify-center border-2 border-black bg-black px-4 py-2 font-black text-xs uppercase text-[#FFE600] shadow-[2px_2px_0px_#000] hover:bg-zinc-800 transition-all"
+            prefetch={false}
           >
             فتح كل الإشارات الحديثة
           </Link>
@@ -3008,6 +3010,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                 <Link
                   href="/pricing"
                   className="inline-flex items-center gap-2 px-6 py-3 border-2 border-black bg-black text-[#FFE600] font-black text-sm uppercase shadow-[3px_3px_0px_#000]"
+                  prefetch={false}
                 >
                   <Crown className="w-4 h-4 text-[#FFE600]" />
                   <span>ترقية الحساب إلى PRO الآن</span>
@@ -3141,6 +3144,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                   <Link
                     href={`/chart?symbol=${encodeURIComponent(selectedActiveTrade.symbol)}`}
                     className="h-10 px-5 border-2 border-black bg-black text-[#FFE600] font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                    prefetch={false}
                   >
                     <BarChart2 className="w-4 h-4" />
                     <span>عرض الرسم البياني الحي للسهم (Chart)</span>

@@ -72,7 +72,9 @@ export async function GET(request: NextRequest) {
 
     if (recommendationError) throw recommendationError;
     const byId = new Map<string, any>(
-      (recommendations || []).map((row: any): [string, any] => [String(row.id), row]),
+      (recommendations || [])
+        .filter((row: any) => String(row.status || "").toLowerCase() !== "cancelled")
+        .map((row: any): [string, any] => [String(row.id), row]),
     );
 
     const trackedRecommendationIds = [...new Set(
@@ -87,6 +89,7 @@ export async function GET(request: NextRequest) {
       if (!recommendation) return [];
       const oldValues = event.old_values && typeof event.old_values === "object" ? event.old_values : {};
       const newValues = event.new_values && typeof event.new_values === "object" ? event.new_values : {};
+      if (String(newValues.status || recommendation.status || "").toLowerCase() === "cancelled") return [];
       const closedOn = newValues.rich_details?.evaluation?.closed_on;
       const occurredAt = event.event_type === "recommendation_closed" &&
         typeof closedOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(closedOn)

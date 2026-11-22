@@ -36,6 +36,7 @@ import {
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { useChat } from "@/contexts/ChatContext";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import StockLogo from "@/components/StockLogo";
 import {
@@ -176,7 +177,7 @@ export default function DisclosuresClient({
           params.set("search", debouncedSearch.trim());
         }
 
-        const res = await fetch(`/api/disclosures?${params.toString()}`, { signal });
+        const res = await hfPublicFetch(`/api/disclosures?${params.toString()}`, { signal }, { cacheTtlMs: 60_000 });
         if (!res.ok) throw new Error("Failed to load disclosures");
         const json = await res.json();
         if (signal?.aborted) return;

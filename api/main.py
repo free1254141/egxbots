@@ -999,25 +999,17 @@ allow_origins = [web_origin] if web_origin != "*" else ["*"]
 
 if "*" not in allow_origins:
 
-    allow_origins.extend(
-
-        [
-
-            "http://localhost:3000",
-
-            "http://127.0.0.1:3000",
-
-            "http://localhost:3001",
-
-            "http://127.0.0.1:3001",
-
-            "http://localhost:3002",
-
-            "http://127.0.0.1:3002",
-
-        ]
-
-    )
+    allow_origins = list(dict.fromkeys([
+        *allow_origins,
+        "https://egxbots.com",
+        "https://www.egxbots.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3002",
+        "http://127.0.0.1:3002",
+    ]))
 
 
 
@@ -1032,6 +1024,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "PATCH", "PUT", "OPTIONS"],
 
     allow_headers=["*"],
+
+    max_age=86400,
 
 )
 

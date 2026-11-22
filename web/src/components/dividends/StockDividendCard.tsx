@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Calendar, Coins, Clock, CheckCircle2, Calculator, ArrowUpRight } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { DividendMarketKey, StockDividendItem } from "@/lib/market/dividends-server";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 export default function StockDividendCard({
   symbol,
@@ -23,7 +24,7 @@ export default function StockDividendCard({
     let active = true;
     const sym = (symbol || "").trim().toUpperCase().split(".")[0];
     if (!sym) return;
-    fetch(`/api/market/dividends?market=${encodeURIComponent(market)}&symbol=${encodeURIComponent(sym)}`)
+    hfPublicFetch(`/api/market/dividends?market=${encodeURIComponent(market)}&symbol=${encodeURIComponent(sym)}`, undefined, { cacheTtlMs: 300_000 })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!active) return;
@@ -77,6 +78,7 @@ export default function StockDividendCard({
         <Link
           href={calHref}
           className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-black border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 text-zinc-950 dark:text-white hover:bg-[#FFE600] hover:text-black transition-colors"
+          prefetch={false}
         >
           <span>{isAr ? "تقويم الكوبونات الكامل" : "Full Dividend Calendar"}</span>
           <ArrowUpRight className="w-3.5 h-3.5" />

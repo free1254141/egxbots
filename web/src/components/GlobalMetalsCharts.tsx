@@ -298,6 +298,7 @@ function MetalChartCard({
           <Link
             href={`/stocks/${symbol}`}
             className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 dark:border-white/15 bg-zinc-50 dark:bg-white/5 hover:bg-zinc-100 dark:hover:bg-white/10 px-2.5 py-1 text-[11px] font-bold text-zinc-700 dark:text-zinc-200 transition"
+            prefetch={false}
           >
             <span>{isAr ? "التفاصيل" : "Details"}</span>
             <ExternalLink className="w-3 h-3" />

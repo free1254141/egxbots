@@ -14,6 +14,7 @@ export function getStockHref(
   const raw = String(symbol || "").trim();
   if (!raw) return "/stocks";
   const lower = raw.toLowerCase();
+  if (lower === "null" || lower === "undefined") return "/stocks";
   if (EXPLICIT_EXCHANGE_SUFFIX_RE.test(lower)) {
     return `/stocks/${lower}`;
   }

@@ -188,6 +188,7 @@ export default function PortfolioRebalancerModal({
                   <Link
                     href="/pricing"
                     className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black text-sm"
+                    prefetch={false}
                   >
                     <Rocket className="w-4 h-4" />
                     <span>{isAr ? "الترقية إلى باقة PRO الآن" : "Upgrade to PRO Now"}</span>

@@ -2158,7 +2158,9 @@ export async function executeStructuredTools(
                 };
                 const page = await fetchRecommendationPages(fetchRecommendationPage);
                 if (page.error && !page.rows.length) throw page.error;
-                let recsData = page.rows;
+                let recsData = (page.rows || []).filter(
+                    (row: any) => String(row?.status || "").toLowerCase() !== "cancelled"
+                );
 
                 // For gated users, apply signal delay / lock logic to rows:
                 if (isGated) {

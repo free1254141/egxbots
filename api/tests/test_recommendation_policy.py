@@ -170,12 +170,15 @@ def test_daily_evaluator_closes_using_hf_archive_when_supabase_has_no_prices(
 
 
 def test_unadjusted_corporate_action_drop_is_blocked_instead_of_false_stop_hit():
+    from api.recommendation_policy import CorporateActionDiscontinuity
+
     bars = [
         dict(date="2026-11-18", open=0.553, high=0.608, low=0.553, close=0.608, volume=87617719),
         dict(date="2026-11-19", open=0.382596, high=0.392035, low=0.361201, close=0.388889, volume=208352862),
         dict(date="2026-11-22", open=0.389, high=0.426, low=0.365, close=0.401, volume=133705269),
     ]
-    with pytest.raises(ValueError, match="Unadjusted corporate action discontinuity"):
+    # Unconfirmed discontinuity never rebases blindly — raises CorporateActionDiscontinuity(confirmed=False)
+    with pytest.raises(CorporateActionDiscontinuity) as exc_info:
         evaluate_bars(
             entry=0.608,
             target=0.790,
@@ -184,6 +187,26 @@ def test_unadjusted_corporate_action_drop_is_blocked_instead_of_false_stop_hit()
             entry_date="2026-11-18",
             cursor="2026-11-18",
         )
+    assert exc_info.value.confirmed is False
+
+    # Verified corporate action triggers Auto-Rebase and keeps trade open (+3.08%)
+    res = evaluate_bars(
+        entry=0.608,
+        target=0.790,
+        stop=0.517,
+        bars=bars,
+        entry_date="2026-11-18",
+        cursor="2026-11-18",
+        corporate_action_dates=["2026-11-19"],
+    )
+    assert res["status"] == "open"
+    assert res["rebased"] is True
+    assert res["entry_price"] == pytest.approx(0.389, abs=0.002)
+    assert res["target_price"] == pytest.approx(0.505, abs=0.002)
+    assert res["stop_loss"] == pytest.approx(0.331, abs=0.002)
+    assert res["last_close"] == 0.401
+    assert res["profit_loss_pct"] == pytest.approx(3.08, abs=0.2)
+    assert res["adjustments"][-1]["type"] == "corporate_action_rebase"
 
 
 def test_wide_stop_loss_above_10_pct_is_rejected():
@@ -197,3 +220,134 @@ def test_wide_stop_loss_above_10_pct_is_rejected():
     within_limit = candidate_assessment(dict(symbol="COMI", last_close=100, target_price=120, stop_loss=90))
     assert within_limit["accepted"]
     assert within_limit["reason"] == "accepted"
+
+
+def test_corporate_action_discontinuity_ineg_like_drop_and_valueerror_subclass():
+    from api.recommendation_policy import CorporateActionDiscontinuity
+
+    bars = [
+        dict(date="2026-11-18", open=0.553, high=0.608, low=0.553, close=0.608, volume=100000),
+        dict(date="2026-11-19", open=0.389, high=0.410, low=0.385, close=0.401, volume=200000),
+    ]
+    # Unconfirmed raise is still a ValueError subclass
+    with pytest.raises(CorporateActionDiscontinuity) as exc_info:
+        evaluate_bars(
+            entry=0.608,
+            target=0.790,
+            stop=0.517,
+            bars=bars,
+            entry_date="2026-11-18",
+            cursor="2026-11-18",
+        )
+    err = exc_info.value
+    assert isinstance(err, ValueError)
+    assert err.confirmed is False
+    assert err.change_pct == pytest.approx(-34.05, abs=0.2)
+
+    # With rebase_corporate_actions=False, even confirmed actions raise
+    with pytest.raises(CorporateActionDiscontinuity) as exc_conf:
+        evaluate_bars(
+            entry=0.608,
+            target=0.790,
+            stop=0.517,
+            bars=bars,
+            entry_date="2026-11-18",
+            cursor="2026-11-18",
+            corporate_action_dates=["2026-11-19"],
+            rebase_corporate_actions=False,
+        )
+    assert exc_conf.value.confirmed is True
+
+    # Next-run replay after DB was already rebased must NOT double-rebase
+    replay = evaluate_bars(
+        entry=0.389,
+        target=0.505,
+        stop=0.331,
+        bars=bars + [dict(date="2026-11-22", open=0.401, high=0.415, low=0.395, close=0.410, volume=150000)],
+        entry_date="2026-11-18",
+        cursor="2026-11-19",
+        corporate_action_dates=["2026-11-19"],
+    )
+    assert replay["rebased"] is False
+    assert replay["entry_price"] == 0.389
+    assert replay["target_price"] == 0.505
+    assert replay["stop_loss"] == 0.331
+
+
+def test_confirmed_12pct_gap_down_rebases_when_confirmed_and_stops_when_unconfirmed():
+    # Entry at 100 on 2026-09-01, stop at 92; next bar opens at 88 (-12% gap)
+    bars = [bar(2, opening=88, high=90, low=87, close=89)]
+
+    rebased = evaluate(bars, corporate_action_dates=["2026-08-03"])
+    assert rebased["rebased"] is True
+    assert rebased["status"] == "open"
+    assert rebased["entry_price"] == pytest.approx(89.0, abs=0.2)
+    assert rebased["target_price"] == pytest.approx(106.8, abs=0.2)
+    assert rebased["stop_loss"] == pytest.approx(80.1, abs=0.2)
+
+    result = evaluate(bars)
+    assert result["exit_reason"] == "stop_hit"
+    assert result["exit_price"] == 88
+
+
+def test_reverse_split_40pct_jump_raises_discontinuity():
+    from api.recommendation_policy import CorporateActionDiscontinuity
+
+    with pytest.raises(CorporateActionDiscontinuity):
+        evaluate([bar(2, opening=140, high=145, low=138, close=142)])
+
+
+def test_normal_minus_9pct_bar_without_action_is_still_stop_hit():
+    result = evaluate([bar(2, opening=91, high=93, low=89, close=91)])
+    assert result["exit_reason"] == "stop_hit"
+    assert result["exit_price"] == 90
+
+
+def test_corporate_action_confirmed_window_edges():
+    from api.recommendation_policy import corporate_action_confirmed
+
+    # 2026-09-01 minus 120 days is 2026-05-04; minus 121 days is 2026-05-03
+    assert corporate_action_confirmed("2026-09-01", ["2026-05-03"]) is False
+    assert corporate_action_confirmed("2026-09-01", ["2026-05-04"]) is True
+    assert corporate_action_confirmed("2026-09-01", ["2026-09-02"]) is True
+    assert corporate_action_confirmed("2026-09-01", ["2026-09-03"]) is False
+    assert corporate_action_confirmed("2026-09-01", ["not-a-date", None]) is False
+
+
+def test_multiday_drift_before_confirmed_minus_15pct_action_rebases_and_same_day_cursor():
+    from api.recommendation_policy import evaluate_bars, resolve_signal_reference
+
+    # Entry at 100 on 2026-09-01, drifts +15% to 115 on 2026-09-02, then confirmed -15% action on 2026-09-03
+    bars = [
+        dict(date="2026-09-01", open=99, high=101, low=98, close=100, volume=10000),
+        dict(date="2026-09-02", open=101, high=116, low=100, close=115, volume=10000),
+        dict(date="2026-09-03", open=97.75, high=99.0, low=96.5, close=97.75, volume=12000),
+    ]
+    res = evaluate_bars(
+        entry=100,
+        target=120,
+        stop=92,
+        bars=bars,
+        entry_date="2026-09-01",
+        cursor="2026-09-03",
+        corporate_action_dates=["2026-09-03"],
+    )
+    assert res["rebased"] is True
+    assert res["entry_price"] == pytest.approx(85.0, abs=0.05)
+    assert res["target_price"] == pytest.approx(102.0, abs=0.05)
+    assert res["stop_loss"] == pytest.approx(78.2, abs=0.05)
+    assert res["last_close"] == pytest.approx(97.75, abs=0.01)
+    assert res["sessions_held"] == 2
+    assert len(res["adjustments"]) == 1
+    assert res["adjustments"][0]["type"] == "corporate_action_rebase"
+
+    ref = resolve_signal_reference(
+        85.0,
+        bars,
+        "2026-09-01",
+        "2026-09-01",
+        rebased=True,
+        corporate_action_dates=["2026-09-03"],
+    )
+    assert ref["ok"] is True
+    assert ref["reason"] == "verified_rebased_signal_reference"

@@ -9,6 +9,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
 import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR } from "@/lib/saudi-stocks";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 interface StockItem {
   symbol: string;
@@ -86,7 +87,7 @@ export default function StocksClient({
     const controller = new AbortController();
     setIsLoadingTasi(true);
 
-    fetch("/api/symbols/search?q=&limit=500&market=tasi", { signal: controller.signal })
+    hfPublicFetch("/api/symbols/search?q=&limit=500&market=tasi", { signal: controller.signal }, { cacheTtlMs: 300_000 })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
       .then((payload) => {
         const results = Array.isArray(payload?.results) ? payload.results : [];
@@ -228,6 +229,7 @@ export default function StocksClient({
               key={tab.href}
               href={tab.href}
               className="px-3 py-1.5 text-xs font-black bg-white dark:bg-zinc-900 text-black dark:text-white border-2 border-black dark:border-white shadow-[2px_2px_0px_#000] dark:shadow-[2px_2px_0px_rgba(255,255,255,0.25)] hover:bg-[#FFE600] hover:text-black transition-colors"
+              prefetch={false}
             >
               {isAr ? tab.ar : tab.en}
             </Link>
@@ -365,6 +367,7 @@ export default function StocksClient({
           <Link
             href={isSaudi ? "/stocks?market=egx" : "/stocks?market=tasi"}
             className="text-xs font-black text-emerald-700 dark:text-emerald-400 hover:underline"
+            prefetch={false}
           >
             {isSaudi
               ? (isAr ? "عرض الدليل المصري الكامل ←" : "Switch to full EGX directory ←")

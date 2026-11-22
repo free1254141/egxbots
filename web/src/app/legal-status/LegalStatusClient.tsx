@@ -148,6 +148,7 @@ export default function LegalStatusClient() {
         <Link
           href="/disclaimer"
           className="h-12 px-6 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 text-black dark:text-white text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center gap-2"
+          prefetch={false}
         >
           <FileCheck2 className="w-4 h-4" />
           {isAr ? "إخلاء المسؤولية الكامل" : "Full Legal Disclaimer"}
@@ -155,6 +156,7 @@ export default function LegalStatusClient() {
         <Link
           href="/refund"
           className="h-12 px-6 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 text-black dark:text-white text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center gap-2"
+          prefetch={false}
         >
           <Coins className="w-4 h-4" />
           {isAr ? "سياسة الاسترجاع" : "Refund Policy"}
@@ -162,6 +164,7 @@ export default function LegalStatusClient() {
         <Link
           href="/pricing"
           className="h-12 px-6 border-4 border-black dark:border-white bg-emerald-400 text-black text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center gap-2"
+          prefetch={false}
         >
           {isAr ? "الاشتراكات والأسعار" : "Pricing Plans"}
           <ArrowRight className={`w-4 h-4 ${isAr ? "rotate-180" : ""}`} />

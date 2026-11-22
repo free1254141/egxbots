@@ -670,7 +670,10 @@ def _load_chart_markers_raw(market: str, effective_exchange: str, symbol: str) -
             .limit(500)
             .execute()
         )
-        rows = getattr(scan_res, "data", None) or []
+        rows = [
+            r for r in (getattr(scan_res, "data", None) or [])
+            if str(r.get("status") or "").lower() != "cancelled"
+        ]
         closed_ids = [str(r["id"]) for r in rows if str(r.get("status") or "").lower() in ("win", "loss")]
         exit_dates: Dict[str, str] = {}
         if closed_ids:
@@ -843,7 +846,8 @@ def _load_recommendations_bundle(market: str, exchange: str, limit: int) -> Dict
         qb = qb.order("created_at", desc=True)
         if market == "tasi":
             qb = qb.order("precision", desc=True)
-        rows = getattr(qb.limit(limit).execute(), "data", None) or []
+        rows = getattr(qb.limit(min(limit + 10, 250)).execute(), "data", None) or []
+        rows = [r for r in rows if str(r.get("status") or "").lower() != "cancelled"][:limit]
 
         open_syms = sorted({str(r.get("symbol") or "") for r in rows if r.get("status") == "open" and r.get("symbol")})
         all_syms = sorted({str(r.get("symbol") or "") for r in rows if r.get("symbol")})
@@ -2092,11 +2096,12 @@ async def api_market_proof(request: Request):
                 c = len(getattr(res, "data", None) or [])
             return int(c or 0)
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             f_all = pool.submit(_count, None)
             f_wins = pool.submit(_count, "win")
             f_losses = pool.submit(_count, "loss")
-            total = f_all.result()
+            f_cancelled = pool.submit(_count, "cancelled")
+            total = max(0, f_all.result() - f_cancelled.result())
             wins = f_wins.result()
             losses = f_losses.result()
 
@@ -2176,7 +2181,7 @@ async def api_market_recommendation_counts(from_param: Optional[str] = Query(def
             offset = page * page_size
             res = (
                 sb.table("scan_results")
-                .select("created_at")
+                .select("created_at,status")
                 .eq("is_public", True)
                 .eq("exchange", "EGX")
                 .gte("created_at", f"{from_date}T00:00:00")
@@ -2186,6 +2191,8 @@ async def api_market_recommendation_counts(from_param: Optional[str] = Query(def
             )
             rows = getattr(res, "data", None) or []
             for row in rows:
+                if str(row.get("status") or "").lower() == "cancelled":
+                    continue
                 d = str(row.get("created_at") or "")[:10]
                 if _ISO_DATE_RE.match(d):
                     daily_counts[d] = daily_counts.get(d, 0) + 1

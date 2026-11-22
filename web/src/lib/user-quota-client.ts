@@ -3,7 +3,7 @@
 import { TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 
 const QUOTA_CACHE_PREFIX = "egxbots_user_quota_v2:";
-const QUOTA_TTL_MS = 10 * 1000; // 10 seconds: deduplicates mount bursts while staying fresh after Telegram usage
+const QUOTA_TTL_MS = 60 * 1000; // 60 seconds: deduplicates mount bursts while staying fresh after Telegram usage
 
 type CachedQuotaEntry = {
   ts: number;

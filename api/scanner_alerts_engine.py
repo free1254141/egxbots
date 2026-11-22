@@ -17,6 +17,12 @@ from zoneinfo import ZoneInfo
 from typing import Dict, Any, List, Optional, Tuple, Set
 import hashlib
 
+from api.recommendation_policy import (
+    corporate_action_confirmed,
+    corporate_action_rebase_factor,
+    is_corporate_action_gap,
+)
+
 logger = logging.getLogger("scanner_alerts_engine")
 logger.setLevel(logging.INFO)
 
@@ -63,25 +69,25 @@ SCANNER_PROFILES = {
 
 SAUDI_SCANNER_PROFILES = {
     "volume_surge": {
-        "t1_pct": 4.2,
-        "t2_pct": 6.5,
-        "sl_pct": 2.6,
+        "t1_pct": 3.8,
+        "t2_pct": 6.0,
+        "sl_pct": 3.5,
         "max_sessions": 6,
         "be_lock_pct": 0.5,
         "title_ar": "السيولة الفائقة",
     },
     "breakout": {
-        "t1_pct": 4.8,
-        "t2_pct": 7.5,
-        "sl_pct": 2.8,
+        "t1_pct": 4.5,
+        "t2_pct": 7.0,
+        "sl_pct": 3.5,
         "max_sessions": 6,
         "be_lock_pct": 0.5,
         "title_ar": "اختراق فني",
     },
     "rsi_oversold": {
-        "t1_pct": 3.8,
-        "t2_pct": 5.8,
-        "sl_pct": 2.4,
+        "t1_pct": 3.5,
+        "t2_pct": 5.5,
+        "sl_pct": 3.0,
         "max_sessions": 5,
         "be_lock_pct": 0.5,
         "title_ar": "تشبع بيعي",
@@ -442,9 +448,14 @@ def evaluate_scanner_candidates(
         if is_saudi:
             candle_range = high_p - low_p
             close_pos = (close - low_p) / candle_range if candle_range > 0 else 1.0
+            sniper_mode = len(valid_rows) >= 50
             min_saudi_turnover = 3_000_000.0 if is_market_healthy else 5_000_000.0
-            min_vol_rvol = 1.8 if is_market_healthy else 2.0
-            min_bo_rvol = 1.6 if is_market_healthy else 1.8
+            min_vol_rvol = (2.2 if sniper_mode else 1.8) if is_market_healthy else (2.4 if sniper_mode else 2.0)
+            min_bo_rvol = (2.2 if sniper_mode else 1.6) if is_market_healthy else (2.4 if sniper_mode else 1.8)
+            min_ch_pct = 2.5 if sniper_mode else 2.0
+            max_ch_pct = 6.5 if sniper_mode else 7.5
+            max_vol_rsi = 66.0 if sniper_mode else 70.0
+            max_bo_rsi = 66.0 if sniper_mode else 72.0
             # TADAWUL institutional quality gate: >= 10 SAR, green strong-close candle, rising EMA20/EMA50 alignment.
             if (
                 close < 10.0
@@ -457,9 +468,9 @@ def evaluate_scanner_candidates(
             is_uptrend = (ema_20 <= 0 or close > ema_20) and (ema_50 <= 0 or close > ema_50)
             if (
                 r_vol >= min_vol_rvol
-                and 2.0 <= ch_pct <= 7.5
+                and min_ch_pct <= ch_pct <= max_ch_pct
                 and is_uptrend
-                and 35.0 <= rsi <= 70.0
+                and 35.0 <= rsi <= max_vol_rsi
             ):
                 volume_matches.append({
                     "symbol": sym,
@@ -473,9 +484,9 @@ def evaluate_scanner_candidates(
             if (
                 bb_ok
                 and r_vol >= min_bo_rvol
-                and 2.0 <= ch_pct <= 7.5
+                and min_ch_pct <= ch_pct <= max_ch_pct
                 and is_uptrend
-                and rsi <= 72.0
+                and rsi <= max_bo_rsi
             ):
                 breakout_matches.append({
                     "symbol": sym,
@@ -585,6 +596,63 @@ def evaluate_scanner_candidates(
     }
 
 
+def resolve_confirmed_action_dates_for_active(
+    sb_client: Any,
+    current_active: List[Dict[str, Any]],
+    latest_by_symbol: Dict[str, Dict[str, Any]],
+    *,
+    as_of_date: str,
+    action_date: str,
+    exchange: str = "EGX",
+) -> Dict[str, List[str]]:
+    """Load confirmed corporate-action dates and run on-demand live verification for active scanner gaps."""
+    confirmed_action_dates: Dict[str, List[str]] = {}
+    if not current_active:
+        return confirmed_action_dates
+    try:
+        from api.corporate_actions_engine import (
+            load_price_adjusting_action_dates,
+            verify_symbol_corporate_action_live,
+        )
+    except Exception:
+        return confirmed_action_dates
+
+    if sb_client is not None:
+        try:
+            confirmed_action_dates = load_price_adjusting_action_dates(sb_client, exchange)
+        except Exception:
+            confirmed_action_dates = {}
+
+    for sig in current_active:
+        sym = sig.get("symbol", "")
+        sym_clean = str(sym or "").upper().split(".")[0]
+        p = latest_by_symbol.get(sym) or latest_by_symbol.get(sym_clean)
+        entry_date = sig.get("entry_date", "")
+        if not p or not entry_date or not (as_of_date > entry_date):
+            continue
+        curr_price = float(p.get("close", sig.get("current_price", sig.get("entry_price", 0.0))))
+        bar_open_raw = float(p.get("open") or 0.0)
+        prior_ref = float(sig.get("current_price") or sig.get("entry_price") or curr_price)
+        sym_dates = confirmed_action_dates.setdefault(sym_clean, [])
+        if corporate_action_confirmed(action_date, sym_dates):
+            continue
+        if is_corporate_action_gap(
+            prior_ref,
+            bar_open_raw if bar_open_raw > 0 else None,
+            curr_price,
+            confirmed=False,
+        ):
+            try:
+                verified = verify_symbol_corporate_action_live(sb_client, sym_clean, exchange, action_date)
+                if verified and verified.get("confirmed"):
+                    v_date = str(verified.get("date") or action_date)[:10]
+                    if v_date not in sym_dates:
+                        sym_dates.append(v_date)
+            except Exception:
+                pass
+    return confirmed_action_dates
+
+
 def step_scanner_lifecycle(
     current_active: List[Dict[str, Any]],
     current_closed: List[Dict[str, Any]],
@@ -601,6 +669,7 @@ def step_scanner_lifecycle(
     intraday_live: bool = False,
     allow_new_entries: bool = True,
     exchange: str = "EGX",
+    confirmed_action_dates: Optional[Dict[str, List[str]]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Advance tracked scanner signals using exchange-calibrated breakeven, target, stop, and expiry rules."""
     is_saudi = _is_saudi_exchange(exchange)
@@ -649,6 +718,93 @@ def step_scanner_lifecycle(
             "sessions_count": elapsed_sessions,
             "updated_at": now_iso,
         })
+
+        bar_open_raw = float(p.get("open") or 0.0) if (p and use_daily_ohlc) else 0.0
+        prior_ref = float(sig.get("current_price") or entry_price)
+        sym_clean = str(sym or "").upper().split(".")[0]
+        is_confirmed = corporate_action_confirmed(
+            action_date, (confirmed_action_dates or {}).get(sym_clean, ())
+        )
+        if (
+            p
+            and is_price_current
+            and not same_entry_day
+            and is_corporate_action_gap(
+                prior_ref,
+                bar_open_raw if bar_open_raw > 0 else None,
+                curr_price,
+                confirmed=is_confirmed,
+            )
+        ):
+            if is_confirmed:
+                factor = corporate_action_rebase_factor(
+                    prior_ref,
+                    bar_open_raw if bar_open_raw > 0 else None,
+                    curr_price,
+                )
+                decimals = 3 if (entry_price * factor) < 20 else 2
+                old_entry = entry_price
+                old_stop = float(sig.get("stop_loss", 0.0))
+                old_t1 = float(sig.get("target_1") or entry_price * 1.04)
+                old_t2 = float(sig.get("target_2") or entry_price * 1.065)
+
+                entry_price = round(entry_price * factor, decimals)
+                prev_highest = round(prev_highest * factor, decimals)
+                lowest_prev = round(float(sig.get("lowest_price") or old_entry) * factor, decimals)
+                new_stop = round(old_stop * factor, decimals)
+                new_t1 = round(old_t1 * factor, decimals)
+                new_t2 = round(old_t2 * factor, decimals)
+
+                highest_price = max(prev_highest, bar_high)
+                lowest_price = min(lowest_prev, bar_low)
+                return_pct = round(((curr_price - entry_price) / entry_price) * 100, 2)
+                max_gain_pct = round(((highest_price - entry_price) / entry_price) * 100, 2)
+
+                sig = {
+                    **sig,
+                    "entry_price": entry_price,
+                    "stop_loss": new_stop,
+                    "target_1": new_t1,
+                    "target_2": new_t2,
+                }
+                updated_sig.update({
+                    "entry_price": entry_price,
+                    "stop_loss": new_stop,
+                    "target_1": new_t1,
+                    "target_2": new_t2,
+                    "highest_price": highest_price,
+                    "lowest_price": lowest_price,
+                    "return_pct": return_pct,
+                    "max_gain_pct": max(round(float(sig.get("max_gain_pct") or 0.0) * 1.0, 2), max_gain_pct),
+                    "rebased_factor": round(factor, 6),
+                })
+                logger.info(
+                    f"[SCANNER_ALERTS] Auto-rebased {sym} on {action_date} (factor={factor:.4f}): "
+                    f"entry {old_entry}->{entry_price}, t1 {old_t1}->{new_t1}, sl {old_stop}->{new_stop}"
+                )
+            else:
+                max_s = int(sig.get("max_sessions", 5))
+                logger.info(
+                    f"[SCANNER_ALERTS] Froze {sym} on {action_date}: unconfirmed corporate action gap "
+                    f"(prior={prior_ref}, open={bar_open_raw}, close={curr_price}); keeping barriers unchanged."
+                )
+                frozen = dict(sig)
+                frozen["sessions_count"] = elapsed_sessions
+                frozen["updated_at"] = now_iso
+                frozen["unconfirmed_gap_date"] = action_date
+                if elapsed_sessions >= max_s:
+                    frozen.update({
+                        "status": "expired",
+                        "exit_price": curr_price,
+                        "return_pct": return_pct,
+                        "exit_date": action_date,
+                        "exit_time": action_time,
+                        "exit_reason": f"انتهاء مدة الاحتفاظ ({max_s} جلسات) بعد فجوة سعرية غير مؤكدة ⏱️",
+                    })
+                    current_closed.insert(0, frozen)
+                else:
+                    still_active_signals.append(frozen)
+                continue
 
         # Breakeven Trail: If stock reached >= +2.5% gain, raise stop loss to entry (or +0.5% net lock on TADAWUL).
         # In daily OHLC replay (causal_be_prev_only=True) and live intraday ticks (intraday_live=True),
@@ -816,6 +972,7 @@ def run_scanner_alerts_simulation(
     start_date: str = "2024-01-01",
     now_iso: Optional[str] = None,
     causal_be_prev_only: bool = True,
+    confirmed_action_dates: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     """
     Deterministic multi-session simulation calling the exact EGX candidate filter
@@ -951,6 +1108,7 @@ def run_scanner_alerts_simulation(
             now_iso=now_str,
             causal_be_prev_only=causal_be_prev_only,
             exchange=ex_norm,
+            confirmed_action_dates=confirmed_action_dates,
         )
 
         last_stage_results = {
@@ -1113,6 +1271,22 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     # ── Tracked Signals Lifecycle & Targets/Stop-Loss Management ──────
     current_active: List[Dict[str, Any]] = list(config.get("active_signals", []))
     current_closed: List[Dict[str, Any]] = list(config.get("closed_signals", []))
+    confirmed_action_dates: Dict[str, List[str]] = {}
+    if current_active:
+        try:
+            import api.stock_ai as stock_ai
+            if stock_ai.supabase is None:
+                stock_ai._init_supabase()
+            confirmed_action_dates = resolve_confirmed_action_dates_for_active(
+                stock_ai.supabase,
+                current_active,
+                latest_by_symbol,
+                as_of_date=as_of_date,
+                action_date=cairo["date_str"],
+                exchange="EGX",
+            )
+        except Exception:
+            confirmed_action_dates = {}
     (
         still_active_signals,
         current_closed,
@@ -1132,6 +1306,7 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         causal_be_prev_only=False,
         intraday_live=True,
         allow_new_entries=allow_new_entries,
+        confirmed_action_dates=confirmed_action_dates,
     )
 
     # Send Follow-Up Target Hit Alerts (VIP & Free channels)

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense } fr
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
@@ -574,7 +575,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                 const symbolBase = shareRow.symbol.split('.')[0];
                 const rowIsSaudi = isRowSaudi(shareRow);
                 const exchange = shareRow.exchange || (rowIsSaudi ? "TADAWUL" : "EGX");
-                const res = await fetch(`/api/ai_bot/candles?symbol=${encodeURIComponent(symbolBase)}&exchange=${encodeURIComponent(exchange)}&market=${rowIsSaudi ? "tasi" : "egx"}&limit=120`);
+                const res = await hfPublicFetch(`/api/ai_bot/candles?symbol=${encodeURIComponent(symbolBase)}&exchange=${encodeURIComponent(exchange)}&market=${rowIsSaudi ? "tasi" : "egx"}&limit=120`, undefined, { cacheTtlMs: 60_000 });
                 if (!res.ok) throw new Error(`Candles fetch failed: ${res.status}`);
                 const data = await res.json();
                 const candles = (data?.candles || []).map((c: any) => ({
@@ -722,7 +723,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
 
         const active = items.filter(r => {
             const s = (r.status || "").toLowerCase();
-            return s !== "win" && s !== "loss";
+            return s !== "win" && s !== "loss" && s !== "cancelled";
         });
         const closed = items.filter(r => {
             const s = (r.status || "").toLowerCase();
@@ -781,7 +782,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             items = items.filter(r => {
                 if (isLockedRow(r)) return true; // fresh signals are active-but-hidden
                 const s = (r.status || "").toLowerCase();
-                return s !== "win" && s !== "loss";
+                return s !== "win" && s !== "loss" && s !== "cancelled";
             });
             // Deduplicate active recommendations by symbol (keep the latest one)
             const seen = new Set<string>();
@@ -878,7 +879,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     const stats = useMemo(() => {
         const active = processedRows.filter(r => {
             const s = (r.status || "").toLowerCase();
-            return s !== "win" && s !== "loss";
+            return s !== "win" && s !== "loss" && s !== "cancelled";
         });
         const closed = processedRows.filter(r => {
             const s = (r.status || "").toLowerCase();
@@ -904,6 +905,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     const systemKpis = useMemo(() => {
         const closed = recommendations.filter(r => {
             const s = (r.status || "").toLowerCase();
+            if (s === "cancelled") return false;
             return s === "win" || s === "loss" || r.profit_loss_pct != null;
         });
         const wins = closed.filter(r => (r.status || "").toLowerCase() === "win" || (r.profit_loss_pct || 0) > 0);
@@ -2505,6 +2507,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         <Link
                                             href="/pricing"
                                             className="h-10 px-4 border-2 border-black bg-black hover:bg-zinc-900 text-[#FFE600] font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[2px_2px_0px_#000] transition-all"
+                                            prefetch={false}
                                         >
                                             <Crown className="w-3.5 h-3.5 text-[#FFE600]" />
                                             <span>{isAr ? "ترقية إلى PRO" : "Upgrade to PRO"}</span>

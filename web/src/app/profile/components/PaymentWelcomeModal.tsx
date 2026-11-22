@@ -316,6 +316,7 @@ export default function PaymentWelcomeModal({
                   href="/pricing"
                   onClick={onClose}
                   className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all text-center"
+                  prefetch={false}
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>{isAr ? "إعادة المحاولة واختيار وسيلة أخرى من صفحة الأسعار ←" : "Retry with another method on Pricing page ←"}</span>
@@ -407,6 +408,7 @@ export default function PaymentWelcomeModal({
                     href={b2bDashboardUrl.startsWith("http") ? "/b2b/dashboard" : b2bDashboardUrl}
                     onClick={onClose}
                     className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                    prefetch={false}
                   >
                     <span>{isAr ? "فتح لوحة تحكم البوت (B2B) الآن ←" : "Open B2B Bot Dashboard →"}</span>
                     <ArrowRight className="w-4 h-4 rtl:rotate-180" />
@@ -436,6 +438,7 @@ export default function PaymentWelcomeModal({
                     href="/chat"
                     onClick={onClose}
                     className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] transition-all"
+                    prefetch={false}
                   >
                     <span>{isAr ? "افتح الشات الذكي الآن (350 استفسار/شهر) ←" : "Open AI Chat Now (350/mo) →"}</span>
                     <ArrowRight className="w-4 h-4 rtl:rotate-180" />
@@ -631,6 +634,7 @@ export default function PaymentWelcomeModal({
               href="/pricing"
               onClick={onClose}
               className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 bg-red-600 hover:bg-red-700 text-white font-black text-xs border-2 border-black shadow-[2px_2px_0px_#000] transition-all"
+              prefetch={false}
             >
               <span>{isAr ? "اختيار وسيلة دفع أخرى" : "Choose Another Payment Method"}</span>
               <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
@@ -640,6 +644,7 @@ export default function PaymentWelcomeModal({
               href={b2bDashboardUrl.startsWith("http") ? "/b2b/dashboard" : b2bDashboardUrl}
               onClick={onClose}
               className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs border-2 border-black shadow-[2px_2px_0px_#000] transition-all"
+              prefetch={false}
             >
               <span>{isAr ? "إدارة رخصة البوت (B2B)" : "Manage B2B License"}</span>
               <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
@@ -649,6 +654,7 @@ export default function PaymentWelcomeModal({
               href="/chat"
               onClick={onClose}
               className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white font-black text-xs border-2 border-black shadow-[2px_2px_0px_#000] transition-all"
+              prefetch={false}
             >
               <span>{isAr ? "بدء استخدام الشات الذكي" : "Start AI Chat"}</span>
               <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
@@ -658,6 +664,7 @@ export default function PaymentWelcomeModal({
               href={isSaudi ? "/scanner/backtests?tab=bots" : "/reports"}
               onClick={onClose}
               className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 bg-black text-white hover:bg-zinc-800 dark:bg-emerald-500 dark:text-black dark:hover:bg-emerald-400 font-black text-xs border-2 border-black shadow-[2px_2px_0px_#000] transition-all"
+              prefetch={false}
             >
               <span>{isAr ? (isSaudi ? "تصفح أنظمة التداول والرادار" : "تصفح تقارير السوق اليومية") : (isSaudi ? "Open Trading Bots & Radar" : "Browse Market Reports")}</span>
               <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />

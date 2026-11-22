@@ -456,6 +456,7 @@ export default function FAQClient() {
           <Link
             href="/scanner/technical"
             className="h-14 px-8 border-4 border-black bg-black text-white text-xs font-black uppercase tracking-widest hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 cursor-pointer flex items-center justify-center gap-2"
+            prefetch={false}
           >
             {isAr ? "ابدأ الفحص" : "Start Scanning"}
             <ArrowRight
@@ -465,6 +466,7 @@ export default function FAQClient() {
           <Link
             href="/scanner/backtests"
             className="h-14 px-8 border-4 border-black bg-white text-black text-xs font-black uppercase tracking-widest hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 cursor-pointer flex items-center justify-center"
+            prefetch={false}
           >
             {t("nav.scanner.ai_trading")}
           </Link>

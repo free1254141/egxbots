@@ -724,6 +724,7 @@ export default function ScannerSignalsTracker({
               <Link
                 href="/pricing"
                 className="flex-1 h-11 bg-[#FFE600] text-black border-4 border-black font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:bg-yellow-300 transition-all"
+                prefetch={false}
               >
                 <Zap className="w-4 h-4" />
                 <span>{isAr ? "ترقية الحساب الآن إلى PRO" : "Upgrade to PRO"}</span>

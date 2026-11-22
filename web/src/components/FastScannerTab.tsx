@@ -631,6 +631,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
               <Link
                 href="/pricing"
                 className="h-10 px-4 border-2 border-black bg-black hover:bg-zinc-900 text-[#FFE600] font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[2px_2px_0px_#000] transition-all"
+                prefetch={false}
               >
                 <Crown className="w-3.5 h-3.5 text-[#FFE600]" />
                 <span>{isAr ? "ترقية إلى PRO" : "Upgrade to PRO"}</span>
@@ -2267,6 +2268,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
               <Link
                 href="/pricing"
                 className="flex-1 h-11 bg-[#FFE600] text-black border-4 border-black font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:bg-yellow-300 transition-all"
+                prefetch={false}
               >
                 <Zap className="w-4 h-4" />
                 <span>{isAr ? "ترقية الحساب الآن إلى PRO" : "Upgrade to PRO"}</span>

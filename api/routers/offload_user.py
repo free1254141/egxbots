@@ -2808,7 +2808,11 @@ def get_user_scanner_alerts(request: Request):
     state_data = _load_scanner_alerts_state(market) or {}
     history = state_data.get("history") or []
     last_scan = state_data.get("last_scan")
-    if state_data.get("active_signals"):
+    if isinstance(state_data.get("active_signals"), list) and (
+        "closed_signals" in state_data
+        or "signals_kpis" in state_data
+        or len(state_data["active_signals"]) > 0
+    ):
         raw_active = state_data["active_signals"]
         raw_closed = state_data.get("closed_signals") or []
         signals_kpis = state_data.get("signals_kpis")

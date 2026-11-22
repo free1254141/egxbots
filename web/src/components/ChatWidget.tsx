@@ -23,12 +23,13 @@ import { broadcastEntitlements } from "@/lib/entitlements";
 import { consumeTrialAutostart, prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 import { fetchUserQuotaCached, invalidateUserQuotaCache } from "@/lib/user-quota-client";
 import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "hero" }) {
     return (
         <span className={`artoro-brand-mark artoro-brand-mark--${size}`} role="img" aria-label="ARTORO V3">
             <span className="artoro-brand-mark__core">
-                <NextImage src="/favicon_io/apple-touch-icon.png" alt="ARTORO AI" width={48} height={48} className="h-full w-full object-contain" priority />
+                <NextImage src="/favicon_io/apple-touch-icon.png" alt="ARTORO AI" width={48} height={48} className="h-full w-full object-contain" priority unoptimized />
             </span>
             {size !== "header" && <span className="artoro-brand-mark__version" aria-hidden="true">V3</span>}
         </span>
@@ -240,7 +241,7 @@ export default function ChatWidget() {
         }
 
         if (!usedCachedCfg) {
-            fetch("/api/payment/public-config")
+            hfPublicFetch("/api/payment/public-config", undefined, { cacheTtlMs: 300_000 })
                 .then(r => r.ok ? r.json() : null)
                 .then(cfg => {
                     if (cfg) {
@@ -1242,7 +1243,7 @@ export default function ChatWidget() {
                                         h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 hidden sm:flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
                                         ${msg.role === "user" ? "bg-zinc-100 dark:bg-black text-zinc-900 dark:text-white" : "bg-white dark:bg-black"}
                                     `}>
-                                        {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" />}
+                                        {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" unoptimized />}
                                     </div>
                                     <div className={`
                                         flex-1 rounded-xl sm:rounded-2xl border p-1.5 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
@@ -1329,7 +1330,7 @@ export default function ChatWidget() {
                             {isLoading && !messages[messages.length - 1]?.content && (
                                 <div className={`flex gap-3 w-full mx-auto items-center p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/20 shadow-xs dark:shadow-[3px_3px_0_0_#FFE600] transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
                                     <div className="h-8 w-8 rounded-full border border-slate-200 dark:border-white bg-white dark:bg-black flex items-center justify-center shrink-0 shadow-xs p-1">
-                                        <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={24} height={24} className="w-5 h-5 object-contain animate-pulse" />
+                                        <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={24} height={24} className="w-5 h-5 object-contain animate-pulse" unoptimized />
                                     </div>
                                     <div className="flex-1 flex flex-col gap-0.5 overflow-hidden">
                                         <div className="flex items-center gap-2">
@@ -1769,7 +1770,7 @@ export default function ChatWidget() {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex items-center gap-2 text-white font-black text-sm">
-                            <NextImage src="/favicon_io/apple-touch-icon.png" alt="Logo" width={24} height={24} className="w-6 h-6 object-contain" />
+                            <NextImage src="/favicon_io/apple-touch-icon.png" alt="Logo" width={24} height={24} className="w-6 h-6 object-contain" unoptimized />
                             <span>معاينة الصورة المرفقة</span>
                         </div>
                         <div className="flex items-center gap-3">

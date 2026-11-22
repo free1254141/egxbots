@@ -108,7 +108,10 @@ export async function GET(request: NextRequest) {
       if (stateData) {
         scannerHistory = stateData.history || [];
         lastScanData = stateData.last_scan || null;
-        if (stateData.active_signals && stateData.active_signals.length > 0) {
+        if (
+          Array.isArray(stateData.active_signals) &&
+          ("closed_signals" in stateData || "signals_kpis" in stateData || stateData.active_signals.length > 0)
+        ) {
           activeSignals = stateData.active_signals;
           closedSignals = stateData.closed_signals || [];
           signalsKpis = stateData.signals_kpis || null;

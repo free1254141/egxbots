@@ -265,6 +265,7 @@ export default function ProfilePage() {
           <Link
             href="/affiliate"
             className="h-10 px-3.5 flex items-center gap-2 border-4 border-black dark:border-white bg-emerald-500 text-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] hover:bg-emerald-400 transition-all cursor-pointer"
+            prefetch={false}
           >
             <span>💰 {isAr ? "رابط الإحالة والأرباح (25%)" : "Referral Link (25%)"}</span>
           </Link>
@@ -677,6 +678,7 @@ export default function ProfilePage() {
                         <Link
                           href="/pricing"
                           className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                          prefetch={false}
                         >
                           <Send className="w-4 h-4 shrink-0" />
                           {isAr ? "ترقية الحساب لدخول قناة VIP السعودية 👑" : "Upgrade to Pro for Saudi VIP Channel 👑"}

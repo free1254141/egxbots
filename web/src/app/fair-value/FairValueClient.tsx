@@ -443,6 +443,7 @@ export default function FairValueClient({
                 <Link
                   href="/sharia"
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline"
+                  prefetch={false}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>{isAr ? "انتقل إلى حاسبة التطهير الشرعي وزكاة الأسهم ↗" : "Go to Sharia & Dividend Cleanser ↗"}</span>

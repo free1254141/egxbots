@@ -822,6 +822,7 @@ export default function StockDetailModal({
             <Link
               href={`/chart?symbol=${upperSym}`}
               className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-black uppercase tracking-wider bg-black text-white dark:bg-white dark:text-black border-2 border-black dark:border-white shadow-[3px_3px_0px_#FFE600] hover:bg-[#FFE600] hover:text-black transition-all"
+              prefetch={false}
             >
               <BarChart3 className="w-4 h-4" />
               <span>{isAr ? "افتح الشارت التفاعلي المباشر" : "Open Live Chart"}</span>

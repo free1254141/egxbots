@@ -92,6 +92,7 @@ export default function MarketDirectoryPage({
           <Link
             href="/chat"
             className="px-4 py-2 text-xs sm:text-sm font-black bg-[#00FF66] text-black border-2 border-black shadow-[3px_3px_0px_#000] hover:bg-[#FFE600] transition-colors"
+            prefetch={false}
           >
             اسأل الشات بوت AI عن أي سهم الآن
           </Link>
@@ -100,6 +101,7 @@ export default function MarketDirectoryPage({
               key={lnk.href}
               href={lnk.href}
               className="px-3 py-2 text-xs font-black bg-zinc-100 dark:bg-zinc-900 text-black dark:text-white border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-colors"
+              prefetch={false}
             >
               {lnk.label}
             </Link>
@@ -133,6 +135,7 @@ export default function MarketDirectoryPage({
                 key={`${item.exchange}-${item.symbol}`}
                 href={getStockHref(item.symbol, { exchange: item.exchange })}
                 className="block p-4 border-2 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.25)] hover:bg-[#FFE600]/15 transition-colors"
+                prefetch={false}
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="min-w-0">

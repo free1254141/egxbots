@@ -824,18 +824,21 @@ def _send_telegram_adjustment(
             "trend_weakening": "⚠️📉",
             "trend_strengthening": "🚀📈",
             "acceleration_breakout": "🚀⚡",
+            "corporate_action_rebase": "🏛️🔧",
         }
         emoji = emoji_map.get(adj_type, "📊")
         web_origin = get_web_origin()
+        currency = "SAR" if str(exchange or "").upper() in {"TADAWUL", "TASI", "SA", "SR"} else "EGP"
 
         reason_ar = adjustment.get('reason_ar', adj_type)
 
         # The free channel receives only an upgrade notice for material moves;
         # never disclose the symbol, price, or target/stop values there. The
         # threshold is based on the actual target/stop change, not the stock's
-        # current unrealised return.
+        # current unrealised return. For public corporate-action price rebases,
+        # publish the transparent level adjustment to both Free and VIP.
         material_change_pct = _adjustment_change_pct(adjustment)
-        if material_change_pct > 25:
+        if adj_type != "corporate_action_rebase" and material_change_pct > 25:
             free_msg = (
                 "📢 *إعلان: تحديث جوهري على إحدى التوصيات*\n"
                 f"تم تعديل مستوى التوصية بنسبة تتجاوز `{material_change_pct:.1f}%`، "
@@ -844,29 +847,54 @@ def _send_telegram_adjustment(
             )
             _notify_free_telegram(free_msg, "material_adjustment_teaser")
 
+        header_title = (
+            "*تحديث تلقائي لمستويات التوصية بعد حدث رأسمالي / تقسيم*"
+            if adj_type == "corporate_action_rebase"
+            else "*تحديث ذكي على التوصية* 🔧"
+        )
         msg = (
-            f"{emoji} *تحديث ذكي على التوصية* 🔧\n"
+            f"{emoji} {header_title}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"💎 *السهم:* `{symbol}.{exchange}`\n"
             f"📌 {reason_ar}\n"
-            f"💰 *السعر الحالي:* `{adjustment.get('current_price', '—')}` EGP\n"
+            f"💰 *السعر الحالي:* `{adjustment.get('current_price', '—')}` {currency}\n"
         )
+        if adjustment.get("old_entry") and adjustment.get("new_entry"):
+            try:
+                old_e = float(adjustment["old_entry"])
+                new_e = float(adjustment["new_entry"])
+                msg += f"📈 *سعر الدخول:* `{old_e:.6g}` ➜ `{new_e:.6g}` {currency}\n"
+            except (TypeError, ValueError):
+                msg += f"📈 *سعر الدخول:* `{adjustment['old_entry']}` ➜ `{adjustment['new_entry']}` {currency}\n"
         if adjustment.get("old_target") and adjustment.get("new_target"):
             try:
                 old_t = float(adjustment["old_target"])
                 new_t = float(adjustment["new_target"])
                 raise_pct = ((new_t - old_t) / old_t) * 100 if old_t > 0 else 0.0
-                msg += f"🎯 *الهدف الأول:* `{old_t:.2f}` ➜ `{new_t:.2f}` EGP (`{raise_pct:+.1f}%`)\n"
-                msg += f"🚀 *الهدف الثاني:* `{round(new_t * 1.10, 2):.2f}` EGP\n"
+                msg += f"🎯 *الهدف الأول:* `{old_t:.6g}` ➜ `{new_t:.6g}` {currency} (`{raise_pct:+.1f}%`)\n"
+                if adj_type != "corporate_action_rebase":
+                    msg += f"🚀 *الهدف الثاني:* `{round(new_t * 1.10, 2):.2f}` {currency}\n"
             except (TypeError, ValueError):
-                msg += f"🎯 *الهدف الأول:* `{adjustment['old_target']}` ➜ `{adjustment['new_target']}` EGP\n"
+                msg += f"🎯 *الهدف الأول:* `{adjustment['old_target']}` ➜ `{adjustment['new_target']}` {currency}\n"
         if adjustment.get("old_stop") and adjustment.get("new_stop"):
-            msg += f"🛡️ *وقف الخسارة:* `{adjustment['old_stop']}` ➜ `{adjustment['new_stop']}` EGP\n"
+            msg += f"🛡️ *وقف الخسارة:* `{adjustment['old_stop']}` ➜ `{adjustment['new_stop']}` {currency}\n"
 
-        msg += f"\n📊 RSI: `{adjustment.get('rsi', '—')}` | ADX: `{adjustment.get('adx', '—')}`\n"
+        if adj_type != "corporate_action_rebase":
+            msg += f"\n📊 RSI: `{adjustment.get('rsi', '—')}` | ADX: `{adjustment.get('adx', '—')}`\n"
         msg += f"📈 *العائد الحالي:* `{adjustment.get('pl_pct', '—')}`%\n"
         msg += f"━━━━━━━━━━━━━━━━━━━━\n"
         msg += f"🔗 رابط المنصة: {web_origin}/scanner/backtests?tab=bots\n"
+
+        if adj_type == "corporate_action_rebase":
+            free_outcome = _notify_free_telegram(msg, "recommendation_adjustment")
+            vip_outcome = _notify_central_telegram(msg, "recommendation_adjustment")
+            combined_receipts = list(getattr(vip_outcome, "receipts", []) or []) + list(
+                getattr(free_outcome, "receipts", []) or []
+            )
+            return TelegramNotificationOutcome(
+                bool(vip_outcome) and bool(free_outcome),
+                receipts=combined_receipts,
+            )
 
         return _notify_central_telegram(msg, "recommendation_adjustment")
 
@@ -885,7 +913,7 @@ def _rollback_recommendation_change(recommendation_id: Any, expected_status: str
     restore = {
         key: old_row.get(key)
         for key in (
-            "status", "exit_price", "last_close", "profit_loss_pct", "target_price",
+            "status", "entry_price", "exit_price", "last_close", "profit_loss_pct", "target_price",
             "stop_loss", "adjustments", "top_reasons", "features", "updated_at", "rich_details",
         )
         if key in old_row
@@ -901,7 +929,7 @@ def _rollback_recommendation_change(recommendation_id: Any, expected_status: str
         )
         verify = (
             supabase.table("scan_results")
-            .select("id,status,updated_at,status,exit_price,last_close,profit_loss_pct,target_price,stop_loss")
+            .select("id,status,updated_at,entry_price,exit_price,last_close,profit_loss_pct,target_price,stop_loss")
             .eq("id", recommendation_id)
             .eq("status", expected_status)
             .eq("updated_at", restore.get("updated_at"))
@@ -911,7 +939,7 @@ def _rollback_recommendation_change(recommendation_id: Any, expected_status: str
         if not rows:
             return False
         row = rows[0]
-        return all(row.get(key) == restore.get(key) for key in ("status", "updated_at", "exit_price", "last_close", "profit_loss_pct", "target_price", "stop_loss"))
+        return all(row.get(key) == restore.get(key) for key in ("status", "updated_at", "entry_price", "exit_price", "last_close", "profit_loss_pct", "target_price", "stop_loss"))
     except Exception as error:
         print(f"[EVALUATE] Lifecycle compensation failed for {recommendation_id}: {error}")
         return False
@@ -928,6 +956,7 @@ def _send_telegram_exit(
     *,
     exit_reason: Optional[str] = None,
     closed_on: Optional[str] = None,
+    corporate_action: Optional[dict] = None,
     event_id: Optional[str] = None,
     claim_token: Optional[str] = None,
     event_client: Any = None,
@@ -939,6 +968,41 @@ def _send_telegram_exit(
         return False
     try:
         web_origin = get_web_origin()
+        actual_day = closed_on or dt.datetime.now(dt.timezone.utc).date().isoformat()
+        if exit_reason == "corporate_action_adjustment":
+            ca = corporate_action if isinstance(corporate_action, dict) else {}
+            currency = "SAR" if str(exchange or "").upper() in {"TADAWUL", "TASI", "SA", "SR"} else "EGP"
+            prior_val = float(ca.get("prior_close") or exit_price or entry_price)
+            after_raw = ca.get("close") if ca.get("close") is not None else ca.get("open")
+            after_line = ""
+            if after_raw is not None:
+                after_val = float(after_raw)
+                chg_val = ca.get("change_pct")
+                if chg_val is None and prior_val > 0:
+                    chg_val = ((after_val / prior_val) - 1.0) * 100.0
+                if chg_val is not None:
+                    after_line = f"📉 *أول سعر بعد الحدث:* `{after_val:.6g}` {currency} (`{float(chg_val):+.2f}%`)\n"
+                else:
+                    after_line = f"📉 *أول سعر بعد الحدث:* `{after_val:.6g}` {currency}\n"
+            msg = (
+                "🏛️ *إلغاء تقني لتوصية — حدث رأسمالي* 🛡️\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"💎 *السهم:* `{symbol}.{exchange}`\n"
+                "📌 *النتيجة:* إلغاء واستبعاد من سجل الأداء (0.00%)\n"
+                f"📅 *تاريخ الحدث:* `{ca.get('day') or actual_day}`\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"📈 *سعر الدخول:* `{entry_price:.6g}` {currency}\n"
+                f"⚖️ *السعر قبل الحدث:* `{prior_val:.6g}` {currency}\n"
+                f"{after_line}"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "📝 الفجوة السعرية ناتجة عن تعديل السعر المرجعي "
+                "(حق اكتتاب/تجزئة/أسهم منحة/تخفيض رأس مال) "
+                "وليست هبوطاً سوقياً أو ضرباً لوقف الخسارة.\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔗 رابط سجل الصفقات: {web_origin}/scanner/backtests?tab=bots"
+            )
+            return _notify_central_telegram(msg, "recommendation_exit")
+
         emoji = "🎉" if status == "win" else ("🧹" if status == "stale" else "🛡️")
         reason_labels = {
             "target_hit": ("تحقيق الهدف", "Target hit"),
@@ -964,7 +1028,6 @@ def _send_telegram_exit(
             except Exception:
                 pass
 
-        actual_day = closed_on or dt.datetime.now(dt.timezone.utc).date().isoformat()
         late_notice = (f"⚠️ *تصحيح متابعة متأخر:* تحقق شرط الإغلاق في جلسة `{actual_day}`؛ هذا إشعار تصحيح اليوم، وليس خروجًا جديدًا اليوم.\n"
                        if closed_on and closed_on < dt.datetime.now(dt.timezone.utc).date().isoformat() else "")
         promo_hook = ""
@@ -1027,6 +1090,7 @@ def retry_pending_recommendation_telegram_events(limit: int = 10) -> int:
                 symbol, exchange, entry, exit_price, pl_pct, status, old_values.get("created_at", ""),
                 exit_reason=((new_values.get("rich_details") or {}).get("evaluation") or {}).get("exit_reason"),
                 closed_on=((new_values.get("rich_details") or {}).get("evaluation") or {}).get("closed_on"),
+                corporate_action=((new_values.get("rich_details") or {}).get("evaluation") or {}).get("corporate_action"),
                 event_id=event_id, claim_token=claim_token, event_client=supabase,
             )
         elif event_type == "target_or_stop_adjusted":
@@ -1034,6 +1098,8 @@ def retry_pending_recommendation_telegram_events(limit: int = 10) -> int:
             adjustment = {
                 "type": adjustment_type,
                 "reason_ar": "إعادة إرسال تحديث التوصية",
+                "old_entry": old_values.get("entry_price"),
+                "new_entry": new_values.get("entry_price"),
                 "old_target": old_values.get("target_price"),
                 "new_target": new_values.get("target_price"),
                 "old_stop": old_values.get("stop_loss"),
@@ -1043,7 +1109,10 @@ def retry_pending_recommendation_telegram_events(limit: int = 10) -> int:
             }
             saved_adjustments = new_values.get("adjustments") or []
             if isinstance(saved_adjustments, list) and saved_adjustments:
-                adjustment.update(saved_adjustments[-1])
+                typed = [a for a in saved_adjustments if isinstance(a, dict) and a.get("type") == adjustment_type]
+                chosen = typed[-1] if typed else (saved_adjustments[-1] if isinstance(saved_adjustments[-1], dict) else None)
+                if chosen:
+                    adjustment.update(chosen)
             delivered = _send_telegram_adjustment(
                 symbol, exchange, adjustment,
                 event_id=event_id, claim_token=claim_token, event_client=supabase,
@@ -1291,7 +1360,7 @@ def _notify_free_telegram(message: str, service_type: str = "free_summary", *, m
         "TELEGRAM_FREE",
         managed_delivery=managed_delivery,
     )
-    return outcome if managed_delivery else bool(outcome)
+    return outcome
 
 
 def _notify_vip_telegram(message: str, service_type: str = "vip", *, managed_delivery: bool = False) -> TelegramNotificationOutcome:
@@ -1328,13 +1397,25 @@ def _notify_central_telegram(message: str, service_type: str = "central"):
 
     if service_type == "recommendation_exit":
         vip_outcome = _notify_vip_telegram(message, "recommendation_exit_vip")
-        free_delivered = _notify_free_telegram(message, service_type)
-        return bool(vip_outcome) and free_delivered
+        free_outcome = _notify_free_telegram(message, service_type)
+        combined_receipts = list(getattr(vip_outcome, "receipts", []) or []) + list(
+            getattr(free_outcome, "receipts", []) or []
+        )
+        return TelegramNotificationOutcome(
+            bool(vip_outcome) and bool(free_outcome),
+            receipts=combined_receipts,
+        )
 
     if service_type == "market_buy_hold":
         vip_outcome = _notify_vip_telegram(message, service_type)
-        free_delivered = _notify_free_telegram(message, service_type)
-        return bool(vip_outcome) and free_delivered
+        free_outcome = _notify_free_telegram(message, service_type)
+        combined_receipts = list(getattr(vip_outcome, "receipts", []) or []) + list(
+            getattr(free_outcome, "receipts", []) or []
+        )
+        return TelegramNotificationOutcome(
+            bool(vip_outcome) and bool(free_outcome),
+            receipts=combined_receipts,
+        )
 
     if service_type in _FREE_TELEGRAM_SERVICE_TYPES:
         return _notify_free_telegram(message, service_type)
@@ -1512,6 +1593,175 @@ def _profit_protection_policy():
                 minimum_distance_pct=3, trigger_pct=5)
 
 
+def _backadjust_stock_prices(client: Any, symbol: str, exchange: str, before_day: str, factor: float, start_day: str) -> None:
+    """Back-adjust historical stock_prices bars prior to a corporate-action ex-date so charts remain continuous."""
+    if not client or not before_day or not factor or factor == 1.0:
+        return
+    try:
+        rows = (
+            client.table("stock_prices")
+            .select("date,open,high,low,close")
+            .eq("symbol", symbol)
+            .eq("exchange", exchange)
+            .gte("date", start_day)
+            .lt("date", before_day)
+            .order("date", desc=False)
+            .limit(500)
+            .execute()
+        ).data or []
+        for row in rows:
+            day_str = str(row.get("date") or "")[:10]
+            if not day_str:
+                continue
+            patch = {}
+            for key in ("open", "high", "low", "close"):
+                raw = row.get(key)
+                if raw is not None:
+                    scaled = float(raw) * factor
+                    dec = 4 if scaled < 5.0 else 3
+                    patch[key] = round(scaled, dec)
+            if patch:
+                (
+                    client.table("stock_prices")
+                    .update(patch)
+                    .eq("symbol", symbol)
+                    .eq("exchange", exchange)
+                    .eq("date", row.get("date"))
+                    .execute()
+                )
+    except Exception as exc:
+        print(f"[EVALUATE] Non-fatal stock_prices back-adjust failed for {symbol}: {exc}")
+
+
+def _cancel_recommendation_for_corporate_action(
+    rec: dict,
+    details: dict,
+    lifecycle: dict,
+    ca: Any,
+    entry_price: float,
+    created_at_date: str,
+    symbol: str,
+    exchange: str,
+    today: str,
+    *,
+    report: Optional[dict] = None,
+) -> bool:
+    """Auto-cancel an open recommendation at 0.00% on unadjusted corporate-action gaps."""
+    corporate_action = dict(
+        day=ca.day,
+        prior_close=ca.prior_close,
+        open=ca.opening,
+        close=ca.close,
+        change_pct=round(ca.change_pct, 2),
+        confirmed=ca.confirmed,
+    )
+    new_lifecycle = dict(lifecycle or {})
+    new_lifecycle.update(
+        exit_reason="corporate_action_adjustment",
+        closed_on=ca.day,
+        exit_reason_ar="إلغاء تقني بسبب حدث رأسمالي (حق اكتتاب/تجزئة/منحة) — مستبعد من سجل الأداء",
+        exit_reason_en="Technical cancellation: corporate action price adjustment — excluded from performance",
+        corporate_action=corporate_action,
+    )
+    now_iso = dt.datetime.utcnow().isoformat()
+    new_details = {
+        **(details if isinstance(details, dict) else {}),
+        "evaluation": new_lifecycle,
+        "data_health": dict(reason="corporate_action_discontinuity", checked_on=today),
+    }
+    update_data = {
+        "status": "cancelled",
+        "profit_loss_pct": 0.0,
+        "exit_price": None,
+        "last_close": ca.prior_close,
+        "rich_details": new_details,
+        "updated_at": now_iso,
+    }
+    try:
+        (
+            supabase.table("scan_results")
+            .update(update_data)
+            .eq("id", rec["id"])
+            .eq("status", "open")
+            .eq("updated_at", rec.get("updated_at"))
+            .execute()
+        )
+        verify = (
+            supabase.table("scan_results")
+            .select("id")
+            .eq("id", rec["id"])
+            .eq("status", "cancelled")
+            .eq("updated_at", now_iso)
+            .execute()
+        )
+        if not getattr(verify, "data", None):
+            print(f"[EVALUATE] Corporate action cancel skipped for {symbol} ({rec['id']}): concurrent modification.")
+            return False
+
+        from api.recommendation_events import (
+            claim_event_delivery,
+            event_values,
+            record_event,
+            update_telegram_delivery,
+        )
+
+        event_rec = record_event(
+            supabase,
+            rec["id"],
+            "recommendation_closed",
+            old_values=event_values(rec),
+            new_values=update_data,
+            price_at_event=ca.prior_close,
+        )
+        if not event_rec:
+            _rollback_recommendation_change(rec["id"], "cancelled", rec, now_iso)
+            if report is not None:
+                report["errors"] = report.get("errors", 0) + 1
+            return False
+
+        if event_rec and event_rec.get("id") and _telegram_recommendation_writes_enabled():
+            claim_token = claim_event_delivery(supabase, event_rec["id"])
+            if claim_token:
+                delivered = _send_telegram_exit(
+                    symbol,
+                    exchange,
+                    entry_price,
+                    ca.prior_close,
+                    0.0,
+                    "cancelled",
+                    created_at=created_at_date,
+                    exit_reason="corporate_action_adjustment",
+                    closed_on=ca.day,
+                    corporate_action=corporate_action,
+                    event_id=event_rec["id"],
+                    claim_token=claim_token,
+                    event_client=supabase,
+                )
+                update_telegram_delivery(
+                    supabase,
+                    event_rec["id"],
+                    success=delivered,
+                    claim_token=claim_token,
+                )
+
+        if report is not None:
+            report["updated"] = report.get("updated", 0) + 1
+            report["cancelled_corporate_action"] = report.get("cancelled_corporate_action", 0) + 1
+            report.setdefault("blocked_symbols", []).append(
+                dict(symbol=rec.get("symbol", symbol), reason="corporate_action_cancelled")
+            )
+        print(
+            f"[EVALUATE] {symbol}: auto-cancelled (0.00%) due to corporate action on {ca.day} "
+            f"(prior={ca.prior_close}, close={ca.close}, confirmed={ca.confirmed})."
+        )
+        return True
+    except Exception as exc:
+        print(f"[EVALUATE] Corporate action cancel failed for {symbol}: {exc}")
+        if report is not None:
+            report["errors"] = report.get("errors", 0) + 1
+        return False
+
+
 def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=None, unverified_symbols=None):
     """
     Evaluate public EGX recommendations using the versioned bar policy.
@@ -1527,12 +1777,12 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
         query = query.eq("batch_id", batch_id)
     if symbols is not None:
         if not symbols:
-            return dict(total=0,evaluated=0,updated=0,closed=0,adjusted=0,unchanged=0,blocked=0,errors=0,blocked_symbols=[]) if return_report else 0
+            return dict(total=0,evaluated=0,updated=0,closed=0,adjusted=0,unchanged=0,blocked=0,errors=0,cancelled_corporate_action=0,blocked_symbols=[]) if return_report else 0
         query = query.in_('symbol', list(symbols))
     res = query.limit(500).execute()
     open_recs = res.data
     report = dict(total=len(open_recs or []), evaluated=0, updated=0, closed=0,
-                  adjusted=0, unchanged=0, blocked=0, errors=0, blocked_symbols=[])
+                  adjusted=0, unchanged=0, blocked=0, errors=0, cancelled_corporate_action=0, blocked_symbols=[])
     from zoneinfo import ZoneInfo
     today = dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
 
@@ -1607,6 +1857,13 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
         if not archive.empty else {}
     )
 
+    try:
+        from api.corporate_actions_engine import load_price_adjusting_action_dates
+        action_dates_by_symbol = load_price_adjusting_action_dates(supabase, "EGX")
+    except Exception as ca_err:
+        print(f"[EVALUATE] Corporate action dates unavailable; continuing with hard gap detector: {ca_err}")
+        action_dates_by_symbol = {}
+
     print(f"[EVALUATE] Smart-evaluating {len(open_recs)} open recommendations...")
     updated_count = 0
 
@@ -1642,19 +1899,31 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
 
         archived = archived_by_symbol.get(str(symbol).upper())
         merged_prices = merge_snapshot_with_live(archived, p_res.data)
-        from api.recommendation_policy import evaluate_bars, resolve_signal_reference
+        from api.recommendation_policy import CorporateActionDiscontinuity, evaluate_bars, resolve_signal_reference
         details = rec.get("rich_details") if isinstance(rec.get("rich_details"), dict) else {}
+        existing_adjustments_raw = rec.get("adjustments") if isinstance(rec.get("adjustments"), list) else []
+        already_rebased = bool(
+            (details.get("evaluation") or {}).get("rebased")
+            or any(isinstance(a, dict) and a.get("type") == "corporate_action_rebase" for a in existing_adjustments_raw)
+        )
         price_date = (details.get("entry_snapshot") or {}).get("price_date")
+        sym_action_dates = list(action_dates_by_symbol.get(str(symbol).upper(), []))
         def as_bars(frame):
             return frame.assign(date=frame["date"].dt.strftime("%Y-%m-%d")).to_dict("records") if not frame.empty else []
-        reference = resolve_signal_reference(entry_price, as_bars(merged_prices), created_at_date, price_date)
+        reference = resolve_signal_reference(
+            entry_price, as_bars(merged_prices), created_at_date, price_date,
+            rebased=already_rebased, corporate_action_dates=sym_action_dates,
+        )
         if not reference["ok"] or merged_prices.empty or merged_prices.date.max() < pd.Timestamp(created_at_date):
             from api.recommendation_data import repair_history
             merged_prices, repair = repair_history(supabase, rec, merged_prices, today)
             if repair.get("status") != "verified":
                 block(rec, "history_repair_failed", details)
                 continue
-            reference = resolve_signal_reference(entry_price, as_bars(merged_prices), created_at_date, price_date)
+            reference = resolve_signal_reference(
+                entry_price, as_bars(merged_prices), created_at_date, price_date,
+                rebased=already_rebased, corporate_action_dates=sym_action_dates,
+            )
         prices = merged_prices.assign(
             date=merged_prices["date"].dt.strftime("%Y-%m-%d")
         ).to_dict("records") if not merged_prices.empty else []
@@ -1710,6 +1979,7 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
             str(latest_price_date)[:10],
         )
         cursor = str(lifecycle.get("last_evaluated_date") or lifecycle.get("initial_review_cursor") or legacy_cursor)
+        verified_ca_meta = None
         try:
             if latest_close <= 0:
                 outcome = {"status": "open"}
@@ -1724,7 +1994,43 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
                     recommendation_symbol=str(symbol).upper(),
                     weak_symbols_by_date=weak_symbols_by_date,
                     profit_protection=management,
+                    corporate_action_dates=sym_action_dates,
+                    rebase_corporate_actions=True,
                 )
+        except CorporateActionDiscontinuity as ca:
+            try:
+                from api.corporate_actions_engine import verify_symbol_corporate_action_live
+                verified_ca_meta = verify_symbol_corporate_action_live(supabase, symbol, exchange, ca.day)
+            except Exception as verify_err:
+                print(f"[EVALUATE] Corporate action live verify error for {symbol}: {verify_err}")
+                verified_ca_meta = None
+
+            if verified_ca_meta and verified_ca_meta.get("confirmed"):
+                v_date = str(verified_ca_meta.get("date") or ca.day)[:10]
+                if v_date not in sym_action_dates:
+                    sym_action_dates.append(v_date)
+                try:
+                    outcome = evaluate_bars(
+                        entry=entry_price, target=target_price, stop=stop_loss, bars=prices,
+                        entry_date=created_at_date, cursor=cursor,
+                        max_sessions=policy.get("max_sessions"),
+                        trail_pct=policy.get("trail_pct"),
+                        sector_risk_by_date=sector_risk_by_date,
+                        recommendation_sector=sector_by_symbol.get(str(symbol).upper()),
+                        recommendation_symbol=str(symbol).upper(),
+                        weak_symbols_by_date=weak_symbols_by_date,
+                        profit_protection=management,
+                        corporate_action_dates=sym_action_dates,
+                        rebase_corporate_actions=True,
+                    )
+                except (ValueError, TypeError) as retry_err:
+                    print(f"[EVALUATE] Verified rebase failed for {symbol}: {retry_err}; leaving checkpoint unchanged.")
+                    block(rec, "corporate_action_discontinuity", details)
+                    continue
+            else:
+                print(f"[EVALUATE] Unconfirmed corporate action discontinuity for {symbol} on {ca.day}; preserving original barriers.")
+                block(rec, "unconfirmed_corporate_action_discontinuity", details)
+                continue
         except (ValueError, TypeError) as error:
             err_text = str(error)
             reason_code = "corporate_action_discontinuity" if "corporate action" in err_text.lower() else "invalid_ohlc"
@@ -1741,7 +2047,7 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
             block(rec, "stale_price_history", details)
             continue
         report["evaluated"] += 1
-        if outcome["last_close"] is None:
+        if outcome.get("last_close") is None and not outcome.get("rebased"):
             report["unchanged"] += 1
             health = "no_trading_volume" if prices[-1].get("volume") == 0 else "no_new_trading_session"
             save_review(rec, {**details, "evaluation": lifecycle}, health)
@@ -1749,7 +2055,12 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
         status = outcome["status"]
         exit_price = outcome["exit_price"]
         found_event = exit_price is not None
-        pl_pct = outcome["profit_loss_pct"]
+        effective_entry_for_pl = float(outcome.get("entry_price") or entry_price)
+        pl_pct = (
+            outcome["profit_loss_pct"]
+            if outcome.get("profit_loss_pct") is not None
+            else (((latest_close / effective_entry_for_pl) - 1.0) * 100.0)
+        )
         new_stop = outcome["stop_loss"]
         new_adjustments = outcome["adjustments"]
         update_applied = True
@@ -1772,11 +2083,41 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
             lifecycle["exit_reason_ar"] = "تراجع سيولة القطاع مع هبوط مؤشري EGX30 وEGX100"
             lifecycle["exit_reason_en"] = "Sector liquidity outflow during broad EGX30/EGX100 drawdown"
             lifecycle["sector_risk"] = outcome["sector_risk"]
+        if outcome.get("rebased"):
+            lifecycle["rebased"] = True
+            lifecycle["rebase_factor"] = outcome.get("rebase_factor")
+            if verified_ca_meta:
+                lifecycle["verified_corporate_action"] = verified_ca_meta
+                for adj_item in new_adjustments:
+                    if isinstance(adj_item, dict) and adj_item.get("type") == "corporate_action_rebase":
+                        adj_item["confirmed"] = True
+                        adj_item["evidence_title"] = verified_ca_meta.get("title")
+                        adj_item["action_type"] = verified_ca_meta.get("action_type")
+                        adj_item["action_date"] = verified_ca_meta.get("date")
+            lifecycle.setdefault(
+                "original_barriers",
+                {"entry_price": entry_price, "target_price": target_price, "stop_loss": stop_loss},
+            )
+            rebased_day = outcome.get("rebased_day")
+            factor_val = float(outcome.get("rebase_factor") or 1.0)
+            if rebased_day and factor_val != 1.0:
+                try:
+                    start_adj = (dt.date.fromisoformat(created_at_date) - dt.timedelta(days=120)).isoformat()
+                except Exception:
+                    start_adj = created_at_date
+                _backadjust_stock_prices(supabase, symbol, exchange, rebased_day, factor_val, start_adj)
         details = {**details, "evaluation": lifecycle,
                    "data_health": dict(reason="verified" if float(prices[-1].get("volume") or 0) > 0 else "no_trading_volume", checked_on=today)}
 
         # ── UPDATE DATABASE ──
         all_adjustments = existing_adjustments + new_adjustments
+        rebased_fields = {}
+        if outcome.get("rebased") or (outcome.get("entry_price") is not None and outcome.get("entry_price") != entry_price):
+            rebased_fields = {
+                "entry_price": outcome["entry_price"],
+                "target_price": outcome["target_price"],
+                "stop_loss": outcome["stop_loss"],
+            }
 
         if not found_event:
             update_data = {
@@ -1785,6 +2126,7 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
                 "profit_loss_pct": round(pl_pct, 4),
                 "status": "open",
                 "updated_at": dt.datetime.utcnow().isoformat(),
+                **rebased_fields,
             }
             if new_stop is not None and new_stop != stop_loss:
                 update_data["stop_loss"] = new_stop
@@ -1814,6 +2156,7 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
             update_data = {
                 "exit_price": exit_price,
                 "rich_details": details,
+                **rebased_fields,
                 "stop_loss": new_stop,
                 # BUG 3 FIX: update last_close to exit price so dashboard shows correct current value
                 "last_close": exit_price,

@@ -237,3 +237,24 @@ def test_output_guard_sanitizes_r_vol_and_upcoming_events():
     assert "الأحداث القادمة ومواعيد النتائج" in cleaned
     assert any("r_vol" in w for w in res["warnings"])
     assert any("upcoming_events" in w for w in res["warnings"])
+
+
+def test_automation_quota_rule_in_prompt_and_output_guard():
+    from api.agentic_chat.prompts import AGENTIC_SYSTEM_PROMPT
+    from api.agentic_chat.output_guard import verify_and_guard_reply
+
+    assert "كل تنفيذ لتقرير مجدول يخصم رسالة واحدة" in AGENTIC_SYSTEM_PROMPT
+    assert "يُمنع منعاً باتاً القول إن الأتمتة المجدولة لا تستهلك من الكوتة" in AGENTIC_SYSTEM_PROMPT
+
+    wrong_reply = (
+        "## اللي مش بيستهلك من الكوتة خالص\n"
+        "- **قناة تليجرام VIP** — بث إشارات.\n"
+        "- **الأتمتة المجدولة (Scheduled Automations)** — التقارير اليومية اللي بتتجدول بتتنفذ تلقائياً ومش بتاكل من كوتة الشات.\n"
+    )
+    res = verify_and_guard_reply(wrong_reply, tool_payloads=[], market="EGX")
+    assert "مش بتاكل من كوتة الشات" not in res["reply"]
+    assert "تستهلك من الكوتة" in res["reply"]
+    assert "يخصم رسالة واحدة" in res["reply"]
+    assert "automation_quota_misstatement_fixed" in res["warnings"]
+    assert res["block_cache"] is True
+

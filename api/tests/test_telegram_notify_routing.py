@@ -42,11 +42,21 @@ class TelegramNotifyRoutingTests(unittest.TestCase):
         )
 
     def test_central_notify_routes_exits_to_both_channels(self):
-        with patch("api.daily_bot_run._notify_free_telegram", return_value=True) as free_send, \
-             patch("api.daily_bot_run._notify_vip_telegram", return_value=TelegramNotificationOutcome(True)) as vip_send, \
-             patch("api.daily_bot_run._telegram_recommendation_writes_enabled", return_value=True):
+        with patch(
+            "api.daily_bot_run._notify_free_telegram",
+            return_value=TelegramNotificationOutcome(True, receipts=[{"chat_id": -1001, "message_id": 11}]),
+        ) as free_send, patch(
+            "api.daily_bot_run._notify_vip_telegram",
+            return_value=TelegramNotificationOutcome(True, receipts=[{"chat_id": -1002, "message_id": 22}]),
+        ) as vip_send, patch(
+            "api.daily_bot_run._telegram_recommendation_writes_enabled", return_value=True
+        ):
             result = _notify_central_telegram("exit", "recommendation_exit")
         self.assertTrue(result)
+        self.assertEqual(
+            getattr(result, "receipts", []),
+            [{"chat_id": -1002, "message_id": 22}, {"chat_id": -1001, "message_id": 11}],
+        )
         free_send.assert_called_once()
         vip_send.assert_called_once()
 

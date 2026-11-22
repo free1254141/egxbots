@@ -173,7 +173,7 @@ export default function SignupPage() {
 
           <div className="mt-6 text-center text-xs text-zinc-500 font-bold">
             {t("auth.signup.have_account")}{" "}
-            <Link href="/login" className="text-indigo-600 dark:text-indigo-400 hover:underline">
+            <Link href="/login" className="text-indigo-600 dark:text-indigo-400 hover:underline" prefetch={false}>
               {t("auth.signup.login")}
             </Link>
           </div>

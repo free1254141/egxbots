@@ -3673,7 +3673,10 @@ def _sync_get_recommendations(
                     if mkt_syms:
                         q = q.in_("symbol", mkt_syms)
                     res = q.order("created_at", desc=True).limit(min(limit or 20, 30)).execute()
-                    rows = res.data or []
+                    rows = [
+                        r for r in (res.data or [])
+                        if str(r.get("status") or "").lower() != "cancelled"
+                    ]
                     if rows:
                         break
                 except Exception:
@@ -3750,7 +3753,10 @@ def _sync_get_recommendations(
 
         query = query.order("created_at", desc=True).limit(min(limit or 20, 30))
         res = query.execute()
-        rows = res.data or []
+        rows = [
+            r for r in (res.data or [])
+            if str(r.get("status") or "").lower() != "cancelled"
+        ]
     except Exception as e:
         return {"status": "error", "message": f"تعذر استرجاع التوصيات: {str(e)}"}
 

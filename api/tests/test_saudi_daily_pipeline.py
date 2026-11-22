@@ -515,7 +515,7 @@ def test_saudi_short_swings_ignores_egx_published_signals(monkeypatch):
     for i, d in enumerate(dates):
         base = 50.0 + i * 0.25
         close = base + (2.5 if i == 68 else 0.1)
-        vol = 1_200_000.0 if i == 68 else 500_000.0
+        vol = 1_500_000.0 if i == 68 else 600_000.0
         rows.append({
             "symbol": "1120",
             "exchange": "TADAWUL",

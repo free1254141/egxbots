@@ -586,6 +586,7 @@ export default function StockDetailClient({
         <Link
           href={isGccStock ? gccDirectoryHref : isSaudiStock ? "/scanner/technical?market=tasi" : "/scanner/technical"}
           className="neobrutal-btn inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-all"
+          prefetch={false}
         >
           <ArrowLeft className="w-4 h-4" />
           {t.backToScanner}
@@ -596,6 +597,7 @@ export default function StockDetailClient({
           <Link
             href={`/chart?symbol=${encodeURIComponent(cleanSymbol)}&exchange=${encodeURIComponent(resolvedExchange)}`}
             className="neobrutal-btn inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-all neobrutal-bg-blue"
+            prefetch={false}
           >
             <ExternalLink className="w-4 h-4" />
             {t.viewChart}
@@ -749,6 +751,7 @@ export default function StockDetailClient({
                 <Link
                   href="/sharia"
                   className="px-3 py-1.5 text-xs font-bold bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 transition-colors flex items-center gap-1.5"
+                  prefetch={false}
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
                   <span>{language === "ar" ? "حاسبة التطهير الشرعي" : "Sharia Cleanser"}</span>
@@ -757,6 +760,7 @@ export default function StockDetailClient({
               <Link
                 href="/fair-value"
                 className="px-3 py-1.5 text-xs font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors flex items-center gap-1.5"
+                prefetch={false}
               >
                 <span>{language === "ar" ? "شاشة السعر العادل للسوق" : "Market Fair Value"}</span>
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -1286,7 +1290,7 @@ export default function StockDetailClient({
           <TrendingUp className="w-5 h-5 text-green-400" />
           {relatedBasis === "sector" ? (language === "ar" ? "أسهم من نفس القطاع" : "Stocks in the same sector") : (language === "ar" ? "أسهم أخرى من الدليل" : "Explore the stock directory")}
         </h2>
-        <Link href="/stocks" className="mb-4 inline-block text-sm underline underline-offset-4">{language === "ar" ? "تصفح دليل الأسهم بالكامل" : "Browse all published stocks"}</Link>
+        <Link href="/stocks" className="mb-4 inline-block text-sm underline underline-offset-4" prefetch={false}>{language === "ar" ? "تصفح دليل الأسهم بالكامل" : "Browse all published stocks"}</Link>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
           {relatedStocks.map((stock) => {
             return (
@@ -1322,10 +1326,10 @@ export default function StockDetailClient({
               : `Latest News & Disclosures for ${nameEn} (${symbol})`}
           </h2>
           <div className="flex items-center gap-2 text-xs font-black">
-            <Link href={isSaudiStock ? "/disclosures?market=tasi" : "/disclosures"} className="px-2.5 py-1 border border-black dark:border-white hover:bg-amber-300 hover:text-black transition-colors">
+            <Link href={isSaudiStock ? "/disclosures?market=tasi" : "/disclosures"} className="px-2.5 py-1 border border-black dark:border-white hover:bg-amber-300 hover:text-black transition-colors" prefetch={false}>
               {language === "ar" ? "رادار الإفصاحات" : "Disclosures Radar"}
             </Link>
-            <Link href={isSaudiStock ? "/news?market=tasi" : "/news"} className="px-2.5 py-1 border border-black dark:border-white hover:bg-amber-300 hover:text-black transition-colors">
+            <Link href={isSaudiStock ? "/news?market=tasi" : "/news"} className="px-2.5 py-1 border border-black dark:border-white hover:bg-amber-300 hover:text-black transition-colors" prefetch={false}>
               {language === "ar" ? "أخبار السوق" : "Market News"}
             </Link>
           </div>
@@ -1396,7 +1400,7 @@ export default function StockDetailClient({
               {language === "ar"
                 ? `تقييم AI Score الحالي: ${computedAIScore}/100${fairValueInfo ? ` · السعر العادل التقديري: ${fairValueInfo.fairValue.toFixed(2)} ${currencyLabel}` : ""}.`
                 : `Current AI Score: ${computedAIScore}/100${fairValueInfo ? ` · Estimated Fair Value: ${fairValueInfo.fairValue.toFixed(2)} ${currency}` : ""}.`}{" "}
-              <Link href={isSaudiStock ? "/fair-value?market=tasi" : "/fair-value"} className="font-bold underline text-emerald-700 dark:text-emerald-400">
+              <Link href={isSaudiStock ? "/fair-value?market=tasi" : "/fair-value"} className="font-bold underline text-emerald-700 dark:text-emerald-400" prefetch={false}>
                 {language === "ar" ? "حاسبة السعر العادل" : "Fair Value Calculator"}
               </Link>
             </p>
@@ -1411,7 +1415,7 @@ export default function StockDetailClient({
               {language === "ar"
                 ? `افحص الضوابط المالية الشرعية ومعامل تطهير التوزيعات لسهم ${nameAr} (${symbol}) مباشرة عبر `
                 : `Verify Shariah financial ratios and dividend purification for ${symbol} directly via `}
-              <Link href={isSaudiStock ? "/sharia?market=tasi" : "/sharia"} className="font-bold underline text-emerald-700 dark:text-emerald-400">
+              <Link href={isSaudiStock ? "/sharia?market=tasi" : "/sharia"} className="font-bold underline text-emerald-700 dark:text-emerald-400" prefetch={false}>
                 {language === "ar" ? "حاسبة الأسهم الشرعية والتطهير" : "Shariah & Purification Calculator"}
               </Link>.
             </p>
@@ -1462,30 +1466,30 @@ export default function StockDetailClient({
                 : `Additional Quantitative Tools for ${nameEn} (${symbol})`}
             </h3>
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-black">
-              <Link href={isGccStock ? "/chat" : isSaudiStock ? "/scanner/ai?market=tasi" : "/scanner/ai"} className="px-3 py-1.5 border-2 border-black bg-[#FFE600] text-black hover:underline">
+              <Link href={isGccStock ? "/chat" : isSaudiStock ? "/scanner/ai?market=tasi" : "/scanner/ai"} className="px-3 py-1.5 border-2 border-black bg-[#FFE600] text-black hover:underline" prefetch={false}>
                 {language === "ar" ? (isGccStock ? "اسأل الشات الذكي عن السهم" : "محلل الأسهم بالذكاء الاصطناعي") : (isGccStock ? "Ask the AI Chat" : isSaudiStock ? "TASI AI Stock Analyzer" : "EGX AI Stock Analyzer")}
               </Link>
               {isGccStock ? (
-                <Link href={gccDirectoryHref} className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                <Link href={gccDirectoryHref} className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline" prefetch={false}>
                   {language === "ar" ? `دليل أسهم ${gccMarketNameAr}` : `${gccMarketNameEn} Directory`}
                 </Link>
               ) : (
-              <Link href={isSaudiStock ? "/fair-value?market=tasi" : "/fair-value"} className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+              <Link href={isSaudiStock ? "/fair-value?market=tasi" : "/fair-value"} className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline" prefetch={false}>
                 {language === "ar" ? "حاسبة السعر العادل ومؤشر الرخص" : (isSaudiStock ? "TASI Fair Value Screener" : "EGX Fair Value Screener")}
               </Link>
               )}
               {!isSaudiStock && !isGccStock && (
                 <>
-                  <Link href="/sharia" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                  <Link href="/sharia" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline" prefetch={false}>
                     {language === "ar" ? "فحص التوافق الشرعي EGX33" : "EGX33 Sharia Compliance"}
                   </Link>
-                  <Link href="/blogs/best-egx-stock-analysis-software" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                  <Link href="/blogs/best-egx-stock-analysis-software" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline" prefetch={false}>
                     {language === "ar" ? "دليل أفضل برامج تحليل البورصة المصرية" : "Best EGX Analysis Software Guide"}
                   </Link>
                 </>
               )}
               {isSaudiStock && (
-                <Link href="/stocks" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                <Link href="/stocks" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline" prefetch={false}>
                   {language === "ar" ? "دليل أسهم السوق السعودي (تاسي)" : "Saudi Exchange (TASI) Directory"}
                 </Link>
               )}

@@ -101,9 +101,9 @@ export default function BacktestsPage() {
             description="قارن الحالات التاريخية المشابهة ونتائجها بعد 5 و10 و20 جلسة، وراجع قوة العينة وسجل التوصيات ونتائج الاختبارات التاريخية."
           />
           <nav aria-label="أدوات أبحاث الأسهم" className="flex flex-wrap gap-4 text-sm font-semibold text-zinc-950 dark:text-white">
-            <Link href="/stocks" className="underline">دليل أسهم البورصة المصرية</Link>
-            <Link href="/scanner/technical" className="underline">الماسح الفني للأسهم</Link>
-            <Link href="/scanner/market" className="underline">اتجاه السوق والسيولة</Link>
+            <Link href="/stocks" className="underline" prefetch={false}>دليل أسهم البورصة المصرية</Link>
+            <Link href="/scanner/technical" className="underline" prefetch={false}>الماسح الفني للأسهم</Link>
+            <Link href="/scanner/market" className="underline" prefetch={false}>اتجاه السوق والسيولة</Link>
           </nav>
           <p role="status" className="mt-6 text-sm text-zinc-600 dark:text-zinc-400">جاري تحميل أدوات التحليل…</p>
         </div>

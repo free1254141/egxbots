@@ -202,6 +202,7 @@ export default function Footer() {
                 <Link
                   href="/stocks"
                   className="text-sm font-bold text-yellow-600 dark:text-yellow-400 hover:underline transition-colors"
+                  prefetch={false}
                 >
                   {t("nav.stocks")}
                 </Link>
@@ -210,6 +211,7 @@ export default function Footer() {
                 <Link
                   href="/scanner/ai"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors font-bold text-indigo-400/80 dark:text-indigo-400/80 light:text-indigo-600/80"
+                  prefetch={false}
                 >
                   {t("nav.scanner.ai")}
                 </Link>
@@ -218,6 +220,7 @@ export default function Footer() {
                   <Link
                     href="/news"
                     className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors font-bold text-indigo-400/80 dark:text-indigo-400/80 light:text-indigo-600/80"
+                    prefetch={false}
                   >
                     {t("nav.scanner.news")}
                   </Link>
@@ -226,6 +229,7 @@ export default function Footer() {
                 <Link
                   href="/scanner/technical"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  prefetch={false}
                 >
                   {t("nav.scanner.tech")}
                 </Link>
@@ -234,6 +238,7 @@ export default function Footer() {
                 <Link
                   href="/scanner/market"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  prefetch={false}
                 >
                   {t("nav.scanner.market")}
                 </Link>
@@ -242,6 +247,7 @@ export default function Footer() {
                 <Link
                   href="/scanner/backtests?tab=bots"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  prefetch={false}
                 >
                   {isAr ? "بوتات التداول اليومية (AI)" : "AI Trading Bots"}
                 </Link>
@@ -251,6 +257,7 @@ export default function Footer() {
                   <Link
                     href="/scanner/backtests?tab=similarity"
                     className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                    prefetch={false}
                   >
                     {isAr ? "النماذج الفنية المتكررة (شبه ده)" : "Historical Pattern Similarity"}
                   </Link>
@@ -260,6 +267,7 @@ export default function Footer() {
                   <Link
                     href="/disclosures"
                     className="text-sm font-bold text-yellow-600 dark:text-yellow-400 hover:underline transition-colors"
+                    prefetch={false}
                   >
                     {isSaudi
                       ? (isAr ? "رادار إفصاحات السوق السعودي (تداول)" : "Saudi Tadawul Disclosures Radar")
@@ -288,24 +296,26 @@ export default function Footer() {
                 <Link
                   href="/blogs"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  prefetch={false}
                 >
                   {t("footer.blogs")}
                 </Link>
               </li>
               {!isSaudi && (
-                <li><Link href="/reports" className="text-sm text-zinc-500 hover:text-amber-500">تقارير السوق والتجميع · Daily reports</Link></li>
+                <li><Link href="/reports" className="text-sm text-zinc-500 hover:text-amber-500" prefetch={false}>تقارير السوق والتجميع · Daily reports</Link></li>
               )}
-              <li><Link href="/fair-value" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors">💎 {isAr ? "محدد السعر العادل ومؤشر الرخص" : "Fair Value Screener"}</Link></li>
-              <li><Link href="/dividends" className="text-sm font-bold text-amber-500 hover:text-amber-400 transition-colors">💰 {isAr ? "تقويم كوبونات البورصة المصرية (EGX)" : "EGX Dividend Calendar"}</Link></li>
-              <li><Link href="/dividends/tasi" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors">🇸🇦 {isAr ? "تقويم كوبونات السوق السعودي (TASI)" : "Saudi TASI Dividend Calendar"}</Link></li>
-              <li><Link href="/dividends/qatar" className="text-sm font-bold text-rose-400 hover:text-rose-300 transition-colors">🇶🇦 {isAr ? "تقويم كوبونات بورصة قطر (QSE)" : "Qatar QSE Dividend Calendar"}</Link></li>
-              <li><Link href="/dividends/uae" className="text-sm font-bold text-cyan-400 hover:text-cyan-300 transition-colors">🇦🇪 {isAr ? "تقويم كوبونات الإمارات (DFM & ADX)" : "UAE DFM & ADX Dividend Calendar"}</Link></li>
-              <li><Link href="/sharia" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors">⚖️ {isAr ? "حاسبة التوافق الشرعي وتطهير الكوبونات" : "Sharia & Dividend Cleanser"}</Link></li>
-              <li><Link href="/profile" className="text-sm font-bold text-indigo-400 hover:text-indigo-300 transition-colors">🔄 {isAr ? "إعادة تدوير المحفظة الذكي (AI)" : "AI Portfolio Rebalancer"}</Link></li>
+              <li><Link href="/fair-value" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors" prefetch={false}>💎 {isAr ? "محدد السعر العادل ومؤشر الرخص" : "Fair Value Screener"}</Link></li>
+              <li><Link href="/dividends" className="text-sm font-bold text-amber-500 hover:text-amber-400 transition-colors" prefetch={false}>💰 {isAr ? "تقويم كوبونات البورصة المصرية (EGX)" : "EGX Dividend Calendar"}</Link></li>
+              <li><Link href="/dividends/tasi" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors" prefetch={false}>🇸🇦 {isAr ? "تقويم كوبونات السوق السعودي (TASI)" : "Saudi TASI Dividend Calendar"}</Link></li>
+              <li><Link href="/dividends/qatar" className="text-sm font-bold text-rose-400 hover:text-rose-300 transition-colors" prefetch={false}>🇶🇦 {isAr ? "تقويم كوبونات بورصة قطر (QSE)" : "Qatar QSE Dividend Calendar"}</Link></li>
+              <li><Link href="/dividends/uae" className="text-sm font-bold text-cyan-400 hover:text-cyan-300 transition-colors" prefetch={false}>🇦🇪 {isAr ? "تقويم كوبونات الإمارات (DFM & ADX)" : "UAE DFM & ADX Dividend Calendar"}</Link></li>
+              <li><Link href="/sharia" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors" prefetch={false}>⚖️ {isAr ? "حاسبة التوافق الشرعي وتطهير الكوبونات" : "Sharia & Dividend Cleanser"}</Link></li>
+              <li><Link href="/profile" className="text-sm font-bold text-indigo-400 hover:text-indigo-300 transition-colors" prefetch={false}>🔄 {isAr ? "إعادة تدوير المحفظة الذكي (AI)" : "AI Portfolio Rebalancer"}</Link></li>
               <li>
                 <Link
                   href="/faq"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  prefetch={false}
                 >
                   {t("footer.faq")}
                 </Link>
@@ -314,6 +324,7 @@ export default function Footer() {
                 <Link
                   href="/disclaimer"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  prefetch={false}
                 >
                   {t("footer.disclaimer")}
                 </Link>
@@ -322,6 +333,7 @@ export default function Footer() {
                 <Link
                   href="/legal-status"
                   className="text-sm text-amber-500/90 dark:text-amber-400/90 light:text-amber-600 hover:text-amber-500 dark:hover:text-amber-300 transition-colors font-bold"
+                  prefetch={false}
                 >
                   {t("footer.legal_status")}
                 </Link>
@@ -330,6 +342,7 @@ export default function Footer() {
                 <Link
                   href="/pricing"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  prefetch={false}
                 >
                   {t("footer.pricing")}
                 </Link>
@@ -338,6 +351,7 @@ export default function Footer() {
                 <Link
                   href="/affiliate"
                   className="inline-flex items-center gap-1.5 text-sm font-black text-emerald-500 hover:text-emerald-400 transition-colors"
+                  prefetch={false}
                 >
                   <span>💰 {isAr ? "التسويق بالعمولة (اربح 25% كاش)" : "Affiliate Program (Earn 25% Cash)"}</span>
                 </Link>
@@ -346,6 +360,7 @@ export default function Footer() {
                 <Link
                   href="/b2b"
                   className="inline-flex items-center gap-1.5 text-sm font-black text-amber-500 hover:text-amber-400 transition-colors"
+                  prefetch={false}
                 >
                   <span>🤖 {isAr ? "حلول الشركات وبوت القنوات (B2B)" : "Enterprise & Channel Bot (B2B)"}</span>
                 </Link>
@@ -364,6 +379,7 @@ export default function Footer() {
                 <Link
                   href="/refund"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  prefetch={false}
                 >
                   {t("footer.refund")}
                 </Link>
@@ -432,6 +448,7 @@ export default function Footer() {
               <Link
                 href="/affiliate#advertisers"
                 className="inline-flex items-center gap-1 px-3 py-2 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white text-xs font-bold shadow-[2px_2px_0px_#000] hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                prefetch={false}
               >
                 <span>{isAr ? "تفاصيل الشراكات ←" : "Partnership Details ←"}</span>
               </Link>
@@ -485,6 +502,7 @@ export default function Footer() {
               <Link
                 href="/blogs/real-estate-vs-stocks-egypt-ewanbot-guide"
                 className="inline-flex items-center gap-1.5 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-bold border border-zinc-300 dark:border-zinc-700 transition-colors"
+                prefetch={false}
               >
                 <span>📖 {isAr ? "دليل العقار vs البورصة" : "Real Estate vs Stocks Guide"}</span>
               </Link>
@@ -513,6 +531,7 @@ export default function Footer() {
                   key={tool.href}
                   href={tool.href}
                   className="px-2.5 py-1 text-[11px] font-bold bg-emerald-500/10 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 hover:border-emerald-500 transition-colors"
+                  prefetch={false}
                 >
                   {isAr ? tool.ar : tool.en}
                 </Link>
@@ -613,6 +632,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/best-tasi-ai-stock-analysis-software"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "أفضل بوت وأداة ذكاء اصطناعي لتحليل الأسهم السعودية تاسي 2026" : "Best AI Software & Bot for Saudi TASI Stock Analysis (2026)"}
                   </Link>
@@ -621,6 +641,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/aramco-2222-rajhi-1120-ai-stock-analysis-guide"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "دليل التحليل الفني والكمي لسهم أرامكو (2222) والراجحي (1120)" : "Aramco (2222) & Al Rajhi (1120) AI Technical Analysis Guide"}
                   </Link>
@@ -629,6 +650,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/saudi-tasi-sharia-compliant-stocks-purification-guide"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "قائمة الأسهم السعودية النقية شرعياً وحاسبة تطهير الأرباح في تاسي 2026" : "Saudi TASI Sharia-Compliant Stocks & Dividend Purification Guide"}
                   </Link>
@@ -637,6 +659,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/best-egx-stock-analysis-software"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "أفضل برنامج تحليل الأسهم المصرية لعام 2026: مقارنة شاملة" : "Best EGX Stock Analysis Software (2026 Comparison Guide)"}
                   </Link>
@@ -645,6 +668,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/ai-egyptian-stock-market-analysis"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "تحليل الأسهم المصرية بالذكاء الاصطناعي: الرصد الكمي للسيولة" : "AI Egyptian Stock Market Analysis & Liquidity Detection"}
                   </Link>
@@ -653,6 +677,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/egx-telegram-stock-recommendations"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-cyan-600 dark:hover:text-cyan-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "قنوات البورصة المصرية على تليجرام: مقارنة التحليل الآلي" : "EGX Telegram Technical Alerts & Quantitative Scanners"}
                   </Link>
@@ -661,6 +686,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/how-to-invest-in-egyptian-stock-market-beginners"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "كيفية الاستثمار في البورصة المصرية للمبتدئين 2026" : "How to Invest in the Egyptian Stock Market (EGX) for Beginners"}
                   </Link>
@@ -669,6 +695,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/egx33-sharia-compliant-stocks-egypt-guide"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "دليل الأسهم المتوافقة مع الشريعة (مؤشر EGX33) وتطهير الكوبونات" : "EGX33 Sharia-Compliant Stocks & Dividend Purification Guide"}
                   </Link>
@@ -677,6 +704,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/undervalued-egx-stocks-fair-value-calculation"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-purple-600 dark:hover:text-purple-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "حساب السعر العادل للأسهم المصرية وأرخص أسهم البورصة" : "Fair Value of Egyptian Stocks & Undervalued Screener"}
                   </Link>
@@ -685,6 +713,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/real-estate-vs-stocks-egypt-ewanbot-guide"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "الاستثمار العقاري vs البورصة في مصر: دليل Ewan Bot و EGX BOTS" : "Real Estate vs. Stocks in Egypt: Ewanbot & EGX BOTS Guide"}
                   </Link>
@@ -693,6 +722,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/gold-silver-xauusd-ai-technical-analysis-guide"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "تحليل الذهب اليوم (XAUUSD) والفضة بالذكاء الاصطناعي 2026" : "Gold (XAUUSD) & Silver AI Technical Analysis Guide"}
                   </Link>
@@ -701,6 +731,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/saudi-tasi-telegram-stock-alerts-ai-guide"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-cyan-600 dark:hover:text-cyan-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "قنوات وتنبيهات الأسهم السعودية (تاسي) على تليجرام 2026" : "Saudi TASI Telegram Alerts & AI Scanning Guide"}
                   </Link>
@@ -709,6 +740,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/undervalued-saudi-tasi-stocks-fair-value-guide"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-orange-600 dark:hover:text-orange-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "السعر العادل للأسهم السعودية وأرخص أسهم تاسي 2026" : "Saudi TASI Fair Value & Undervalued Stocks Guide"}
                   </Link>
@@ -717,6 +749,7 @@ export default function Footer() {
                   <Link
                     href="/blogs/uae-dfm-adx-qatar-qse-ai-sharia-stocks-guide"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors block"
+                    prefetch={false}
                   >
                     • {isAr ? "دليل تحليل أسهم الإمارات (DFM & ADX) وبورصة قطر (QSE)" : "UAE (DFM & ADX) & Qatar (QSE) AI Stocks Guide"}
                   </Link>

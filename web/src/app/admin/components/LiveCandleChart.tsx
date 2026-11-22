@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, IChartApi, CrosshairMode, ISeriesApi } from "lightweight-charts";
 import { Loader2, X, Maximize2, Minimize2 } from "lucide-react";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 interface Candle {
     time: number;
@@ -111,7 +112,7 @@ export default function LiveCandleChart({
 
     const fetchData = async () => {
         try {
-            const res = await fetch(`/api/ai_bot/candles?symbol=${encodeURIComponent(symbol)}&bot_id=${botId}&limit=150`);
+            const res = await hfPublicFetch(`/api/ai_bot/candles?symbol=${encodeURIComponent(symbol)}&bot_id=${botId}&limit=150`, undefined, { cacheTtlMs: 60_000 });
             if (!res.ok) {
                 if (res.status === 404) throw new Error("No data found");
                 throw new Error(`Fetch failed: ${res.status}`);

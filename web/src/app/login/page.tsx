@@ -184,7 +184,7 @@ function LoginForm() {
 
         <div className="mt-6 text-center text-xs text-zinc-500 font-bold">
           {t("auth.login.no_account")}{" "}
-          <Link href="/signup" className="text-indigo-600 dark:text-indigo-400 hover:underline">
+          <Link href="/signup" className="text-indigo-600 dark:text-indigo-400 hover:underline" prefetch={false}>
             {t("auth.login.create_one")}
           </Link>
         </div>

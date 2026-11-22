@@ -351,6 +351,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
             <Link
               href="/pricing"
               className="h-9 px-3.5 border-2 border-black dark:border-white bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs flex items-center gap-1.5 uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+              prefetch={false}
             >
               <Crown className="w-3.5 h-3.5" />
               {isAr ? "ترقية إلى Pro" : "Upgrade to Pro"}
@@ -599,6 +600,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
               <Link 
                 href="/pricing"
                 className="shrink-0 px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-black font-black text-[10px] border border-black shadow-[1px_1px_0_0_#000] transition-transform active:translate-y-0.5"
+                prefetch={false}
               >
                 {isAr ? "تجديد الآن" : "Renew Now"}
               </Link>

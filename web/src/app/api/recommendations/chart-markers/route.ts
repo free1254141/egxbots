@@ -55,7 +55,9 @@ export async function GET(request: NextRequest) {
       .order("created_at", { ascending: false }).limit(500);
     if (error) throw error;
     const visible = ((data || []) as ScanRow[]).filter((row) => {
-      const closed = ["win", "loss"].includes(String(row.status).toLowerCase());
+      const statusLow = String(row.status || "").toLowerCase();
+      if (statusLow === "cancelled") return false;
+      const closed = ["win", "loss"].includes(statusLow);
       const created = Date.parse(row.created_at);
       const entry = Number(row.entry_price);
       const last = Number(row.last_close);

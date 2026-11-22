@@ -474,6 +474,7 @@ export default function ShariaCleanserClient({
               <Link
                 href="/fair-value"
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-500 hover:text-white dark:hover:bg-emerald-500 dark:hover:text-white border-2 border-zinc-200 dark:border-zinc-700 text-xs font-bold text-zinc-700 dark:text-zinc-300 transition-colors"
+                prefetch={false}
               >
                 <Scale className="w-4 h-4 text-emerald-500" />
                 <span>{isAr ? "تصفح محدد السعر العادل ومؤشر الرخص ←" : "Browse Fair Value Screener →"}</span>

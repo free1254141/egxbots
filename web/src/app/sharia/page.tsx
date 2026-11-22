@@ -115,10 +115,10 @@ export default async function ShariaPage() {
       <section dir="rtl" aria-label="أدوات التحليل المجانية ذات الصلة" className="mx-auto max-w-6xl px-4 pb-8">
         <nav className="flex flex-wrap items-center gap-3 border border-black/15 dark:border-white/15 bg-white/70 dark:bg-zinc-900/60 p-4 text-xs font-bold">
           <span className="text-zinc-900 dark:text-white font-black">أدوات مجانية مكملة:</span>
-          <Link href="/fair-value" className="underline text-emerald-700 dark:text-emerald-400">محدد السعر العادل ومؤشر الرخص</Link>
-          <Link href="/disclosures" className="underline text-amber-700 dark:text-amber-400">رادار إفصاحات البورصة وتعاملات الداخليين</Link>
-          <Link href="/scanner/technical" className="underline text-indigo-700 dark:text-indigo-400">الماسح الفني للأسهم</Link>
-          <Link href="/stocks" className="underline text-zinc-700 dark:text-zinc-300">دليل الأسهم المصرية والسعودية</Link>
+          <Link href="/fair-value" className="underline text-emerald-700 dark:text-emerald-400" prefetch={false}>محدد السعر العادل ومؤشر الرخص</Link>
+          <Link href="/disclosures" className="underline text-amber-700 dark:text-amber-400" prefetch={false}>رادار إفصاحات البورصة وتعاملات الداخليين</Link>
+          <Link href="/scanner/technical" className="underline text-indigo-700 dark:text-indigo-400" prefetch={false}>الماسح الفني للأسهم</Link>
+          <Link href="/stocks" className="underline text-zinc-700 dark:text-zinc-300" prefetch={false}>دليل الأسهم المصرية والسعودية</Link>
         </nav>
       </section>
     </>

@@ -7,6 +7,7 @@ import StockLogo from "@/components/StockLogo";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 interface UserNotificationRow {
   id: string;
@@ -74,7 +75,7 @@ export default function NotificationBell() {
       }
       if (heldQty.size === 0) return;
 
-      const res = await fetch("/api/market/dividends?market=egx");
+      const res = await hfPublicFetch("/api/market/dividends?market=egx", undefined, { cacheTtlMs: 300_000 });
       if (!res.ok) return;
       const cal = await res.json();
       const divs = Array.isArray(cal?.dividends) ? cal.dividends : [];
@@ -242,6 +243,7 @@ export default function NotificationBell() {
                   href="/dividends"
                   onClick={() => setOpen(false)}
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#FFE600] text-black text-xs font-black hover:bg-yellow-300 transition-colors"
+                  prefetch={false}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>{isAr ? "استعرض تقويم الكوبونات القادمة" : "Browse Upcoming Dividends"}</span>
@@ -262,6 +264,7 @@ export default function NotificationBell() {
                     className={`block p-3.5 hover:bg-zinc-50 dark:hover:bg-zinc-900/80 transition-colors ${
                       !n.is_read ? "bg-emerald-500/[0.06]" : ""
                     }`}
+                    prefetch={false}
                   >
                     <div className="flex items-start gap-3">
                       {sym ? (
@@ -320,6 +323,7 @@ export default function NotificationBell() {
               href="/dividends"
               onClick={() => setOpen(false)}
               className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline"
+              prefetch={false}
             >
               <span>{isAr ? "تقويم الكوبونات (4 أسواق)" : "Dividend Calendar"}</span>
               <ArrowUpLeft className="w-3.5 h-3.5" />
@@ -328,6 +332,7 @@ export default function NotificationBell() {
               href="/profile#portfolio"
               onClick={() => setOpen(false)}
               className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-colors"
+              prefetch={false}
             >
               {isAr ? "إدارة محفظتي" : "My Portfolio"}
             </Link>

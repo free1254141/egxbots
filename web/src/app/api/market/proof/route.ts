@@ -29,7 +29,7 @@ type ProofStats = {
 async function fetchProofStats(market: MarketMode): Promise<ProofStats> {
   const db = getMarketSupabaseServiceClient(market, { cacheMarketData: true });
   const exchange = getMarketExchange(market);
-  const [all, wins, losses] = await Promise.all([
+  const [all, wins, losses, cancelled] = await Promise.all([
     db
       .from("scan_results")
       .select("id", { count: "exact", head: true })
@@ -47,14 +47,21 @@ async function fetchProofStats(market: MarketMode): Promise<ProofStats> {
       .eq("is_public", true)
       .eq("exchange", exchange)
       .eq("status", "loss"),
+    db
+      .from("scan_results")
+      .select("id", { count: "exact", head: true })
+      .eq("is_public", true)
+      .eq("exchange", exchange)
+      .eq("status", "cancelled"),
   ]);
 
   const winCount = wins.count || 0;
   const lossCount = losses.count || 0;
   const closed = winCount + lossCount;
+  const totalRecommendations = Math.max(0, (all.count || 0) - (cancelled.count || 0));
 
   return {
-    recommendations: all.count || 0,
+    recommendations: totalRecommendations,
     closed,
     win_rate: closed > 0 ? Math.round((winCount / closed) * 100) : null,
   };

@@ -201,6 +201,7 @@ export default function QuickProfitGuideModal({
                   href={current.actionHref}
                   onClick={onClose}
                   className="inline-flex items-center gap-1.5 text-xs font-black text-black dark:text-white hover:text-amber-500 underline underline-offset-4"
+                  prefetch={false}
                 >
                   <span>{current.actionLabel}</span>
                   <ExternalLink className="w-3.5 h-3.5" />

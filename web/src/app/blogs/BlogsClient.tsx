@@ -1009,6 +1009,7 @@ export default function BlogsPage() {
                 key={guide.href}
                 href={guide.href}
                 className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+                prefetch={false}
               >
                 <div>
                   <span className={`inline-block px-2.5 py-1 border-2 border-black ${guide.badgeBg} text-black text-xs font-black mb-3`}>

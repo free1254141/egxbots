@@ -113,6 +113,7 @@ export function ActiveAISignals({
                                 <Link
                                     href="/pricing"
                                     className="px-6 py-3 border-2 border-black bg-black text-[#FFE600] hover:bg-zinc-800 text-xs sm:text-sm font-black shadow-[3px_3px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all text-center flex items-center justify-center gap-2"
+                                    prefetch={false}
                                 >
                                     <Zap className="w-4 h-4 text-amber-400" />
                                     <span>{isAr ? "الترقية إلى باقة PRO الآن" : "Upgrade to PRO Now"}</span>
@@ -120,6 +121,7 @@ export function ActiveAISignals({
                                 <Link
                                     href="/login"
                                     className="px-6 py-2.5 border-2 border-black bg-white hover:bg-zinc-100 text-black text-xs font-black shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all text-center"
+                                    prefetch={false}
                                 >
                                     {isAr ? "تسجيل الدخول للمشتركين" : "Sign In to Access"}
                                 </Link>

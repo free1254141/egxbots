@@ -62,7 +62,17 @@ from api.stock_ai import (
 from api.train_exchange_model import add_market_context, add_massive_features
 from api.trap_detector import detect_daily_traps
 from api.adaptive_model_selector import AdaptiveModelSelector
-from api.recommendation_policy import POLICY_VERSION, candidate_assessment, evaluate_bars, valid_candidate
+from api.corporate_actions_engine import (
+    load_price_adjusting_action_dates,
+    verify_symbol_corporate_action_live,
+)
+from api.recommendation_policy import (
+    CorporateActionDiscontinuity,
+    POLICY_VERSION,
+    candidate_assessment,
+    evaluate_bars,
+    valid_candidate,
+)
 from api.saudi_train_models import (
     SAUDI_PROFIT_PROTECTION_POLICY,
     _build_bars_dict,
@@ -1132,6 +1142,11 @@ def _build_scan_results_and_backtest(
     mkt_sma20_map = {ts.strftime("%Y-%m-%d"): float(mkt_sma20.iloc[i]) for i, ts in enumerate(market_df.index)}
 
     bars_dict, date_pos = _build_bars_dict(bars_by_symbol, min_date="2023-07-01")
+    try:
+        saudi_action_dates = load_price_adjusting_action_dates(sb, EXCHANGE)
+    except Exception as ca_err:
+        print(f"  [WARN] Could not preload Saudi corporate actions: {ca_err}")
+        saudi_action_dates = {}
     recent_dates = set(sorted(df_win["date_str"].unique())[-5:])
 
     eval_batch_id = str(uuid.uuid4())
@@ -1229,23 +1244,63 @@ def _build_scan_results_and_backtest(
             if b_idx is None:
                 continue
 
-            ev = evaluate_bars(
-                entry=entry_close,
-                target=target_price,
-                stop=stop_loss,
-                bars=sym_bars[b_idx:],
-                entry_date=d_str,
-                cursor=d_str,
-                max_sessions=20,
-                profit_protection=SAUDI_PROFIT_PROTECTION_POLICY,
-            )
+            sym_action_dates = saudi_action_dates.setdefault(sym, [])
+            ev = None
+            unconfirmed_ca = None
+            for _attempt in range(3):
+                try:
+                    ev = evaluate_bars(
+                        entry=entry_close,
+                        target=target_price,
+                        stop=stop_loss,
+                        bars=sym_bars[b_idx:],
+                        entry_date=d_str,
+                        cursor=d_str,
+                        max_sessions=20,
+                        profit_protection=SAUDI_PROFIT_PROTECTION_POLICY,
+                        corporate_action_dates=sym_action_dates,
+                        rebase_corporate_actions=True,
+                    )
+                    unconfirmed_ca = None
+                    break
+                except CorporateActionDiscontinuity as ca:
+                    if not ca.confirmed:
+                        try:
+                            verified = verify_symbol_corporate_action_live(sb, sym, EXCHANGE, ca.day)
+                        except Exception:
+                            verified = None
+                        if verified and verified.get("confirmed"):
+                            v_date = str(verified.get("date") or ca.day)[:10]
+                            if v_date not in sym_action_dates:
+                                sym_action_dates.append(v_date)
+                            continue
+                    unconfirmed_ca = ca
+                    break
+
+            if ev is None:
+                if existing_by_key.get((sym, d_str)) is None or unconfirmed_ca is None:
+                    print(f"[SAUDI] skip {sym} {d_str}: unconfirmed corporate action")
+                    continue
+                ev = {
+                    "status": "open",
+                    "exit_price": None,
+                    "last_close": unconfirmed_ca.prior_close,
+                    "profit_loss_pct": 0.0,
+                    "closed_on": None,
+                    "cursor": unconfirmed_ca.day,
+                    "sessions_held": 0,
+                    "exit_reason": "unconfirmed_corporate_action_discontinuity",
+                    "adjustments": [],
+                }
             status = str(ev["status"])
-            decimals = 3 if entry_close < 2.0 else 2
-            last_px = float(ev.get("last_close") or entry_close)
+            effective_entry = float(ev.get("entry_price") or entry_close)
+            effective_target = float(ev.get("target_price") or target_price)
+            decimals = 3 if effective_entry < 2.0 else 2
+            last_px = float(ev.get("last_close") or effective_entry)
             pl_pct = (
                 round(float(ev["profit_loss_pct"]), 2)
                 if ev.get("profit_loss_pct") is not None
-                else round(((last_px - entry_close) / entry_close) * 100.0, 2)
+                else round(((last_px - effective_entry) / effective_entry) * 100.0, 2)
             )
             exit_date = ev.get("closed_on") or latest_date
             cooldown_until[sym] = exit_date
@@ -1283,6 +1338,18 @@ def _build_scan_results_and_backtest(
 
             existing_id = existing_by_key.get((sym, d_str))
             resolved_last_close = last_px if status == "open" else (exit_px_val if exit_px_val is not None else last_px)
+            eval_meta: Dict[str, Any] = {
+                "last_evaluated_date": exit_date if status != "open" else latest_date,
+                "closed_on": exit_date if status != "open" else None,
+                "cursor": ev.get("cursor") or latest_date,
+                "sessions_held": int(ev.get("sessions_held") or 0),
+                "exit_price": exit_px_val,
+                "exit_reason": ev.get("exit_reason"),
+                "profit_loss_pct": pl_pct,
+            }
+            if ev.get("rebased"):
+                eval_meta["rebased"] = True
+                eval_meta["rebase_factor"] = ev.get("rebase_factor")
             row_dict: Dict[str, Any] = {
                 "batch_id": open_batch_id if status == "open" else eval_batch_id,
                 "user_id": None,
@@ -1295,8 +1362,8 @@ def _build_scan_results_and_backtest(
                 "precision": round(shown_precision, 4),
                 "signal": "BUY",
                 "status": status,
-                "entry_price": round(entry_close, decimals),
-                "target_price": round(target_price, decimals),
+                "entry_price": round(effective_entry, decimals),
+                "target_price": round(effective_target, decimals),
                 "stop_loss": effective_stop,
                 "exit_price": exit_px_val,
                 "profit_loss_pct": pl_pct,
@@ -1334,15 +1401,7 @@ def _build_scan_results_and_backtest(
                         "technical_filter": reason_tf,
                         "tasi_regime": tasi_regime,
                     },
-                    "evaluation": {
-                        "last_evaluated_date": exit_date if status != "open" else latest_date,
-                        "closed_on": exit_date if status != "open" else None,
-                        "cursor": ev.get("cursor") or latest_date,
-                        "sessions_held": int(ev.get("sessions_held") or 0),
-                        "exit_price": exit_px_val,
-                        "exit_reason": ev.get("exit_reason"),
-                        "profit_loss_pct": pl_pct,
-                    },
+                    "evaluation": eval_meta,
                 },
                 "created_at": f"{d_str}T12:30:00+00:00",
                 "updated_at": f"{exit_date}T12:30:00+00:00" if status != "open" else now_iso,

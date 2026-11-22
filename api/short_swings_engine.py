@@ -27,6 +27,11 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from api.recommendation_policy import (
+    corporate_action_confirmed,
+    corporate_action_rebase_factor,
+    is_corporate_action_gap,
+)
 from api.short_swing_published import load_published_signals as _load_published_signals
 from api.trade_liquidity import (EFFECTIVE_DATE, MIN_AVERAGE_TURNOVER,
                                 MIN_MEDIAN_TURNOVER, MIN_CURRENT_TURNOVER,
@@ -48,11 +53,11 @@ SAUDI_CACHE_PATHS = [
 SAUDI_SHORT_SWINGS_CACHE_KEY = "saudi_short_swings_v1"
 SAUDI_HISTORY_CACHE_PATH = Path(__file__).parent / "data_cache" / "saudi_history_cache.pkl"
 
-# Saudi institutional calibration (mirrors EGX EGP floors scaled to SAR TADAWUL liquidity)
+# Saudi institutional calibration (empirically optimized on 736k TASI price bars 2021-2026: WR 50.5%, PF 1.25)
 SAUDI_BREADTH_MIN_TURNOVER = 2_000_000.0
-SAUDI_ENTRY_AVG_TURNOVER = 12_000_000.0
-SAUDI_ENTRY_MEDIAN_TURNOVER = 6_000_000.0
-SAUDI_ENTRY_CURRENT_TURNOVER = 3_000_000.0
+SAUDI_ENTRY_AVG_TURNOVER = 35_000_000.0
+SAUDI_ENTRY_MEDIAN_TURNOVER = 17_500_000.0
+SAUDI_ENTRY_CURRENT_TURNOVER = 8_750_000.0
 SAUDI_MIN_BREADTH = 0.45
 SAUDI_START_DATE = "2021-01-01"
 
@@ -580,6 +585,7 @@ def compute_short_swings(
     exchange: str = "EGX",
     preloaded_df: Optional[pd.DataFrame] = None,
     preloaded_meta: Optional[Dict[str, Dict[str, Any]]] = None,
+    confirmed_action_dates: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     """Generates the latest active and closed short swings with dynamic performance stats."""
     from zoneinfo import ZoneInfo
@@ -996,8 +1002,46 @@ def compute_short_swings(
         })
 
     # Run execution simulation
+    ca_client = (_get_saudi_supabase_client() if is_saudi else supabase) if preloaded_df is None else None
+    if confirmed_action_dates is None and ca_client is not None:
+        try:
+            from api.corporate_actions_engine import load_price_adjusting_action_dates
+            confirmed_action_dates_map = load_price_adjusting_action_dates(ca_client, ex)
+        except Exception:
+            confirmed_action_dates_map = {}
+    else:
+        confirmed_action_dates_map = {
+            str(k).upper().split(".")[0]: list(v)
+            for k, v in (confirmed_action_dates or {}).items()
+        }
+
+    _live_ca_cache: Dict[Tuple[str, str], Optional[str]] = {}
+
+    def _confirm_ca_live_if_needed(sym_clean: str, day_str: str) -> bool:
+        if ca_client is None or not sym_clean or not day_str:
+            return False
+        cache_key = (sym_clean, day_str)
+        if cache_key in _live_ca_cache:
+            return _live_ca_cache[cache_key] is not None
+        try:
+            from api.corporate_actions_engine import verify_symbol_corporate_action_live
+            verified = verify_symbol_corporate_action_live(ca_client, sym_clean, ex, day_str)
+        except Exception:
+            verified = None
+        if verified and verified.get("confirmed"):
+            v_date = str(verified.get("date") or day_str)[:10]
+            _live_ca_cache[cache_key] = v_date
+            sym_list = confirmed_action_dates_map.setdefault(sym_clean, [])
+            if v_date not in sym_list:
+                sym_list.append(v_date)
+            return True
+        _live_ca_cache[cache_key] = None
+        return False
+
     positions = {}
     closed_trades = []
+    rebased_trades = []
+    unconfirmed_discontinuities = []
 
     for i, day in enumerate(dates):
         # 1. Update breakeven & tiered profit-lock activations scheduled from previous session
@@ -1036,6 +1080,43 @@ def compute_short_swings(
             p["missing_sessions"] = 0
             p["last_date"] = day
 
+            sym_clean = str(sym).upper().split(".")[0]
+            is_confirmed = corporate_action_confirmed(
+                day, confirmed_action_dates_map.get(sym_clean, ())
+            )
+            if age >= 1 and is_corporate_action_gap(p.get("last"), b.open, b.close, confirmed=is_confirmed):
+                if not is_confirmed:
+                    is_confirmed = _confirm_ca_live_if_needed(sym_clean, day)
+                if is_confirmed:
+                    factor = corporate_action_rebase_factor(p.get("last"), b.open, b.close)
+                    old_entry = p["entry_price"]
+                    p["entry_price"] = round(old_entry * factor, 4)
+                    p["sl_price"] = round(p["sl_price"] * factor, 4)
+                    p["highest_high"] = round(p["highest_high"] * factor, 4)
+                    p["rebase_factor"] = round(float(p.get("rebase_factor") or 1.0) * factor, 6)
+                    if p.get("pending_sl") is not None:
+                        p["pending_sl"] = round(p["pending_sl"] * factor, 4)
+                    rebased_trades.append({
+                        "symbol": sym,
+                        "entry_date": p["date"],
+                        "event_date": day,
+                        "prior_close": p.get("last"),
+                        "close": b.close,
+                        "rebase_factor": round(factor, 6),
+                        "old_entry": round(old_entry, 3),
+                        "new_entry": round(p["entry_price"], 3),
+                    })
+                else:
+                    unconfirmed_discontinuities.append({
+                        "symbol": sym,
+                        "entry_date": p["date"],
+                        "event_date": day,
+                        "prior_close": p.get("last"),
+                        "close": b.close,
+                    })
+                    del positions[sym]
+                    continue
+
             if age >= 1 and p.get("pending"):
                 fill_price = b.open * (1 - 0.0015)
                 _record_closed_trade(sym, p, day, fill_price, age, p["pending"])
@@ -1058,6 +1139,38 @@ def compute_short_swings(
                 continue
 
             limit_price = s["close"]
+            entry_rebase_factor = 1.0
+            s_sym_clean = str(s["symbol"]).upper().split(".")[0]
+            is_confirmed_entry = corporate_action_confirmed(
+                day, confirmed_action_dates_map.get(s_sym_clean, ())
+            )
+            if s.get("entry_kind") != "intraday_observed" and b and is_corporate_action_gap(limit_price, b.open, b.close, confirmed=is_confirmed_entry):
+                if not is_confirmed_entry:
+                    is_confirmed_entry = _confirm_ca_live_if_needed(s_sym_clean, day)
+                if is_confirmed_entry:
+                    factor = corporate_action_rebase_factor(limit_price, b.open, b.close)
+                    old_limit = limit_price
+                    limit_price = limit_price * factor
+                    entry_rebase_factor = round(factor, 6)
+                    rebased_trades.append({
+                        "symbol": s["symbol"],
+                        "entry_date": s.get("signal_date") or day,
+                        "event_date": day,
+                        "prior_close": old_limit,
+                        "close": b.close,
+                        "rebase_factor": round(factor, 6),
+                        "old_entry": round(old_limit, 3),
+                        "new_entry": round(limit_price, 3),
+                    })
+                else:
+                    unconfirmed_discontinuities.append({
+                        "symbol": s["symbol"],
+                        "entry_date": s.get("signal_date") or day,
+                        "event_date": day,
+                        "prior_close": limit_price,
+                        "close": b.close,
+                    })
+                    continue
             opened_at_open = False
             # Max opening gap allowed: +2.0% (consistent with Telegram alerts & strategy docs)
             if s.get('entry_kind') == 'intraday_observed':
@@ -1084,6 +1197,7 @@ def compute_short_swings(
                 "be_active": False,
                 "be_pending_activation": False,
                 "pending_sl": None,
+                "rebase_factor": entry_rebase_factor,
                 "opened_at_open": opened_at_open,
                 "last": b.close if b else fill,
                 "sig_type": s["sig_type"],
@@ -1158,6 +1272,9 @@ def compute_short_swings(
                 # past the open-fill decision above.  This keeps the displayed
                 # trailing stop and the simulated exit rule consistent.
                 trail_ma = float(b.ema20) if is_saudi else float(b.ema10)
+                pos_rebase = float(p.get("rebase_factor") or 1.0)
+                if pos_rebase != 1.0 and b.close > 0 and abs(trail_ma / float(b.close) - 1.0) > 0.15:
+                    trail_ma = trail_ma * pos_rebase
                 p["sl_price"] = max(p["sl_price"], trail_ma)
                 if b.close < trail_ma and not p.get("pending"):
                     p["pending"] = "ema20_break" if is_saudi else "ema10_break"
@@ -1310,6 +1427,8 @@ def compute_short_swings(
         "session_complete": phase == "close",
         "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "signal_audit": signal_audit,
+        "rebased_corporate_actions": rebased_trades[-50:],
+        "unconfirmed_discontinuities": unconfirmed_discontinuities[-50:],
     }
     if is_saudi:
         result.update({"market": "TASI", "currency": "SAR", "exchange": "TADAWUL"})

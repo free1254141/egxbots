@@ -84,6 +84,7 @@ export default function RefundClient() {
           <Link
             href="/pricing"
             className="inline-flex items-center gap-2 h-12 px-6 border-4 border-black dark:border-white bg-emerald-400 text-black font-black uppercase tracking-widest shadow-[3px_3px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+            prefetch={false}
           >
             {isAr ? "العودة إلى الأسعار" : "Back to Pricing"}
           </Link>

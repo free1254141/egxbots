@@ -481,6 +481,7 @@ export default function LandingClient() {
                                 height={48}
                                 className="w-10 h-10 sm:w-12 sm:h-12 object-contain"
                                 priority
+                                unoptimized
                             />
                         </div>
                         <h1 className="text-4xl sm:text-6xl md:text-8xl font-black tracking-tighter text-black dark:text-white uppercase drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:drop-shadow-[4px_4px_0px_rgba(255,255,255,0.15)]">
@@ -551,6 +552,7 @@ export default function LandingClient() {
                             href={user ? "/scanner/backtests" : "/signup"}
                             onClick={() => trackEvent("hero_cta_click", { variant: "primary", signed_in: Boolean(user?.id) })}
                             className="h-16 px-8 border-4 border-black dark:border-white neobrutal-bg-yellow text-black font-black uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 flex items-center justify-center gap-3 text-base sm:text-lg"
+                            prefetch={false}
                         >
                             {user ? (isAr ? "افتح أفضل الأسهم" : "Open Top Stocks") : (isAr ? "ابدأ مجاناً — بدون كارت" : "Start Free — No Card")}
                             <ArrowRight className={`w-5 h-5 ${isAr ? "rotate-180" : ""}`} />
@@ -559,6 +561,7 @@ export default function LandingClient() {
                             href="/scanner/backtests"
                             onClick={() => trackEvent("hero_cta_click", { variant: "secondary" })}
                             className="h-16 px-6 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 text-black dark:text-white font-black uppercase tracking-wider text-sm shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-100 flex items-center justify-center gap-2"
+                            prefetch={false}
                         >
                             {isAr ? "شوف توصيات النهاردة" : "See Today's Picks"}
                         </Link>
@@ -673,6 +676,7 @@ export default function LandingClient() {
                         <Link
                             href={user ? "/scanner/backtests" : "/signup"}
                             className="h-16 px-8 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 text-black dark:text-white font-black uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_rgba(255,255,255,1)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100 cursor-pointer flex items-center justify-center gap-3 text-base sm:text-xl"
+                            prefetch={false}
                         >
                             {user ? (isAr ? "أفضل الأسهم" : "View Top Stocks") : (isAr ? "أنشئ حساباً مجانياً" : "Create Free Account")}
                             <ArrowRight className={`w-6 h-6 transition-transform ${isAr ? "rotate-180" : ""}`} />
@@ -740,7 +744,7 @@ export default function LandingClient() {
                                         : "This is a 15-day delayed view. Some recent recommendations are hidden. Subscribe to Pro for all recommendations and live data."}
                                 </span>
                             </div>
-                            <Link href="/pricing" className="inline-flex shrink-0 items-center justify-center border-2 border-black bg-black px-4 py-2 text-white font-black uppercase tracking-wide hover:bg-zinc-800">
+                            <Link href="/pricing" className="inline-flex shrink-0 items-center justify-center border-2 border-black bg-black px-4 py-2 text-white font-black uppercase tracking-wide hover:bg-zinc-800" prefetch={false}>
                                 {isAr ? "اشترك في Pro" : "Subscribe to Pro"}
                             </Link>
                         </div>
@@ -756,6 +760,7 @@ export default function LandingClient() {
                         <Link
                             href="/scanner/backtests"
                             className="inline-flex items-center gap-3 px-8 py-5 border-4 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black font-black text-lg uppercase shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_rgba(255,255,255,1)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100 cursor-pointer"
+                            prefetch={false}
                         >
                             {isAr ? "عرض الترتيب الكامل للأسهم ←" : (isSaudi ? "See the full Saudi TASI Stocks ranking →" : "See the full EGX Stocks ranking →")}
                         </Link>
@@ -955,6 +960,7 @@ export default function LandingClient() {
                                 <Link
                                     href="/scanner/backtests?tab=similarity"
                                     className="inline-flex items-center gap-2 px-6 py-3 border-4 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black font-black text-sm uppercase shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_rgba(255,255,255,1)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100 cursor-pointer"
+                                    prefetch={false}
                                 >
                                     {isAr ? "عرض الإشارات الحية" : "Open Live Signals"}
                                     <ArrowRight className={`w-4 h-4 ${isAr ? "rotate-180" : ""}`} />
@@ -1035,6 +1041,7 @@ export default function LandingClient() {
                             <Link 
                                 href="/scanner/backtests" 
                                 className="text-sm font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5 mt-4"
+                                prefetch={false}
                             >
                                 {isAr ? "شاهد أفضل الأسهم اليوم" : "See Today's Top Stocks"}
                                 <ArrowRight className={`w-4 h-4 ${isAr ? 'rotate-180' : ''}`} />
@@ -1102,6 +1109,7 @@ export default function LandingClient() {
                             <Link 
                                 href="/scanner/backtests" 
                                 className="text-sm font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5 mt-4"
+                                prefetch={false}
                             >
                                 {isAr ? "شاهد أفضل الأسهم اليوم" : "See Today's Top Stocks"}
                                 <ArrowRight className={`w-4 h-4 ${isAr ? 'rotate-180' : ''}`} />
@@ -1191,6 +1199,7 @@ export default function LandingClient() {
                         <Link
                             href="/news"
                             className="h-12 px-6 border-4 border-black dark:border-white bg-black dark:bg-white text-white dark:text-black font-black text-sm uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_rgba(255,255,255,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 cursor-pointer inline-flex items-center justify-center gap-2"
+                            prefetch={false}
                         >
                             {isAr ? "عرض جميع الأخبار" : "View All News"}
                             <ArrowRight className={`w-4 h-4 ${isAr ? 'rotate-180' : ''}`} />
@@ -1370,6 +1379,7 @@ export default function LandingClient() {
                                     <Link
                                         href="/scanner/market"
                                         className="inline-flex items-center gap-2 px-6 py-3 bg-black dark:bg-white text-white dark:text-black font-black text-[11px] uppercase tracking-widest border-2 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,0.4)] hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+                                        prefetch={false}
                                     >
                                         {isAr ? "عرض التحليل" : "Open Analysis"}
                                         <ArrowRight className={`w-4 h-4 ${isAr ? 'rotate-180' : ''}`} />
@@ -1521,6 +1531,7 @@ export default function LandingClient() {
                                         href={`/pricing?plan=${plan.id}`}
                                         onClick={() => trackEvent("landing_pricing_click", { plan: plan.id })}
                                         className="mt-6 h-12 border-4 border-black dark:border-white neobrutal-bg-yellow text-black font-black uppercase tracking-wider text-xs sm:text-sm flex items-center justify-center gap-2 hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-100"
+                                        prefetch={false}
                                     >
                                         {isAr ? "اختار الباقة" : "Choose plan"}
                                         <ArrowRight className={`w-4 h-4 ${isAr ? "rotate-180" : ""}`} />
@@ -1534,6 +1545,7 @@ export default function LandingClient() {
                                 href="/pricing"
                                 onClick={() => trackEvent("landing_pricing_click", { plan: "all" })}
                                 className="inline-block text-sm font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 hover:underline"
+                                prefetch={false}
                             >
                                 {isAr ? "شوف المقارنة الكاملة والتفاصيل ←" : "See the full comparison →"}
                             </Link>
@@ -1577,6 +1589,7 @@ export default function LandingClient() {
                             <Link
                                 href={user ? "/scanner/backtests" : "/signup"}
                                 className="h-16 px-10 border-4 border-black bg-black text-white font-black text-base sm:text-lg shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100 cursor-pointer inline-flex items-center justify-center gap-3"
+                                prefetch={false}
                             >
                                 {isAr ? "ابدأ الآن مجاناً" : "Start Now For Free"}
                                 <ArrowRight className={`w-5 h-5 transition-transform ${isAr ? "rotate-180" : ""}`} />
@@ -1624,6 +1637,7 @@ export default function LandingClient() {
                             href={user ? "/scanner/backtests" : "/signup"}
                             onClick={() => trackEvent("sticky_cta_click", { signed_in: Boolean(user?.id) })}
                             className="flex-1 h-12 border-4 border-black dark:border-white neobrutal-bg-yellow text-black font-black uppercase tracking-wider text-xs sm:text-sm flex items-center justify-center gap-2"
+                            prefetch={false}
                         >
                             {user ? (isAr ? "افتح أفضل الأسهم" : "Open Top Stocks") : (isAr ? "ابدأ مجاناً — بدون كارت" : "Start Free — No Card")}
                             <ArrowRight className={`w-4 h-4 ${isAr ? "rotate-180" : ""}`} />

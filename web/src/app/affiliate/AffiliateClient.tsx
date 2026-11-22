@@ -251,6 +251,7 @@ export default function AffiliateClient() {
               <Link
                 href="/login?redirect=%2Faffiliate"
                 className="inline-flex items-center gap-2 border-4 border-black dark:border-white bg-emerald-500 hover:bg-emerald-600 text-black font-black px-8 py-4 text-sm uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all"
+                prefetch={false}
               >
                 <span>{isAr ? "تسجيل الدخول واستلام رابط الإحالة" : "Sign In & Get Referral Link"}</span>
                 {isAr ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}

@@ -22,6 +22,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isPro } from "@/lib/ai/plan-gate";
 import type { TrapsSnapshot, TrapSignalRow } from "@/app/api/scan/traps/route";
 import type { SignalPerformancePayload } from "@/app/api/scan/signal-performance/route";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 export default function TrapDetector() {
   const { language } = useLanguage();
@@ -92,7 +93,7 @@ export default function TrapDetector() {
     setShowReview(false);
 
     const requests: Promise<unknown>[] = [
-      fetch(`/api/scan/traps?market=${market}`, { signal: controller.signal })
+      hfPublicFetch(`/api/scan/traps?market=${market}`, { signal: controller.signal }, { cacheTtlMs: 120_000 })
         .then((res) => {
           if (!res.ok) throw new Error("Failed");
           return res.json();

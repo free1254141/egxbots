@@ -337,12 +337,14 @@ export default function B2BDashboardClient() {
               <Link
                 href="/login?redirect=/b2b/dashboard"
                 className="border-3 border-black dark:border-white bg-emerald-500 hover:bg-emerald-600 text-black font-black px-6 py-3 text-xs uppercase shadow-[3px_3px_0px_#000] active:translate-y-0.5"
+                prefetch={false}
               >
                 {isAr ? "تسجيل الدخول الآن" : "Sign In Now"}
               </Link>
               <Link
                 href="/b2b"
                 className="border-3 border-black dark:border-white bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-white font-black px-6 py-3 text-xs uppercase shadow-[3px_3px_0px_#000] active:translate-y-0.5"
+                prefetch={false}
               >
                 {isAr ? "استعراض صفحة عروض الشركات (B2B)" : "Browse B2B Solutions & Plans"}
               </Link>
@@ -417,6 +419,7 @@ export default function B2BDashboardClient() {
                 <Link
                   href="/pricing?mode=b2b"
                   className="inline-flex items-center gap-2 border-2 border-black bg-emerald-500 hover:bg-emerald-600 text-black font-black px-4 py-2.5 text-xs uppercase shadow-[2px_2px_0px_#000] active:translate-y-0.5 mt-2"
+                  prefetch={false}
                 >
                   <span>{isAr ? "عرض باقات القنوات والأسعار" : "View B2B Plans & Pricing"}</span>
                   <ArrowRight className={`w-3.5 h-3.5 ${isAr ? "rotate-180" : ""}`} />

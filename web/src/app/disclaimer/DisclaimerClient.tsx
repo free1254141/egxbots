@@ -129,6 +129,7 @@ export default function DisclaimerClient() {
           <Link
             href="/"
             className="h-14 px-6 border-4 border-black bg-black text-white text-xs font-black uppercase tracking-widest hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 cursor-pointer flex items-center justify-center gap-2"
+            prefetch={false}
           >
             {isAr ? "الرئيسية" : "Home"}
             <ArrowRight
@@ -138,6 +139,7 @@ export default function DisclaimerClient() {
           <Link
             href="/legal-status"
             className="h-14 px-6 border-4 border-black bg-amber-300 text-black text-xs font-black uppercase tracking-widest hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 cursor-pointer flex items-center justify-center gap-2"
+            prefetch={false}
           >
             <Scale className="w-4 h-4" />
             {isAr ? "الموقف القانوني والتنظيمي" : "Legal & Regulatory Status"}
@@ -145,6 +147,7 @@ export default function DisclaimerClient() {
           <Link
             href="/scanner/technical"
             className="h-14 px-6 border-4 border-black bg-white text-black text-xs font-black uppercase tracking-widest hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 cursor-pointer flex items-center justify-center"
+            prefetch={false}
           >
             {isAr ? "ابدأ الفحص الفني" : "Technical Scanner"}
           </Link>

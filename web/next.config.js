@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  images: {
+    minimumCacheTTL: 2592000,
+  },
 
   async redirects() {
     return [
@@ -12,6 +15,16 @@ const nextConfig = {
       {
         source: '/portfolio',
         destination: '/profile#portfolio',
+        permanent: false,
+      },
+      {
+        source: '/stocks/null',
+        destination: '/stocks',
+        permanent: false,
+      },
+      {
+        source: '/null',
+        destination: '/',
         permanent: false,
       },
       {
@@ -295,12 +308,12 @@ compress: true,
         ],
       },
       {
-        // Static pricing page (revalidate in browser on deploy, keep 7d Vercel Edge CDN cache)
+        // Static pricing page (cache in browser 5m, keep 7d Vercel Edge CDN cache)
         source: '/pricing',
         headers: [
           {
             key: 'Cache-Control',
-            value: 'public, max-age=0, must-revalidate',
+            value: 'public, max-age=300, s-maxage=604800, stale-while-revalidate=86400',
           },
           {
             key: 'Vercel-CDN-Cache-Control',
@@ -309,6 +322,42 @@ compress: true,
           {
             key: 'CDN-Cache-Control',
             value: 'public, s-maxage=604800, stale-while-revalidate=86400',
+          },
+        ],
+      },
+      {
+        source: '/logos/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+      {
+        source: '/favicon_io/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+      {
+        source: '/manifest.json',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=86400, stale-while-revalidate=604800',
+          },
+        ],
+      },
+      {
+        source: '/:file(favicon\\.svg|favicon\\.ico|palestine-watermelon\\.svg|opengraph-image\\.png|dashboard_preview\\.png)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=604800, stale-while-revalidate=2592000',
           },
         ],
       },

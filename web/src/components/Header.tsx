@@ -604,7 +604,7 @@ export default function Header() {
                             className="w-full h-full object-contain object-top block"
                         />
                     </div>
-                    <Link href="/" className="group flex items-center gap-2 sm:gap-2.5 min-w-0">
+                    <Link href="/" className="group flex items-center gap-2 sm:gap-2.5 min-w-0" prefetch={false}>
                         <div className="relative bg-white p-1 rounded-none border-4 border-black dark:border-white transition-all duration-300 group-hover:scale-110 group-hover:rotate-6 flex-shrink-0 flex items-center justify-center shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.5)]">
                                 <Image
                                     src="/favicon_io/apple-touch-icon.png"
@@ -613,6 +613,7 @@ export default function Header() {
                                     height={32}
                                     className="object-contain w-7 h-7 sm:w-8 sm:h-8"
                                     priority
+                                    unoptimized
                                 />
                             </div>
                             <div className="hidden min-[420px]:flex flex-col shrink-0 header-title">
@@ -645,6 +646,7 @@ export default function Header() {
                                             animationDelay: `${300 + idx * 50}ms`,
                                             color: isActive ? (theme === "dark" ? "#000000" : "#ffffff") : undefined
                                         }}
+                                        prefetch={false}
                                     >
                                         {item.icon}
                                         <span className="hidden 2xl:inline-flex items-center gap-1.5">
@@ -746,16 +748,16 @@ export default function Header() {
                                             <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">{t("account.label")}</p>
                                             <p className="text-xs font-medium text-zinc-300 truncate">{user.email}</p>
                                         </div>
-                                        <Link href="/profile" className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 rounded-xl transition-all">
+                                        <Link href="/profile" className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 rounded-xl transition-all" prefetch={false}>
                                             <User className="h-4 w-4" />
                                             {t("nav.profile")}
                                         </Link>
-                                        <Link href="/profile#portfolio" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-emerald-400 hover:text-white hover:bg-white/5 rounded-xl transition-all">
+                                        <Link href="/profile#portfolio" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-emerald-400 hover:text-white hover:bg-white/5 rounded-xl transition-all" prefetch={false}>
                                             <Wallet className="h-4 w-4 text-emerald-400" />
                                             {language === "ar" ? "المحفظة الاستثمارية" : "My Portfolio"}
                                         </Link>
                                         {!isGccChatOnly && (
-                                        <Link href="/b2b/dashboard" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-emerald-400 hover:text-white hover:bg-white/5 rounded-xl transition-all">
+                                        <Link href="/b2b/dashboard" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-emerald-400 hover:text-white hover:bg-white/5 rounded-xl transition-all" prefetch={false}>
                                             <Bot className="h-4 w-4 text-emerald-400" />
                                             {language === "ar" ? "لوحة ترخيص البوت (B2B)" : "B2B Bot Dashboard"}
                                         </Link>
@@ -775,6 +777,7 @@ export default function Header() {
                             <Link
                                 href="/login"
                                 className="app-primary-action hidden md:flex h-9 px-3 md:px-5 items-center rounded-xl text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap"
+                                prefetch={false}
                             >
                                 {t("auth.login")}
                             </Link>
@@ -949,6 +952,7 @@ export default function Header() {
                                                     ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-2 border-amber-500/30" 
                                                     : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-2 border-transparent"
                                             }`}
+                                            prefetch={false}
                                         >
                                             {item.icon}
                                             <span className="flex items-center gap-2">
@@ -980,12 +984,12 @@ export default function Header() {
                                     <span>{language === "ar" ? "English" : "العربية"}</span>
                                 </button>
                                 {!user ? (
-                                    <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="flex items-center justify-center h-11 px-5 rounded-xl bg-amber-500 text-black text-sm font-black uppercase flex-1 border-2 border-black active:scale-95 transition-transform shadow-[3px_3px_0px_0px_#000]">
+                                    <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="flex items-center justify-center h-11 px-5 rounded-xl bg-amber-500 text-black text-sm font-black uppercase flex-1 border-2 border-black active:scale-95 transition-transform shadow-[3px_3px_0px_0px_#000]" prefetch={false}>
                                         {t("auth.login")}
                                     </Link>
                                 ) : (
                                     <>
-                                        <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className="flex items-center justify-center h-11 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-700 text-sm font-bold flex-1 text-black dark:text-white active:scale-95 transition-transform">
+                                        <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className="flex items-center justify-center h-11 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-700 text-sm font-bold flex-1 text-black dark:text-white active:scale-95 transition-transform" prefetch={false}>
                                             <User className="h-4 w-4" />
                                         </Link>
                                         <button onClick={() => signOut()} className="flex items-center justify-center h-11 px-4 rounded-xl bg-red-500/10 text-red-500 border-2 border-red-500/30 text-sm font-bold flex-1 active:scale-95 transition-transform">

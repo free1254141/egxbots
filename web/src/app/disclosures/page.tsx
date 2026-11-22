@@ -294,19 +294,19 @@ export default async function DisclosuresPage() {
                 أدوات مجانية مكملة على المنصة
               </h2>
               <nav className="flex flex-wrap gap-2 pt-1 font-bold text-xs">
-                <Link href="/fair-value" className="underline underline-offset-4 text-emerald-700 dark:text-emerald-400 hover:text-emerald-500">
+                <Link href="/fair-value" className="underline underline-offset-4 text-emerald-700 dark:text-emerald-400 hover:text-emerald-500" prefetch={false}>
                   محدد السعر العادل (EGX & TASI)
                 </Link>
-                <Link href="/sharia" className="underline underline-offset-4 text-emerald-700 dark:text-emerald-400 hover:text-emerald-500">
+                <Link href="/sharia" className="underline underline-offset-4 text-emerald-700 dark:text-emerald-400 hover:text-emerald-500" prefetch={false}>
                   الأسهم الحلال وحاسبة التطهير
                 </Link>
-                <Link href="/scanner/technical" className="underline underline-offset-4 text-amber-700 dark:text-amber-400 hover:text-amber-500">
+                <Link href="/scanner/technical" className="underline underline-offset-4 text-amber-700 dark:text-amber-400 hover:text-amber-500" prefetch={false}>
                   الماسح الفني المجاني
                 </Link>
-                <Link href="/scanner/market" className="underline underline-offset-4 text-indigo-700 dark:text-indigo-400 hover:text-indigo-500">
+                <Link href="/scanner/market" className="underline underline-offset-4 text-indigo-700 dark:text-indigo-400 hover:text-indigo-500" prefetch={false}>
                   مؤشرات واتساع السوق
                 </Link>
-                <Link href="/reports" className="underline underline-offset-4 text-zinc-800 dark:text-zinc-200 hover:text-amber-500">
+                <Link href="/reports" className="underline underline-offset-4 text-zinc-800 dark:text-zinc-200 hover:text-amber-500" prefetch={false}>
                   التقارير اليومية
                 </Link>
               </nav>

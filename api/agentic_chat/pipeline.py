@@ -1157,6 +1157,26 @@ async def _run_agentic_chat_stream_impl(
         )
         formatted_messages.append({"role": "system", "content": hints_text})
 
+    if message and re.search(
+        r"(?:كوت[ةه]|رسا[يئ]ل|رساله|رسالة|باقي\s+كام|فاضل\s+كام|متبقي|استهلكت|اشتراك|باقتي|اتوميشن|أتمت[ةه]|اتمت[ةه]|quota)",
+        message,
+        re.IGNORECASE,
+    ):
+        has_valid_quota = isinstance(quota_limit, int) and 0 < quota_limit < 900 and isinstance(remaining_quota, int)
+        quota_nums_str = (
+            f"الحد الأقصى={quota_limit} رسالة | المتبقي حالياً={max(remaining_quota, 0)} رسالة "
+            f"(المستهلك={max(quota_limit - max(remaining_quota, 0), 0)} رسالة)"
+            if has_valid_quota
+            else f"الحد الشهري={350 if is_pro else 10} رسالة"
+        )
+        formatted_messages.append({
+            "role": "system",
+            "content": (
+                f"بيانات كوتة واشتراك المستخدم الفعلية من النظام: حالة الحساب={'مشترك باقة مدفوعة نشطة (Pro / Chat Pro)' if is_pro else 'باقة مجانية (Free)'} | {quota_nums_str}. "
+                "حقيقة إلزامية: الكوتة موحدة على الحساب وتُخصم منها رسائل شات الموقع، وبوت التليجرام الخاص، والمهام المؤتمتة المجدولة (Scheduled Automations — كل تنفيذ مجدول يستهلك رسالة واحدة 1 من الكوتة الشهرية)."
+            ),
+        })
+
     # Append vision context and user message
     if vision_data:
         vision_context_str = format_vision_context_for_prompt(vision_data)

@@ -380,7 +380,7 @@ def _build_uptrend_rows(symbol: str, start_end_date: str = "2026-10-05", periods
     ]
 
 
-def _run_offline_engine(monkeypatch, tmp_path, rows, now_iso="2026-10-12T16:00:00+02:00"):
+def _run_offline_engine(monkeypatch, tmp_path, rows, now_iso="2026-10-12T16:00:00+02:00", confirmed_action_dates=None):
     import datetime as dt
     import pandas as pd
 
@@ -407,7 +407,7 @@ def _run_offline_engine(monkeypatch, tmp_path, rows, now_iso="2026-10-12T16:00:0
     monkeypatch.setattr(engine, "_load_published_signals", lambda _: [])
     monkeypatch.setattr(engine, "_persist_saved_snapshot", lambda *_: True)
     monkeypatch.setattr(engine, "CACHE_PATHS", [tmp_path / "ss_test_cache.json"])
-    return engine.compute_short_swings(phase="close")
+    return engine.compute_short_swings(phase="close", confirmed_action_dates=confirmed_action_dates)
 
 
 def test_day0_negative_close_blocks_be_and_schedules_eod_stop(monkeypatch, tmp_path):
@@ -490,3 +490,74 @@ def test_vip_update_message_includes_profit_and_loss_pct():
     )
     assert "نسبة الربح/الخسارة: 🟢 `+3.57%`" in msg
     assert "نسبة الربح/الخسارة: 🔴 `-2.50%`" in msg
+
+
+def test_short_swings_rebases_open_position_when_confirmed_and_blocks_when_unconfirmed(monkeypatch, tmp_path):
+    """Confirmed corporate action rebases open position barriers and keeps trade active; unconfirmed drops cleanly without rebasing."""
+    rows = _build_uptrend_rows("CAX1", start_end_date="2026-10-05", periods=90)
+    # 2026-10-06: breakout signal
+    rows.append({"symbol": "CAX1", "exchange": "EGX", "date": "2026-10-06", "open": 146.0, "high": 152.0, "low": 145.5, "close": 151.0, "volume": 280_000.0})
+    # 2026-10-07 (Day 0): opens and holds normally -> position opened at ~151.23, last close 152.0
+    rows.append({"symbol": "CAX1", "exchange": "EGX", "date": "2026-10-07", "open": 151.0, "high": 154.0, "low": 150.0, "close": 152.0, "volume": 220_000.0})
+    # 2026-10-08 (Day 1): -35.5% gap down from 152.0 -> open 95.0, close 98.0
+    rows.append({"symbol": "CAX1", "exchange": "EGX", "date": "2026-10-08", "open": 95.0, "high": 99.0, "low": 94.0, "close": 98.0, "volume": 350_000.0})
+
+    # Confirmed corporate action -> rebases and stays OPEN
+    res_conf = _run_offline_engine(
+        monkeypatch,
+        tmp_path,
+        rows,
+        now_iso="2026-10-08T16:00:00+02:00",
+        confirmed_action_dates={"CAX1": ["2026-10-08"]},
+    )
+    active = [t for t in res_conf["active_trades"] if t["symbol"] == "CAX1"]
+    assert len(active) == 1
+    assert active[0]["entry_price"] == pytest.approx(94.52, abs=1.0)
+    assert len(res_conf["rebased_corporate_actions"]) == 1
+    assert [t for t in res_conf["closed_trades"] if t["symbol"] == "CAX1"] == []
+
+    # Unconfirmed discontinuity -> does NOT blindly rebase target/entry
+    res_unconf = _run_offline_engine(
+        monkeypatch,
+        tmp_path,
+        rows,
+        now_iso="2026-10-08T16:00:00+02:00",
+        confirmed_action_dates={},
+    )
+    assert [t for t in res_unconf["closed_trades"] if t["symbol"] == "CAX1"] == []
+    assert [t for t in res_unconf["active_trades"] if t["symbol"] == "CAX1"] == []
+    assert len(res_unconf.get("unconfirmed_discontinuities", [])) == 1
+
+
+def test_short_swings_entry_day_corporate_action_gap_requires_confirmation(monkeypatch, tmp_path):
+    """Confirmed entry-day gap rebases limit_price and enters at post-split price; unconfirmed skips ghost trade."""
+    rows = _build_uptrend_rows("CAX2", start_end_date="2026-10-05", periods=90)
+    # 2026-10-06: breakout signal (limit_price = 151.0)
+    rows.append({"symbol": "CAX2", "exchange": "EGX", "date": "2026-10-06", "open": 146.0, "high": 152.0, "low": 145.5, "close": 151.0, "volume": 280_000.0})
+    # 2026-10-07 (Entry Day): gap-down to 95.0 open, 98.0 close
+    rows.append({"symbol": "CAX2", "exchange": "EGX", "date": "2026-10-07", "open": 95.0, "high": 99.0, "low": 94.0, "close": 98.0, "volume": 350_000.0})
+    # 2026-10-08: steady hold at 97.0 (above rebased stop ~91.2)
+    rows.append({"symbol": "CAX2", "exchange": "EGX", "date": "2026-10-08", "open": 98.0, "high": 99.0, "low": 96.0, "close": 97.0, "volume": 200_000.0})
+
+    res_conf = _run_offline_engine(
+        monkeypatch,
+        tmp_path,
+        rows,
+        now_iso="2026-10-08T16:00:00+02:00",
+        confirmed_action_dates={"CAX2": ["2026-10-07"]},
+    )
+    active = [t for t in res_conf["active_trades"] if t["symbol"] == "CAX2"]
+    assert len(active) == 1
+    assert active[0]["entry_price"] == pytest.approx(95.14, abs=0.5)
+    assert len(res_conf["rebased_corporate_actions"]) == 1
+
+    res_unconf = _run_offline_engine(
+        monkeypatch,
+        tmp_path,
+        rows,
+        now_iso="2026-10-08T16:00:00+02:00",
+        confirmed_action_dates={},
+    )
+    assert [t for t in res_unconf["active_trades"] if t["symbol"] == "CAX2"] == []
+    assert [t for t in res_unconf["closed_trades"] if t["symbol"] == "CAX2"] == []
+    assert len(res_unconf.get("unconfirmed_discontinuities", [])) == 1

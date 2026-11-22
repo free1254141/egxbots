@@ -288,6 +288,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
           <Link
             href="/scanner/backtests?tab=medium_swings"
             className="h-8 sm:h-10 px-3 sm:px-4 flex items-center justify-center gap-1.5 border-2 sm:border-4 border-black bg-blue-500 hover:bg-blue-400 text-white font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all"
+            prefetch={false}
           >
             <Target className="w-4 h-4" />
             <span>{isAr ? "فتح إشارات المدى المتوسط 📈" : "Open Medium-Term Signals 📈"}</span>
@@ -328,6 +329,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
             <Link
               href="/scanner/backtests?tab=medium_swings"
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-[#FFE600] hover:bg-zinc-800 border-2 border-black font-black text-xs uppercase shrink-0 shadow-[2px_2px_0px_#000]"
+              prefetch={false}
             >
               <Target className="w-4 h-4" />
               <span>{isAr ? "الانتقال إلى إشارات المدى المتوسط" : "Go to Medium-Term Signals"}</span>
@@ -395,6 +397,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
                 <Link
                   href="/pricing"
                   className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] transition-all w-full sm:w-auto"
+                  prefetch={false}
                 >
                   <Sparkles className="w-4 h-4" />
                   {isAr ? "اشترك في Pro للوصول إلى VIP" : "Upgrade to Pro for VIP access"}

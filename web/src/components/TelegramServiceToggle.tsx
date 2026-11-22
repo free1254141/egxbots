@@ -98,6 +98,7 @@ export default function TelegramServiceToggle({
                     <Link
                         href="/login"
                         className="h-9 px-4 border-2 border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 font-bold uppercase text-xs flex items-center gap-2 transition-all duration-100"
+                        prefetch={false}
                     >
                         {isAr ? "تسجيل الدخول" : "Login"}
                     </Link>
