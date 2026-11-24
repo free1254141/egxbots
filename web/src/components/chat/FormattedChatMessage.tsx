@@ -18,8 +18,10 @@ import {
     MiniPriceChartSvg,
     PortfolioVisualCard,
     PriceTrapsRadarCard,
+    QuantIntelligenceCard,
     RecommendationsTrackerCard,
     ShariaPurificationCard,
+    SmartDcaPlanCard,
     StockChartSeries,
 } from "./StockVisuals";
 import ScheduleAutomationModal from "./ScheduleAutomationModal";
@@ -1467,6 +1469,8 @@ export function FormattedChatMessage({
             if (t.visuals.sharia) mergedVisuals.sharia = t.visuals.sharia;
             if (t.visuals.price_traps) mergedVisuals.price_traps = t.visuals.price_traps;
             if (t.visuals.disclosures?.length) mergedVisuals.disclosures = t.visuals.disclosures;
+            if (t.visuals.quant_analysis?.length) mergedVisuals.quant_analysis = t.visuals.quant_analysis;
+            if (t.visuals.dca_plan) mergedVisuals.dca_plan = t.visuals.dca_plan;
         }
     }
     let hasAttachedStockCard = false;
@@ -1814,6 +1818,12 @@ export function FormattedChatMessage({
             )}
             {!isStreaming && mergedVisuals.fair_value && mergedVisuals.fair_value.length >= 1 && (
                 <FairValueGaugeCard items={mergedVisuals.fair_value} />
+            )}
+            {!isStreaming && mergedVisuals.quant_analysis && mergedVisuals.quant_analysis.length >= 1 && (
+                <QuantIntelligenceCard items={mergedVisuals.quant_analysis} />
+            )}
+            {!isStreaming && mergedVisuals.dca_plan && (
+                <SmartDcaPlanCard plan={mergedVisuals.dca_plan} />
             )}
             {!isStreaming && mergedVisuals.comparison && mergedVisuals.comparison.length >= 2 && (
                 <ComparisonMirrorCard stocks={mergedVisuals.comparison} />

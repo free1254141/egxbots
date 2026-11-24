@@ -935,14 +935,6 @@ def _compute_single_fair_value(
     eps = _finite(data.get("eps"))
     if (eps is None or eps == 0) and raw_pe and raw_pe > 0 and close > 0:
         eps = round(close / raw_pe, 4)
-    eff_eps = eps if (eps is not None and eps > 0) else None
-    if raw_fwd_pe is not None and 2.0 <= raw_fwd_pe <= 60.0 and close > 0:
-        fwd_eps = close / raw_fwd_pe
-        if eff_eps is not None and eff_eps > 0:
-            fwd_eps_clamped = _clamp(fwd_eps, eff_eps * 0.4, eff_eps * 3.0)
-            eff_eps = round(0.50 * eff_eps + 0.50 * fwd_eps_clamped, 4)
-        else:
-            eff_eps = round(fwd_eps, 4)
     bvps = _finite(
         data.get("bookValuePerShare")
         or data.get("book_value_per_share")
@@ -952,8 +944,36 @@ def _compute_single_fair_value(
     if (bvps is None or bvps == 0) and raw_pb and raw_pb > 0 and close > 0:
         bvps = round(close / raw_pb, 4)
 
+    # Guard against unadjusted pre-split EPS/BVPS in Yahoo fundamentals (e.g. POUL 4:1 split)
+    sp_adj: Optional[float] = None
+    if bvps is not None and bvps > 0 and raw_pb is not None and raw_pb > 0 and close > 0:
+        implied_pre_px = bvps * raw_pb
+        if (implied_pre_px / close) > 1.85:
+            sp_adj = close / implied_pre_px
+    elif eps is not None and eps > 0 and raw_pe is not None and raw_pe > 0 and close > 0:
+        implied_pre_px = eps * raw_pe
+        if (implied_pre_px / close) > 1.85:
+            sp_adj = close / implied_pre_px
+    if sp_adj is not None and 0.05 < sp_adj < 0.55:
+        if eps is not None:
+            eps = round(eps * sp_adj, 4)
+        if bvps is not None:
+            bvps = round(bvps * sp_adj, 4)
+
+    eff_eps = eps if (eps is not None and eps > 0) else None
+    if raw_fwd_pe is not None and 2.0 <= raw_fwd_pe <= 60.0 and close > 0:
+        fwd_eps = close / raw_fwd_pe
+        if eff_eps is not None and eff_eps > 0:
+            fwd_eps_clamped = _clamp(fwd_eps, eff_eps * 0.4, eff_eps * 3.0)
+            eff_eps = round(0.50 * eff_eps + 0.50 * fwd_eps_clamped, 4)
+        else:
+            eff_eps = round(fwd_eps, 4)
+
     pe_ratio = round(close / eps, 2) if (eps and eps > 0) else (round(raw_pe, 2) if raw_pe else None)
     pb_ratio = round(close / bvps, 2) if (bvps and bvps > 0) else (round(raw_pb, 2) if raw_pb else None)
+    net_inc = _finite(data.get("netIncome") if data.get("netIncome") is not None else data.get("net_income"))
+    roe_chk = _finite(data.get("roe"))
+    is_loss_making = bool((eps is not None and eps <= 0) or (net_inc is not None and net_inc < 0) or (roe_chk is not None and roe_chk < 0))
 
     ema200_val = _finite(tech.get("ema_200")) or _finite(tech.get("sma_200"))
     vwap20_val = _finite(tech.get("vwap_20")) or _finite(tech.get("ema_50"))
@@ -1026,17 +1046,31 @@ def _compute_single_fair_value(
         ]
     elif bvps is not None and bvps > 0:
         bvps_r = round(bvps, 2)
-        pb_fair = round(bvps * sec_pb, 2)
-        fair_value = round(_clamp(bvps * sec_pb, close * 0.50, close * 1.65), 2)
-        model_type = "pb_multiple"
-        model_label_ar = "مضاعف القيمة الدفترية (P/B)"
-        eq_ar = "السعر العادل = القيمة الدفترية للسهم (BVPS) × وسيط مضاعف القيمة الدفترية للقطاع (Sector P/B)"
-        sub_ar = f"{bvps_r} × {sec_pb} = {fair_value} {currency_ar}"
-        steps_ar = [
-            f"1️⃣ القيمة الدفترية للسهم من حقوق الملكية (BVPS) = {bvps_r} {currency_ar}",
-            f"2️⃣ وسيط مضاعف القيمة الدفترية لقطاع ({sector_ar}) = {sec_pb} مرة",
-            f"✅ السعر العادل = {bvps_r} × {sec_pb} = {pb_fair} {currency_ar} -> المعتمد {fair_value} {currency_ar}.",
-        ]
+        if is_loss_making:
+            distress_pb = round(min(1.0, max(0.55, sec_pb * 0.45)), 2)
+            pb_fair = round(bvps * distress_pb, 2)
+            fair_value = round(_clamp(pb_fair, close * 0.45, close * 0.98), 2)
+            model_type = "pb_distressed"
+            model_label_ar = "قيمة دفترية مخفضة (شركة خاسرة)"
+            eq_ar = "السعر العادل التحفظي = القيمة الدفترية (BVPS) × مضاعف خصم الخسائر (بحد أقصى 98% من السعر الحالي)"
+            sub_ar = f"{bvps_r} × {distress_pb} = {fair_value} {currency_ar}"
+            steps_ar = [
+                f"1️⃣ الشركة تسجّل خسائر حالياً: القيمة الدفترية للسهم (BVPS) = {bvps_r} {currency_ar}",
+                f"2️⃣ تطبيق معامل خصم الخسائر المتحفظ = {distress_pb}x بدلاً من مضاعف القطاع غير المربح ({sec_pb}x)",
+                f"✅ السعر العادل التحفظي = {pb_fair} {currency_ar} -> المعتمد {fair_value} {currency_ar}.",
+            ]
+        else:
+            pb_fair = round(bvps * sec_pb, 2)
+            fair_value = round(_clamp(bvps * sec_pb, close * 0.50, close * 1.65), 2)
+            model_type = "pb_multiple"
+            model_label_ar = "مضاعف القيمة الدفترية (P/B)"
+            eq_ar = "السعر العادل = القيمة الدفترية للسهم (BVPS) × وسيط مضاعف القيمة الدفترية للقطاع (Sector P/B)"
+            sub_ar = f"{bvps_r} × {sec_pb} = {fair_value} {currency_ar}"
+            steps_ar = [
+                f"1️⃣ القيمة الدفترية للسهم من حقوق الملكية (BVPS) = {bvps_r} {currency_ar}",
+                f"2️⃣ وسيط مضاعف القيمة الدفترية لقطاع ({sector_ar}) = {sec_pb} مرة",
+                f"✅ السعر العادل = {bvps_r} × {sec_pb} = {pb_fair} {currency_ar} -> المعتمد {fair_value} {currency_ar}.",
+            ]
     else:
         ema200_v = round(ema200_val if ema200_val is not None else close, 2)
         vwap20_v = round(vwap20_val if vwap20_val is not None else close, 2)

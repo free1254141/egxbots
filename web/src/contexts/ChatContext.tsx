@@ -18,6 +18,137 @@ import { invalidateUserQuotaCache } from "@/lib/user-quota-client";
 
 
 
+export type AnswerStageId = "understand" | "fetch_data" | "quant_verify" | "synthesize";
+
+export type AnswerStageItem = {
+    id: AnswerStageId;
+    label: string;
+    status: "pending" | "in_progress" | "done";
+};
+
+const _RAW_STATUS_CODES = new Set(["thinking", "vision", "executing_tools", "quant_engine", "generating", "cached"]);
+
+export function createInitialAnswerStages(opts?: { hasImages?: boolean; isVoiceNote?: boolean }): AnswerStageItem[] {
+    return [
+        {
+            id: "understand",
+            label: opts?.isVoiceNote
+                ? "تحويل الرسالة الصوتية وفهم السؤال"
+                : opts?.hasImages
+                ? "قراءة الصورة وفهم سياق السؤال"
+                : "فهم السؤال وتحديد السهم والسوق",
+            status: "in_progress",
+        },
+        {
+            id: "fetch_data",
+            label: "جلب البيانات الحية من أدوات السوق",
+            status: "pending",
+        },
+        {
+            id: "quant_verify",
+            label: "التحليل الكمي ومحاكاة مونت كارلو وحسم التعارض",
+            status: "pending",
+        },
+        {
+            id: "synthesize",
+            label: "صياغة التقرير النهائي ومراجعة الحارس الآلي",
+            status: "pending",
+        },
+    ];
+}
+
+function _resolveStageIdFromPayload(payload: { step_id?: string; status?: string }): AnswerStageId | null {
+    const sid = payload.step_id;
+    if (sid === "understand" || sid === "fetch_data" || sid === "quant_verify" || sid === "synthesize") {
+        return sid;
+    }
+    const st = String(payload.status || "").trim();
+    if (st === "thinking" || st === "vision") return "understand";
+    if (st === "executing_tools" || st === "cached") return "fetch_data";
+    if (st === "quant_engine") return "quant_verify";
+    if (st === "generating") return "synthesize";
+    return null;
+}
+
+export function advanceAnswerStagesOnStatus(
+    stages: AnswerStageItem[] | undefined,
+    payload: { step_id?: string; status?: string; message?: string; content?: string }
+): AnswerStageItem[] {
+    const base = stages && stages.length > 0 ? stages.map((s) => ({ ...s })) : createInitialAnswerStages();
+    const rawMsg = typeof payload.message === "string"
+        ? payload.message.trim()
+        : typeof payload.content === "string"
+        ? payload.content.trim()
+        : "";
+    const humanLabel = rawMsg && !_RAW_STATUS_CODES.has(rawMsg) ? rawMsg : "";
+
+    if (payload.status === "cached") {
+        const understand = base.find((s) => s.id === "understand") || createInitialAnswerStages()[0];
+        const fetchStage = base.find((s) => s.id === "fetch_data") || createInitialAnswerStages()[1];
+        const synthStage = base.find((s) => s.id === "synthesize") || createInitialAnswerStages()[3];
+        return [
+            { ...understand, status: "done" },
+            { ...fetchStage, label: humanLabel || "تم استرجاع التحليل الموثق من الذاكرة", status: "done" },
+            { ...synthStage, status: "in_progress" },
+        ];
+    }
+
+    const targetId = _resolveStageIdFromPayload(payload);
+    if (!targetId) return base;
+
+    let targetIdx = base.findIndex((s) => s.id === targetId);
+    if (targetIdx < 0) {
+        const fresh = createInitialAnswerStages();
+        const prevMap = new Map(base.map((s) => [s.id, s]));
+        base.splice(0, base.length, ...fresh.map((s) => prevMap.get(s.id) || s));
+        targetIdx = base.findIndex((s) => s.id === targetId);
+    }
+
+    return base.map((stage, idx) => {
+        if (idx < targetIdx) {
+            return { ...stage, status: "done" };
+        }
+        if (idx === targetIdx) {
+            return {
+                ...stage,
+                label: humanLabel || stage.label,
+                status: "in_progress",
+            };
+        }
+        return { ...stage, status: "pending" };
+    });
+}
+
+export function advanceAnswerStagesOnToken(stages: AnswerStageItem[] | undefined): AnswerStageItem[] {
+    if (!stages || stages.length === 0) return [];
+    const middleReached = stages.some(
+        (s) => (s.id === "fetch_data" || s.id === "quant_verify") && (s.status === "done" || s.status === "in_progress")
+    );
+    const filtered = middleReached
+        ? stages
+        : stages.filter((s) => s.id === "understand" || s.id === "synthesize");
+    return filtered.map((stage) =>
+        stage.id === "synthesize"
+            ? { ...stage, status: "in_progress" }
+            : { ...stage, status: "done" }
+    );
+}
+
+export function finalizeAnswerStages(
+    stages: AnswerStageItem[] | undefined,
+    opts?: { toolsUsed?: string[]; cached?: boolean }
+): AnswerStageItem[] {
+    if (!stages || stages.length === 0) return [];
+    const hasTools = Array.isArray(opts?.toolsUsed) && opts.toolsUsed.length > 0;
+    const filtered = stages.filter((s) => {
+        if (s.id === "understand" || s.id === "synthesize") return true;
+        if (s.status === "done" || s.status === "in_progress") return true;
+        if (hasTools && !opts?.cached) return true;
+        return false;
+    });
+    return filtered.map((s) => ({ ...s, status: "done" }));
+}
+
 export type ChatMessage = {
 
     id?: string;
@@ -41,6 +172,8 @@ export type ChatMessage = {
     isStreaming?: boolean;
 
     statusText?: string;
+
+    answerStages?: AnswerStageItem[];
 
     tables?: ChatTable[];
 
@@ -212,6 +345,87 @@ export type ChatTable = {
             sentiment?: string | number | null;
             source_url?: string | null;
         }>;
+        quant_analysis?: Array<{
+            symbol: string;
+            name_ar?: string | null;
+            exchange?: string;
+            currency?: string;
+            close?: number | null;
+            setup_regime?: string;
+            setup_regime_label_ar?: string;
+            conflict_resolution_ar?: string;
+            technical_score?: number;
+            fundamental_score?: number;
+            conviction_score?: number;
+            is_sharia_compliant?: boolean | null;
+            bull_case?: string[];
+            bear_case?: string[];
+            monte_carlo?: {
+                paths_count?: number;
+                horizon_days?: number;
+                daily_limit_pct?: number;
+                target_barrier?: number;
+                stop_barrier?: number;
+                raw_target_prob_pct?: number;
+                prob_hit_target_first_pct?: number;
+                calibrated_target_prob_pct?: number;
+                prob_hit_stop_first_pct?: number;
+                prob_stay_in_range_pct?: number;
+                mathematical_expectancy_pct?: number;
+                expected_10d_range?: { p10: number; p50: number; p90: number };
+                daily_vol_pct?: number;
+                annualized_vol_pct?: number;
+            };
+            self_learning?: {
+                raw_target_prob_pct?: number;
+                calibrated_target_prob_pct?: number;
+                empirical_hit_rate_pct?: number | null;
+                empirical_sample_size?: number;
+                brier_score?: number | null;
+                learned_lesson_ar?: string;
+            };
+            macro_sensitivity?: {
+                rating?: string;
+                corr_usd_parallel?: number | null;
+                corr_gold?: number | null;
+                summary_ar?: string;
+            } | null;
+        }>;
+        dca_plan?: {
+            symbol: string;
+            exchange?: string;
+            currency?: string;
+            dca_allowed: boolean;
+            verdict_ar?: string;
+            rejection_reason_ar?: string;
+            old_shares?: number;
+            old_avg_price?: number;
+            current_price?: number;
+            current_loss_pct?: number;
+            capital_protection_stop?: number;
+            dca_budget?: number;
+            budget_estimated?: boolean;
+            reference_100_shares?: boolean;
+            new_avg_price_t1?: number;
+            new_avg_price_full?: number;
+            rally_needed_before_pct?: number;
+            rally_needed_after_pct?: number;
+            prob_breakeven_10d_before_pct?: number | null;
+            prob_breakeven_10d_after_pct?: number | null;
+            hard_invalidation_stop?: number;
+            estimated_fees?: number;
+            leftover_cash?: number;
+            tranches?: Array<{
+                tranche: number;
+                label: string;
+                weight_pct: number;
+                limit_price: number;
+                shares: number;
+                cost: number;
+                fee: number;
+                avg_after: number;
+            }>;
+        };
     };
 
 };
@@ -667,6 +881,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const sessionMessagesCache = useRef<Record<string, ChatMessage[]>>({});
 
     const loadingSessionIds = useRef<Record<string, boolean>>({});
+    const lastSubmitRef = useRef<{ sessionId: string; text: string; ts: number } | null>(null);
 
     const activeSessionIdRef = useRef<string | null>(activeSessionId);
 
@@ -1599,6 +1814,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         if (loadingSessionIds.current[currentSessionId]) return;
 
+        const normSubmitText = text.trim();
+        const nowSubmitTs = Date.now();
+        if (
+            normSubmitText
+            && imagesList.length === 0
+            && !options?.isVoiceNote
+            && lastSubmitRef.current
+            && lastSubmitRef.current.sessionId === currentSessionId
+            && lastSubmitRef.current.text === normSubmitText
+            && (nowSubmitTs - lastSubmitRef.current.ts) < 3000
+        ) {
+            return;
+        }
+        lastSubmitRef.current = { sessionId: currentSessionId, text: normSubmitText, ts: nowSubmitTs };
+
 
 
         const isVoice = Boolean(options?.isVoice || options?.isVoiceNote || options?.isVoiceCall);
@@ -1673,6 +1903,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
             statusText: isVoiceNote ? "أرتورو يستمع للرسالة الصوتية..." : "جاري تحليل السؤال...",
 
+            answerStages: createInitialAnswerStages({
+                hasImages: imagesList.length > 0,
+                isVoiceNote: Boolean(isVoiceNote),
+            }),
+
             isVoice,
 
             isVoiceNote,
@@ -1726,6 +1961,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 assistantMsg.isStreaming = false;
 
                 assistantMsg.statusText = undefined;
+
+                assistantMsg.answerStages = undefined;
 
                 updateAssistantMsgInState(assistantMsg);
 
@@ -1839,6 +2076,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 assistantMsg.statusText = undefined;
 
+                assistantMsg.answerStages = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
 
                 flushStoredMessages(currentSessionId);
@@ -1857,6 +2096,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 assistantMsg.statusText = undefined;
 
+                assistantMsg.answerStages = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
 
                 flushStoredMessages(currentSessionId);
@@ -1874,6 +2115,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 assistantMsg.isStreaming = false;
 
                 assistantMsg.statusText = undefined;
+
+                assistantMsg.answerStages = undefined;
 
                 updateAssistantMsgInState(assistantMsg);
 
@@ -1902,6 +2145,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 assistantMsg.isStreaming = false;
 
                 assistantMsg.statusText = undefined;
+
+                assistantMsg.answerStages = undefined;
 
                 updateAssistantMsgInState(assistantMsg);
 
@@ -1966,6 +2211,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 assistantMsg.isStreaming = false;
 
                 assistantMsg.statusText = undefined;
+
+                assistantMsg.answerStages = finalizeAnswerStages(assistantMsg.answerStages, {
+                    toolsUsed: Array.isArray(data.usage?.tools_used) ? data.usage.tools_used : undefined,
+                    cached: Boolean(data.cached),
+                });
 
                 updateAssistantMsgInState(assistantMsg);
 
@@ -2067,6 +2317,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                                 assistantMsg.statusText = undefined;
 
+                                assistantMsg.answerStages = undefined;
+
                                 updateAssistantMsgInState(assistantMsg);
 
                             } else if (currentEventName === "enable_autonomous_recs" || parsed.type === "enable_autonomous_recs") {
@@ -2093,15 +2345,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                             } else if (currentEventName === "status" || parsed.type === "status" || parsed.event === "status" || parsed.status) {
 
-                                const statusMsg = parsed.status || parsed.message || parsed.content;
+                                const rawCandidate = parsed.message || parsed.content;
+
+                                const statusMsg = typeof rawCandidate === "string" && !_RAW_STATUS_CODES.has(rawCandidate.trim())
+                                    ? rawCandidate.trim()
+                                    : undefined;
+
+                                assistantMsg.answerStages = advanceAnswerStagesOnStatus(assistantMsg.answerStages, parsed);
 
                                 if (statusMsg) {
 
                                     assistantMsg.statusText = statusMsg;
 
-                                    updateAssistantMsgInState(assistantMsg);
-
                                 }
+
+                                updateAssistantMsgInState(assistantMsg);
 
                             } else if (currentEventName === "token" || parsed.type === "token" || parsed.event === "token" || parsed.token !== undefined || parsed.delta !== undefined) {
 
@@ -2110,6 +2368,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                  // Accumulate stream tokens raw; sanitize once after the stream ends.
 
                                  // sanitizeReply adds structured output/disclaimers and is not token-safe.
+
+                                 const isFirstToken = !assistantMsg.content && Boolean(token);
+
+                                 if (isFirstToken && assistantMsg.answerStages) {
+
+                                     assistantMsg.answerStages = advanceAnswerStagesOnToken(assistantMsg.answerStages);
+
+                                     assistantMsg.statusText = undefined;
+
+                                     lastRenderTime = 0;
+
+                                 }
 
                                  assistantMsg.content += token;
 
@@ -2201,13 +2471,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                                 assistantMsg.isStreaming = false;
 
+                                assistantMsg.statusText = undefined;
+
+                                assistantMsg.answerStages = finalizeAnswerStages(assistantMsg.answerStages, {
+                                    toolsUsed: Array.isArray(parsed.usage?.tools_used) ? parsed.usage.tools_used : undefined,
+                                    cached: Boolean(parsed.cached),
+                                });
+
                                 updateAssistantMsgInState(assistantMsg);
 
                             } else {
 
-                                if (parsed.status) {
+                                if (parsed.status || parsed.step_id) {
 
-                                    assistantMsg.statusText = parsed.status;
+                                    assistantMsg.answerStages = advanceAnswerStagesOnStatus(assistantMsg.answerStages, parsed);
+
+                                    const rawFallback = parsed.message || parsed.content;
+
+                                    if (typeof rawFallback === "string" && !_RAW_STATUS_CODES.has(rawFallback.trim())) {
+
+                                        assistantMsg.statusText = rawFallback.trim();
+
+                                    }
 
                                 }
 
@@ -2287,6 +2572,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 assistantMsg.statusText = undefined;
 
+                assistantMsg.answerStages = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
 
                 return assistantMsg.content;
@@ -2294,6 +2581,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             }
 
             assistantMsg.isStreaming = false;
+
+            assistantMsg.answerStages = receivedError ? undefined : finalizeAnswerStages(assistantMsg.answerStages);
 
             if (!assistantMsg.content && assistantMsg.statusText) {
 
@@ -2304,6 +2593,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 assistantMsg.content = stripMarkdownTables(sanitizeReply(assistantMsg.content));
 
             }
+
+            assistantMsg.statusText = undefined;
 
             updateAssistantMsgInState(assistantMsg);
 
@@ -2338,6 +2629,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             assistantMsg.isStreaming = false;
 
             assistantMsg.statusText = undefined;
+
+            assistantMsg.answerStages = undefined;
 
             updateAssistantMsgInState(assistantMsg);
 

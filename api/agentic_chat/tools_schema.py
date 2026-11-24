@@ -495,14 +495,18 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "calculate_position",
-            "description": "حساب مركز مؤقت دون حفظ في المحفظة (حساب القيمة السوقية والتكلفة والأرباح والخسائر بالجنيه المصري أو الريال السعودي حسب السهم).",
+            "description": (
+                "حساب مركز مالي مؤقت (الربح/الخسارة والقيمة السوقية) وتوليد خطة التبريد الذكي وتعديل المتوسط (Smart DCA Ladder) "
+                "على الدعوم باحتمالية التعادل خلال 10 جلسات عند وجود خسارة أو ذكر ميزانية تبريد (dca_budget)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "symbol": {"type": "string"},
-                    "quantity": {"type": "number"},
-                    "entry_price": {"type": "number"},
+                    "quantity": {"type": "number", "description": "عدد الأسهم الحالية (اختياري؛ يُستخدم 100 سهم كمرجع عند عدم الذكر)."},
+                    "entry_price": {"type": "number", "description": "سعر الشراء / متوسط التكلفة الحالي."},
                     "total_cost": {"type": "number"},
+                    "dca_budget": {"type": "number", "description": "السيولة الإضافية المخصصة للتبريد / تعديل المتوسط بعملة السوق (اختياري)."},
                 },
                 "required": ["symbol"],
             },

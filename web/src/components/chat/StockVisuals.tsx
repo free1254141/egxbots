@@ -1823,4 +1823,256 @@ export function DisclosuresTimelineCard({ items }: { items: DisclosureTimelineIt
     );
 }
 
+type QuantAnalysisItem = NonNullable<ChatVisualsPayload["quant_analysis"]>[number];
+type SmartDcaPlanItem = NonNullable<ChatVisualsPayload["dca_plan"]>;
+
+/**
+ * Interactive Quantitative Intelligence Card:
+ * Displays deterministic Setup Regime, 5,000-path calibrated Monte Carlo barrier probabilities,
+ * side-by-side Bull vs Bear evidence, self-learning calibration lesson, and macro hedge badge.
+ */
+export function QuantIntelligenceCard({ items }: { items: QuantAnalysisItem[] }) {
+    const valid = (items || []).filter((q) => q && q.symbol && q.monte_carlo);
+    const [activeIdx, setActiveIdx] = useState(0);
+    if (!valid.length) return null;
+
+    const item = valid[Math.min(activeIdx, valid.length - 1)];
+    const mc = item.monte_carlo || {};
+    const sl = item.self_learning;
+    const curr = item.currency || "ج.م";
+    const targetP = Math.max(0, Math.min(100, Number(mc.prob_hit_target_first_pct ?? mc.calibrated_target_prob_pct ?? 0)));
+    const stopP = Math.max(0, Math.min(100 - targetP, Number(mc.prob_hit_stop_first_pct ?? 0)));
+    const rangeP = Math.max(0, Number((100 - targetP - stopP).toFixed(1)));
+
+    const regimeTone =
+        item.setup_regime === "aligned_bullish"
+            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+            : item.setup_regime === "high_risk_avoid"
+                ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30"
+                : item.setup_regime === "value_in_downtrend" || item.setup_regime === "speculative_momentum"
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                    : "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30";
+
+    return (
+        <div
+            data-testid="quant-intelligence-card"
+            className="rounded-xl border border-indigo-500/30 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 space-y-2.5 text-right"
+            dir="rtl"
+        >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                    <BarChart3 className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span className="text-xs font-extrabold text-zinc-900 dark:text-zinc-100">
+                        الذكاء الكمي ومحاكاة مونت كارلو — {item.name_ar ? `${item.name_ar} (${item.symbol})` : item.symbol}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${regimeTone}`}>
+                        {item.setup_regime_label_ar || item.setup_regime}
+                    </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                    {typeof item.conviction_score === "number" && (
+                        <span className="px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-bold">
+                            ثقة كمية {item.conviction_score}/100
+                        </span>
+                    )}
+                    {valid.length > 1 && (
+                        <div className="flex items-center gap-1">
+                            {valid.map((v, idx) => (
+                                <button
+                                    key={v.symbol}
+                                    type="button"
+                                    onClick={() => setActiveIdx(idx)}
+                                    className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${
+                                        idx === activeIdx
+                                            ? "bg-indigo-600 text-white border-indigo-600"
+                                            : "bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-300 dark:border-white/10"
+                                    }`}
+                                >
+                                    {v.symbol}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {item.conflict_resolution_ar && (
+                <div className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300 bg-white/80 dark:bg-black/30 rounded-lg px-2.5 py-1.5 border border-zinc-200/70 dark:border-white/10">
+                    {item.conflict_resolution_ar}
+                </div>
+            )}
+
+            {/* Monte Carlo 10-Session Barrier Probability Bar */}
+            <div className="rounded-lg bg-white/90 dark:bg-black/40 border border-zinc-200/70 dark:border-white/10 p-2.5 space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
+                    <span className="font-bold text-zinc-700 dark:text-zinc-200">
+                        احتمالات {mc.horizon_days || 10} جلسات ({(mc.paths_count || 5000).toLocaleString()} مسار | حد ±{mc.daily_limit_pct || 20}%)
+                    </span>
+                    {mc.expected_10d_range && (
+                        <span dir="ltr" className="font-mono text-zinc-600 dark:text-zinc-400">
+                            P10–P90: {mc.expected_10d_range.p10} – {mc.expected_10d_range.p90} {curr} (P50: {mc.expected_10d_range.p50})
+                        </span>
+                    )}
+                </div>
+
+                <div className="h-3 w-full rounded-full overflow-hidden flex bg-zinc-200 dark:bg-zinc-800" dir="ltr">
+                    <div
+                        className="bg-emerald-500 h-full transition-all"
+                        style={{ width: `${targetP}%` }}
+                        title={`بلوغ الهدف (${mc.target_barrier}): ${targetP}%`}
+                    />
+                    <div
+                        className="bg-slate-400 dark:bg-slate-500 h-full transition-all"
+                        style={{ width: `${rangeP}%` }}
+                        title={`نطاق عرضي: ${rangeP}%`}
+                    />
+                    <div
+                        className="bg-rose-500 h-full transition-all"
+                        style={{ width: `${stopP}%` }}
+                        title={`كسر الوقف (${mc.stop_barrier}): ${stopP}%`}
+                    />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-bold">
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                        هدف ({mc.target_barrier}): {targetP}%
+                    </span>
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                        عرضي: {rangeP}%
+                    </span>
+                    <span className="text-rose-600 dark:text-rose-400">
+                        وقف ({mc.stop_barrier}): {stopP}%
+                    </span>
+                </div>
+            </div>
+
+            {/* Bull vs Bear Deterministic Debate */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2 space-y-1">
+                    <div className="font-extrabold text-emerald-700 dark:text-emerald-400">
+                        🐂 أدلة الصعود (فني {item.technical_score ?? "—"} | مالي {item.fundamental_score ?? "—"})
+                    </div>
+                    <ul className="space-y-0.5 text-zinc-700 dark:text-zinc-300 list-disc list-inside">
+                        {(item.bull_case || []).map((pt, idx) => (
+                            <li key={idx}>{pt}</li>
+                        ))}
+                    </ul>
+                </div>
+                <div className="rounded-lg bg-rose-500/5 border border-rose-500/20 p-2 space-y-1">
+                    <div className="font-extrabold text-rose-700 dark:text-rose-400">
+                        🐻 أدلة المخاطرة والضغط
+                    </div>
+                    <ul className="space-y-0.5 text-zinc-700 dark:text-zinc-300 list-disc list-inside">
+                        {(item.bear_case || []).map((pt, idx) => (
+                            <li key={idx}>{pt}</li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+
+            {/* Self-Learning & Macro Badges */}
+            {(sl?.learned_lesson_ar || item.macro_sensitivity?.summary_ar) && (
+                <div className="flex flex-wrap items-center justify-between gap-1.5 text-[10px] text-zinc-600 dark:text-zinc-400 pt-0.5">
+                    {sl?.learned_lesson_ar && (
+                        <span className="px-2 py-0.5 rounded bg-white/80 dark:bg-black/30 border border-zinc-200/70 dark:border-white/10">
+                            🧠 {sl.learned_lesson_ar}
+                        </span>
+                    )}
+                    {item.macro_sensitivity?.summary_ar && (
+                        <span className="px-2 py-0.5 rounded bg-white/80 dark:bg-black/30 border border-zinc-200/70 dark:border-white/10">
+                            🌍 {item.macro_sensitivity.summary_ar}
+                        </span>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/**
+ * Interactive Operations Research Smart DCA & Break-Even Optimizer Card.
+ */
+export function SmartDcaPlanCard({ plan }: { plan: SmartDcaPlanItem }) {
+    if (!plan || !plan.symbol) return null;
+    const curr = plan.currency || "ج.م";
+
+    if (!plan.dca_allowed) {
+        return (
+            <div
+                data-testid="smart-dca-plan-card"
+                className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 space-y-1.5 text-right"
+                dir="rtl"
+            >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-extrabold text-rose-700 dark:text-rose-300">
+                        🛡️ حارس التبريد — {plan.symbol}: {plan.verdict_ar || "غير مناسب للتبريد حالياً"}
+                    </span>
+                    {typeof plan.current_loss_pct === "number" && (
+                        <span dir="ltr" className="font-mono text-[10px] font-bold text-rose-600 dark:text-rose-400">
+                            {plan.current_loss_pct}%
+                        </span>
+                    )}
+                </div>
+                {plan.rejection_reason_ar && (
+                    <div className="text-[11px] text-zinc-800 dark:text-zinc-200">
+                        السبب الرياضي: {plan.rejection_reason_ar}
+                    </div>
+                )}
+                {plan.capital_protection_stop && (
+                    <div className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400">
+                        مستوى حماية رأس المال المقترح: {plan.capital_protection_stop} {curr}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div
+            data-testid="smart-dca-plan-card"
+            className="rounded-xl border border-emerald-500/35 bg-emerald-50/40 dark:bg-emerald-950/20 p-3 space-y-2 text-right"
+            dir="rtl"
+        >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-extrabold text-zinc-900 dark:text-zinc-100">
+                    🧮 خطة التبريد الذكي وفك التعلّق — {plan.symbol}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                    تخفيض المتوسط: {plan.old_avg_price} → {plan.new_avg_price_full} {curr}
+                </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                {(plan.tranches || []).map((t) => (
+                    <div
+                        key={t.tranche}
+                        className="rounded-lg bg-white/90 dark:bg-black/40 border border-zinc-200/70 dark:border-white/10 p-2 space-y-0.5"
+                    >
+                        <div className="font-bold text-zinc-900 dark:text-zinc-100">
+                            الدفعة {t.tranche} ({t.weight_pct}%) — عند {t.limit_price} {curr}
+                        </div>
+                        <div className="text-zinc-600 dark:text-zinc-400">
+                            {t.shares} سهم (~{t.cost} {curr} + عمولة {t.fee}) ← متوسط جديد {t.avg_after} {curr}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-bold text-zinc-700 dark:text-zinc-300">
+                {typeof plan.prob_breakeven_10d_before_pct === "number" && typeof plan.prob_breakeven_10d_after_pct === "number" && (
+                    <span className="text-emerald-700 dark:text-emerald-400">
+                        📈 احتمال التعادل خلال 10 جلسات: {plan.prob_breakeven_10d_before_pct}% ⬅️ {plan.prob_breakeven_10d_after_pct}%
+                    </span>
+                )}
+                {plan.hard_invalidation_stop && (
+                    <span className="text-rose-600 dark:text-rose-400">
+                        🛑 وقف الإلغاء الكامل: {plan.hard_invalidation_stop} {curr}
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+}
+
+
 

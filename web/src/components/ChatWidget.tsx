@@ -13,6 +13,7 @@ import { VoiceNoteRecorder } from "@/components/chat/VoiceNoteRecorder";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { AnswerStagesChecklist } from "@/components/chat/AnswerStagesChecklist";
 import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
 import { ChatWallpaperModal } from "@/components/chat/ChatWallpaperModal";
 import { AutonomousRecsModal } from "@/components/chat/AutonomousRecsModal";
@@ -1274,6 +1275,14 @@ export default function ChatWidget() {
                                                 ))}
                                             </div>
                                         )}
+                                        {msg.role === "assistant" && msg.answerStages && msg.answerStages.length > 0 && (
+                                            <AnswerStagesChecklist
+                                                stages={msg.answerStages}
+                                                isStreaming={Boolean(msg.isStreaming)}
+                                                onStop={msg.isStreaming && isLastMessage ? stopResponding : undefined}
+                                                language={language}
+                                            />
+                                        )}
                                         {((msg.isVoiceNote || msg.voiceAudioUrl) && (msg.role === "user" || (!msg.isStreaming && Boolean(msg.content && msg.content.trim())))) ? (
                                             <div className="space-y-2">
                                                 <VoiceNotePlayer
@@ -1305,7 +1314,7 @@ export default function ChatWidget() {
                                                     </div>
                                                 )}
                                             </div>
-                                        ) : (
+                                        ) : (!msg.answerStages?.length || Boolean(msg.content) || Boolean(msg.tables?.length) || Boolean(msg.isVoiceNote)) ? (
                                             <FormattedChatMessage 
                                                 content={msg.content || msg.statusText || (msg.isVoiceNote ? "أرتورو يُسجل الرد الصوتي... 🎙️" : "")} 
                                                 role={msg.role} 
@@ -1320,14 +1329,14 @@ export default function ChatWidget() {
                                                 latencyMs={msg.latencyMs}
                                                 userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
                                             />
-                                        )}
+                                        ) : null}
 
                                     </div>
                                 </div>
                                 );
                             })}
 
-                            {isLoading && !messages[messages.length - 1]?.content && (
+                            {isLoading && !messages[messages.length - 1]?.content && !messages[messages.length - 1]?.answerStages?.length && (
                                 <div className={`flex gap-3 w-full mx-auto items-center p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/20 shadow-xs dark:shadow-[3px_3px_0_0_#FFE600] transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
                                     <div className="h-8 w-8 rounded-full border border-slate-200 dark:border-white bg-white dark:bg-black flex items-center justify-center shrink-0 shadow-xs p-1">
                                         <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={24} height={24} className="w-5 h-5 object-contain animate-pulse" unoptimized />

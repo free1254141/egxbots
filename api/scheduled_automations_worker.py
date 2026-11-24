@@ -500,7 +500,7 @@ def _fetch_market_indicators_brief(
     if all_symbols:
         sym_filter = ",".join(all_symbols[:15])
         raw_rows = _supabase_request(
-            f"stock_technical_indicators?symbol=in.({sym_filter})&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&order=date.desc&limit=45"
+            f"stock_technical_indicators?symbol=in.({sym_filter})&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,ema_200,macd,macd_signal,bb_upper,bb_lower,atr_14,vwap_20,cmf_20,egx_ai_score,divergence_summary&order=date.desc&limit=45"
         ) or []
         rows: List[Dict[str, Any]] = []
         seen_syms: set[str] = set()
@@ -521,33 +521,84 @@ def _fetch_market_indicators_brief(
         ti_date_filter = f"&date=eq.{latest_ti_date}" if latest_ti_date else ""
         ti_limit = 15 if any(k in combined_text for k in ("15", "١٥", "خمسه عشر", "خمسة عشر", "12", "١٢")) else 10
         rows = _supabase_request(
-            f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&change_pct=gt.0&rsi_14=gte.45&rsi_14=lte.75&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&order=egx_ai_score.desc.nullslast,r_vol.desc.nullslast&limit={ti_limit}"
+            f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&change_pct=gt.0&rsi_14=gte.45&rsi_14=lte.75&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,ema_200,macd,macd_signal,bb_upper,bb_lower,atr_14,vwap_20,cmf_20,egx_ai_score,divergence_summary&order=egx_ai_score.desc.nullslast,r_vol.desc.nullslast&limit={ti_limit}"
         ) or []
         if not rows:
             rows = _supabase_request(
-                f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,bb_upper,bb_lower,egx_ai_score&order=volume.desc&limit={ti_limit}"
+                f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,ema_200,bb_upper,bb_lower,atr_14,vwap_20,egx_ai_score&order=volume.desc&limit={ti_limit}"
             ) or []
 
+    fund_brief_map: Dict[str, Dict[str, Any]] = {}
+    open_stop_map: Dict[str, float] = {}
     if isinstance(rows, list) and rows:
-        lines = ["📊 بيانات السوق والمؤشرات الفنية المسجلة:"]
+        row_syms = [str(r.get("symbol") or "").upper() for r in rows if r.get("symbol")][:20]
+        if row_syms:
+            sym_in = ",".join(row_syms)
+            f_rows = _supabase_request(
+                f"stock_fundamentals?exchange=eq.EGX&symbol=in.({sym_in})&select=symbol,fund_score,data&limit={len(row_syms) + 2}"
+            ) or []
+            for fr in (f_rows if isinstance(f_rows, list) else []):
+                if isinstance(fr, dict) and fr.get("symbol"):
+                    fund_brief_map[str(fr["symbol"]).upper()] = fr
+            sr_rows = _supabase_request(
+                f"scan_results?symbol=in.({sym_in})&status=eq.open&select=symbol,stop_loss&limit=20"
+            ) or []
+            for sr in (sr_rows if isinstance(sr_rows, list) else []):
+                if isinstance(sr, dict) and sr.get("symbol") and sr.get("stop_loss") is not None:
+                    try:
+                        open_stop_map[str(sr["symbol"]).upper()] = float(sr["stop_loss"])
+                    except Exception:
+                        pass
+
+        lines = ["📊 بيانات السوق والمؤشرات الفنية المسجلة (مقارنات المتوسطات محسوبة بدقة في الخلفية):"]
         for r in rows:
             sym = str(r.get("symbol") or "").upper()
             ar_name = name_map.get(sym, "")
             label = f"#{sym} ({ar_name})" if ar_name and ar_name != sym else f"#{sym}"
             close = r.get("close")
+            close_f = float(close or 0.0)
             r_date = r.get("date") or ""
             chg = float(r.get("change_pct") or 0)
             rsi = float(r.get("rsi_14") or 50)
             ema20 = r.get("ema_20")
             ema50 = r.get("ema_50")
+            ema200 = r.get("ema_200")
             rvol = r.get("r_vol")
             bb_u = r.get("bb_upper")
             bb_l = r.get("bb_lower")
+            atr_raw = r.get("atr_14")
+            atr_f = float(atr_raw) if atr_raw is not None else 0.0
+            sup1 = float(bb_l) if (bb_l is not None and 0 < float(bb_l) < close_f) else (round(max(close_f * 0.85, close_f - 1.5 * atr_f), 3) if close_f > 0 and atr_f > 0 else None)
+            res1 = float(bb_u) if (bb_u is not None and float(bb_u) > close_f) else (round(close_f + 2.0 * atr_f, 3) if close_f > 0 and atr_f > 0 else None)
+            sr_stop = open_stop_map.get(sym)
+            stp = sr_stop if (sr_stop is not None and 0 < sr_stop < close_f) else (round(sup1 * 0.98, 3) if sup1 and sup1 > 0 else (round(max(close_f * 0.82, close_f - 2.0 * atr_f), 3) if close_f > 0 and atr_f > 0 else None))
             ai_sc = r.get("egx_ai_score")
             extra = []
+            if ema20:
+                e20_f = float(ema20)
+                pos20 = "فوق EMA20 ✅" if close_f >= e20_f else "تحت EMA20 🔴"
+                ema20_str = f"{e20_f:.3f} ({pos20})"
+            else:
+                ema20_str = "غير متاح"
             if ema50:
-                extra.append(f"EMA50: {float(ema50):.2f}")
-            if bb_l and bb_u:
+                e50_f = float(ema50)
+                pos50 = "فوق EMA50 ✅" if close_f >= e50_f else "تحت EMA50 🔴"
+                extra.append(f"EMA50: {e50_f:.3f} ({pos50})")
+            if ema200:
+                e200_f = float(ema200)
+                pos200 = "فوق EMA200 ✅" if close_f >= e200_f else "تحت EMA200 🔴"
+                extra.append(f"EMA200: {e200_f:.3f} ({pos200})")
+            if sup1 or res1 or stp:
+                lvl_parts = []
+                if sup1:
+                    lvl_parts.append(f"دعم {float(sup1):.3f}")
+                if res1:
+                    lvl_parts.append(f"مقاومة {float(res1):.3f}")
+                if stp:
+                    lvl_parts.append(f"وقف محسوب {float(stp):.3f}")
+                if lvl_parts:
+                    extra.append(" | ".join(lvl_parts))
+            elif bb_l and bb_u:
                 extra.append(f"دعم/مقاومة بولينجر: {float(bb_l):.2f} - {float(bb_u):.2f}")
             if rvol is not None:
                 rv_f = float(rvol)
@@ -560,10 +611,16 @@ def _fetch_market_indicators_brief(
                 ai_pct = ai_val * 100.0 if ai_val <= 1.0 else (ai_val * 10.0 if ai_val <= 10.0 else ai_val)
                 if ai_pct > 0:
                     extra.append(f"تقييم AI: {ai_pct:.0f}/100")
+            fr = fund_brief_map.get(sym) or {}
+            fs = fr.get("fund_score")
+            fdata = fr.get("data") if isinstance(fr.get("data"), dict) else {}
+            eps_f = fdata.get("eps")
+            if (fs is not None and float(fs) < 40.0) or (eps_f is not None and float(eps_f) < 0):
+                extra.append(f"⚠️ تحذير مالي: شركة خاسرة أو تقييم مالي ضعيف ({fs or 'ضعيف'})")
             extra_str = (" | " + " | ".join(extra)) if extra else ""
             date_tag = f" [{r_date}]" if r_date else ""
             lines.append(
-                f"• {label}{date_tag}: آخر سعر مسجل {close} ج.م ({chg:+.2f}%) | RSI: {rsi:.1f} | EMA20: {ema20}{extra_str}"
+                f"• {label}{date_tag}: آخر سعر مسجل {close} ج.م ({chg:+.2f}%) | RSI: {rsi:.1f} | EMA20: {ema20_str}{extra_str}"
             )
         sections.append("\n".join(lines))
 
@@ -654,6 +711,14 @@ def _record_cached_automation_usage() -> None:
         pass
 
 
+def _guard_automation_reply(text: str) -> str:
+    try:
+        from api.agentic_chat.output_guard import verify_and_guard_reply
+        return verify_and_guard_reply(text, [], market="EGX").get("reply") or text
+    except Exception:
+        return text
+
+
 def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") -> str:
     """Generates a professional stock market consultation using DeepSeek."""
     _AUTO_METRICS_TLS.last_usage = None
@@ -712,7 +777,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
         "2. قدّم تحليلاً فنياً واقعياً ومحترفاً ومباشراً مقسماً بوضوح حسب نقاط سؤال المشترك بدون حشو.\n"
         "3. ركز على مستويات الدعم، المقاومة، اتجاه السيولة، وحجم التداول.\n"
         "4. التزم بحالة الجلسة المذكورة أعلاه فقط: إذا كانت الجلسة مفتوحة لا تكتب أن الوقت خارج ساعات التداول، وإذا كانت مغلقة أو عطلة فقدّم رؤية استباقية واستعداداً للجلسة القادمة.\n"
-        "5. اختم دائماً بنصيحة إدارة مخاطر ذكية ومستوى وقف خسارة محدد (2.5% إلى 3.5%) وخاتمة فنية متكاملة.\n"
+        "5. اختم دائماً بنصيحة إدارة مخاطر ذكية مبنية على مستوى الدعم ووقف الخسارة الحقيقي المرفق في البيانات (لا تثبّت نسبة عشوائية 2.5%-3.5% بل انقل `وقف محسوب` أو مستوى الدعم الفعلي)، والتزم تماماً بعلامات `فوق EMA ✅` أو `تحت EMA 🔴` المحسوبة حتمياً في البيانات ولا تكتب أبداً أي مسمى تقني إنجليزي مثل `r_vol`.\n"
         "6. التزم باللغة العربية الواضحة وتنسيق تليجرام أنيق ومرتب مع الإيموجي المناسب للقراءة السريعة.\n"
         "7. احرص على إكمال كل فكرة وجملة بدقة، ولا تترك أي فقرة أو نقطة مقطوعة أو غير مكتملة أبداً."
     )
@@ -745,7 +810,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
                 content = res_data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 if content:
                     _record_automation_deepseek_usage(res_data.get("usage"))
-                    return content
+                    return _guard_automation_reply(content)
             logger.warning(f"[AUTOMATIONS_WORKER] DeepSeek returned HTTP {r.status_code}: {r.text[:200]}")
         except Exception as e:
             logger.warning(f"[AUTOMATIONS_WORKER] DeepSeek requests error: {e}")
@@ -762,7 +827,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 if content:
                     _record_automation_deepseek_usage(data.get("usage"))
-                    return content
+                    return _guard_automation_reply(content)
         except Exception as e:
             logger.warning(f"[AUTOMATIONS_WORKER] DeepSeek urllib error: {e}")
 
@@ -791,7 +856,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
                     content = nv_data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                     if content:
                         logger.info("[AUTOMATIONS_WORKER] Generated consultation via Nvidia Llama-3.3-70B fallback.")
-                        return content
+                        return _guard_automation_reply(content)
                 logger.warning(f"[AUTOMATIONS_WORKER] Nvidia API returned HTTP {nv_resp.status_code}: {nv_resp.text[:200]}")
         except Exception as e:
             logger.warning(f"[AUTOMATIONS_WORKER] Nvidia fallback error: {e}")
@@ -808,7 +873,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
         fallback_lines.append("")
     fallback_lines.extend([
         "⚖️ **إدارة المخاطر:**",
-        "• يرجى الالتزام بمستويات وقف الخسارة المحددة (2.5% إلى 3.5%) وتجنب الدخول بكامل السيولة في سهم واحد.",
+        "• يرجى الالتزام بمستوى وقف الخسارة المحسوب أو الدعم القريب الموضح في المؤشرات أعلاه وتجنب الدخول بكامل السيولة في سهم واحد.",
         "━━━━━━━━━━━━━━━━━━━━",
         "💡 *تحديث دوري مؤتمت صادر عن محرك ARTORO AI للبورصة المصرية.*"
     ])
@@ -829,6 +894,10 @@ def _log_automation_to_chat_history(
 ) -> None:
     """Persists the scheduled consultation into ai_chat_sessions and ai_chat_messages using valid UUID auto_id."""
     try:
+        try:
+            asst_iso = (dt.datetime.fromisoformat(str(now_iso).replace("Z", "+00:00")) + dt.timedelta(seconds=1)).isoformat()
+        except Exception:
+            asst_iso = now_iso
         # 1. Upsert session in ai_chat_sessions so foreign key on ai_chat_messages(session_id) is satisfied
         _supabase_request(
             "ai_chat_sessions?on_conflict=id",
@@ -837,7 +906,7 @@ def _log_automation_to_chat_history(
                 "id": auto_id,
                 "user_id": user_id,
                 "title": f"⏰ {name}"[:80],
-                "updated_at": now_iso,
+                "updated_at": asst_iso,
             },
             extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
         )
@@ -870,7 +939,7 @@ def _log_automation_to_chat_history(
             "user_id": user_id,
             "role": "assistant",
             "content": reply_text,
-            "created_at": now_iso,
+            "created_at": asst_iso,
             "metadata": asst_meta,
         }
         if latency_ms is not None:

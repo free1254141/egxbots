@@ -1507,6 +1507,122 @@ def _build_graham_gap_ar(close: Optional[float], graham: Optional[float]) -> Opt
     return f"السعر الحالي أعلى من أرضية جراهام {graham:g} بنسبة +{(close - graham) / graham * 100.0:.1f}% (أي جراهام أقل من السعر بنحو {abs(up):.1f}%)"
 
 
+def _detect_and_adjust_price_split(
+    desc_rows: List[Dict[str, Any]],
+    ema_50: Optional[float],
+    ema_200: Optional[float],
+    close: Optional[float],
+) -> Tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Detect unadjusted overnight corporate splits (<0.45x) and recompute split-adjusted EMAs."""
+    if not close or close <= 0 or not desc_rows:
+        return ema_50, ema_200, None, False
+    asc_closes = [
+        float(r["close"])
+        for r in reversed(list(desc_rows))
+        if isinstance(r, dict) and r.get("close") and float(r["close"]) > 0
+    ]
+    if len(asc_closes) < 5:
+        return ema_50, ema_200, None, False
+
+    split_factor = 1.0
+    had_split_jump = False
+    for idx_c in range(1, len(asc_closes)):
+        prev_v = asc_closes[idx_c - 1]
+        cur_v = asc_closes[idx_c]
+        if prev_v > 0 and cur_v / prev_v < 0.45:
+            sp_ratio = cur_v / prev_v
+            asc_closes[:idx_c] = [c * sp_ratio for c in asc_closes[:idx_c]]
+            split_factor *= sp_ratio
+            had_split_jump = True
+
+    out_split_factor: Optional[float] = round(split_factor, 4) if (had_split_jump and split_factor < 0.45) else None
+    recent_25 = asc_closes[-25:]
+    max_25 = max(recent_25) if recent_25 else close
+    stale_ema = bool(
+        (ema_50 and max_25 > 0 and ema_50 > max_25 * 1.25)
+        or (ema_200 and max_25 > 0 and ema_200 > max_25 * 1.25)
+    )
+    if (had_split_jump or stale_ema) and len(asc_closes) >= 20:
+        def _ewm_span(vals: List[float], span: int) -> float:
+            alpha = 2.0 / (span + 1.0)
+            cur = vals[0]
+            for v_c in vals[1:]:
+                cur = alpha * v_c + (1.0 - alpha) * cur
+            return round(cur, 4)
+
+        return _ewm_span(asc_closes, 50), _ewm_span(asc_closes, 200), out_split_factor, True
+    return ema_50, ema_200, out_split_factor, False
+
+
+def _normalize_split_adjusted_fundamentals(
+    fd: Any,
+    close_price: Optional[float],
+    split_factor: Optional[float] = None,
+) -> Tuple[Dict[str, Any], bool]:
+    """Scale pre-split EPS/BVPS in Yahoo fundamentals so post-split P/E and Graham stay realistic."""
+    if not isinstance(fd, dict):
+        return {}, False
+    out = dict(fd)
+    if not close_price or close_price <= 0:
+        return out, False
+
+    eps = _safe_float(out.get("eps") if out.get("eps") is not None else out.get("trailing_eps"), 4)
+    bvps = _safe_float(
+        out.get("bookValuePerShare")
+        if out.get("bookValuePerShare") is not None
+        else (out.get("book_value_per_share") if out.get("book_value_per_share") is not None else out.get("bvps")),
+        4,
+    )
+    pe = _safe_float(out.get("peRatio") if out.get("peRatio") is not None else out.get("pe_ratio"))
+    pb = _safe_float(out.get("pbRatio") if out.get("pbRatio") is not None else out.get("pb_ratio"))
+
+    adj: Optional[float] = None
+    if bvps is not None and bvps > 0 and pb is not None and pb > 0:
+        implied_px = bvps * pb
+        if (implied_px / close_price) > 1.85:
+            adj = close_price / implied_px
+    elif eps is not None and eps > 0 and pe is not None and pe > 0:
+        implied_px = eps * pe
+        if (implied_px / close_price) > 1.85:
+            adj = close_price / implied_px
+    elif (
+        split_factor is not None
+        and 0.05 < split_factor < 0.45
+        and eps is not None
+        and eps > 0
+        and (close_price / eps) < 2.5
+    ):
+        adj = split_factor
+
+    if adj is None or not (0.05 < adj < 0.55):
+        return out, False
+
+    if eps is not None:
+        new_eps = round(eps * adj, 4)
+        out["eps"] = new_eps
+        if "trailing_eps" in out:
+            out["trailing_eps"] = new_eps
+        if new_eps > 0:
+            out["peRatio"] = round(close_price / new_eps, 2)
+            if "pe_ratio" in out:
+                out["pe_ratio"] = out["peRatio"]
+    if bvps is not None:
+        new_bvps = round(bvps * adj, 4)
+        out["bookValuePerShare"] = new_bvps
+        for k in ("book_value_per_share", "bvps"):
+            if k in out:
+                out[k] = new_bvps
+        if new_bvps > 0:
+            out["pbRatio"] = round(close_price / new_bvps, 2)
+            if "pb_ratio" in out:
+                out["pb_ratio"] = out["pbRatio"]
+    dps = _safe_float(out.get("dividendPerShare") if out.get("dividendPerShare") is not None else out.get("dividend_per_share"), 4)
+    if dps is not None and dps > close_price * 0.25:
+        out["dividendPerShare"] = round(dps * adj, 4)
+    out["fundamentals_split_adjusted"] = True
+    return out, True
+
+
 def _compute_stock_context_metrics(
     close: Optional[float],
     ema_50: Optional[float],
@@ -1516,16 +1632,18 @@ def _compute_stock_context_metrics(
     resistance_1: Optional[float],
     stop_loss: Optional[float],
 ) -> Dict[str, Any]:
-    """Pre-compute exact percentage distances, tactical near-term support/stop, and risk/reward."""
+    """Pre-compute exact percentage distances, EMA position tags, tactical near-term support/stop, and risk/reward."""
     if not close or close <= 0:
         return {}
     metrics: Dict[str, Any] = {}
     if ema_50:
-        metrics["above_ema50"] = close > ema_50
+        metrics["above_ema50"] = close >= ema_50
+        metrics["ema50_position_ar"] = f"فوق EMA50 ({ema_50}) ✅" if close >= ema_50 else f"تحت EMA50 ({ema_50}) 🔴"
     if ema_200:
-        metrics["above_ema200"] = close > ema_200
+        metrics["above_ema200"] = close >= ema_200
+        metrics["ema200_position_ar"] = f"فوق EMA200 ({ema_200}) ✅" if close >= ema_200 else f"تحت EMA200 ({ema_200}) 🔴"
     if vwap_20:
-        metrics["above_vwap"] = close > vwap_20
+        metrics["above_vwap"] = close >= vwap_20
     dist_s1_pct: Optional[float] = None
     if support_1:
         dist_s1_pct = round(((support_1 - close) / close) * 100.0, 2)
@@ -1955,10 +2073,12 @@ def _extract_rich_fundamentals(
     close_price: Optional[float] = None,
     name: Optional[str] = None,
     trade_currency: Optional[str] = None,
+    split_factor: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Extract normalized financial & fundamental ratios (camelCase + snake_case) plus deterministic diagnosis."""
     if not isinstance(fd, dict):
         fd = {}
+    fd, fund_split_adjusted = _normalize_split_adjusted_fundamentals(fd, close_price, split_factor=split_factor)
     pick = lambda *ks: next((fd.get(k) for k in ks if fd.get(k) is not None and fd.get(k) != ""), None)
     raw = {
         "pe_ratio": _safe_float(pick("peRatio", "pe_ratio", "trailing_pe")),
@@ -2002,6 +2122,8 @@ def _extract_rich_fundamentals(
             "تنبيه عملة القوائم: سعر تداول السهم بالدولار ($) لكن أرقام القوائم المالية والتدفق النقدي "
             "والكوبون المسجل بالجنيه المصري (ج.م) — اكتبها بـ ج.م ولا تضع علامة $ بجانبها."
         )
+    if fund_split_adjusted:
+        clean["fundamentals_split_adjusted"] = True
     diag = _build_fundamental_diagnosis(clean, close_price=close_price, name=name or pick("name", "name_ar"))
     if diag:
         clean["fundamental_diagnosis"] = diag
@@ -2014,6 +2136,7 @@ def _compute_fundamental_fair_value(
     ema: float,
     fd: Optional[Dict[str, Any]],
     market: str = "EGX",
+    split_factor: Optional[float] = None,
 ) -> Tuple[float, str, Dict[str, Any]]:
     """
     Compute realistic blended institutional fair value across all 4 markets (EGX, TADAWUL, QSE, UAE):
@@ -2022,7 +2145,7 @@ def _compute_fundamental_fair_value(
     - Always preserves classic Graham Number separately in `extra["graham_value"]` as defensive floor
     - Falls back cleanly to P/E -> P/B -> VWAP/EMA quant equilibrium when fundamentals are missing.
     """
-    f = fd if isinstance(fd, dict) else {}
+    f, _fv_split_adj = _normalize_split_adjusted_fundamentals(fd, close, split_factor=split_factor)
     eps = _safe_float(f.get("eps") if f.get("eps") is not None else f.get("trailing_eps"), 4)
     bvps = _safe_float(
         f.get("bookValuePerShare")
@@ -2039,6 +2162,8 @@ def _compute_fundamental_fair_value(
         bvps = round(close / pb, 4)
 
     roe = _safe_float(f.get("roe"))
+    net_inc = _safe_float(f.get("netIncome") if f.get("netIncome") is not None else f.get("net_income"), 2)
+    is_loss_making = bool((eps is not None and eps <= 0) or (net_inc is not None and net_inc < 0) or (roe is not None and roe < 0))
     dy = _safe_float(f.get("dividendYield"))
     sector = f.get("sector")
     industry = f.get("industry")
@@ -2144,6 +2269,13 @@ def _compute_fundamental_fair_value(
         return fv_pe, "مضاعف الربحية الأساسي (P/E Multiple)", extra
 
     if bvps and bvps > 0:
+        if is_loss_making:
+            distress_pb = round(min(1.0, max(0.55, target_pb * 0.45)), 2)
+            raw_pb_fv = round(bvps * distress_pb, 2)
+            fv_pb = round(max(close * 0.45, min(close * 0.98, raw_pb_fv)), 2) if close > 0 else raw_pb_fv
+            extra["pb_fair_value"] = raw_pb_fv
+            extra["loss_making_discount_applied"] = True
+            return fv_pb, "قيمة دفترية مخفضة (شركة خاسرة)", extra
         fv_pb = round(_clamp_fv(bvps * target_pb), 2)
         extra["pb_fair_value"] = round(bvps * target_pb, 2)
         return fv_pb, "مضاعف القيمة الدفترية (P/B Multiple)", extra
@@ -2449,23 +2581,25 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
 
     stocks_data: List[Dict[str, Any]] = []
     errors: List[str] = []
+    total_requested_syms = len(egx_syms) + sum(len(v) for v in non_egx_groups.values())
 
     # ── 1. EGX symbols (Primary Supabase) ────────────────────────────────────
     if egx_syms:
         sb = _get_sb()
 
         levels_map: Dict[str, Dict[str, Any]] = {}
+        by_sym: Dict[str, List[Dict[str, Any]]] = {}
         try:
+            price_limit = min(max(len(egx_syms) * 120, 120), 2200)
             res_prices = (
                 sb.from_("stock_prices")
                 .select("symbol,high,low,close,volume,date")
                 .eq("exchange", "EGX")
                 .in_("symbol", egx_syms)
                 .order("date", desc=True)
-                .limit(min(len(egx_syms) * 30, 1000))
+                .limit(price_limit)
                 .execute()
             )
-            by_sym: Dict[str, List[Dict[str, Any]]] = {}
             for r in (res_prices.data or []):
                 s_sym = r.get("symbol")
                 by_sym.setdefault(s_sym, []).append(r)
@@ -2600,6 +2734,15 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
             wyckoff_info = wyckoff_map.get(sym, {})
 
             close_price = _safe_price(latest_tech.get("close"))
+            bb_low = _safe_price(latest_tech.get("bb_lower"))
+            bb_up = _safe_price(latest_tech.get("bb_upper"))
+            ema_50, ema_200, split_factor, split_adjusted_ema = _detect_and_adjust_price_split(
+                by_sym.get(sym) or [],
+                _safe_price(latest_tech.get("ema_50")),
+                _safe_price(latest_tech.get("ema_200")),
+                close_price,
+            )
+
             fundamentals: Dict[str, Any] = {}
             fd = fund_map.get(sym)
             if isinstance(fd, dict):
@@ -2611,6 +2754,7 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     close_price=close_price,
                     name=stock_name_en,
                     trade_currency=_reg_currency_for_symbol(sym, "EGX"),
+                    split_factor=split_factor,
                 )
 
             change_pct = _safe_float(latest_tech.get("change_pct"))
@@ -2620,10 +2764,6 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
             acc_score = _safe_float(wyckoff_info.get("acc_score"))
             rsi = _safe_float(latest_tech.get("rsi_14"))
 
-            bb_low = _safe_price(latest_tech.get("bb_lower"))
-            bb_up = _safe_price(latest_tech.get("bb_upper"))
-            ema_50 = _safe_price(latest_tech.get("ema_50"))
-            ema_200 = _safe_price(latest_tech.get("ema_200"))
             vwap_20 = _safe_price(latest_tech.get("vwap_20"))
             macd_hist = _safe_float(latest_tech.get("macd_histogram"), 4)
             dist_score = _safe_float(wyckoff_info.get("dist_score"))
@@ -2717,6 +2857,8 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                 **ctx_metrics,
                 **fundamentals,
             }
+            if split_adjusted_ema:
+                egx_item["split_adjusted_ema"] = True
             up_div = _lookup_upcoming_dividend(sym, "EGX")
             if up_div:
                 egx_item["upcoming_dividend"] = up_div
@@ -2737,13 +2879,60 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     pass
             ui_chart = _build_ui_chart_payload(
                 by_sym.get(sym, []) if "by_sym" in locals() else [],
-                _safe_price(latest_tech.get("ema_50")),
+                ema_50,
                 support_1,
                 resistance_1,
                 currency=sym_currency,
             )
             if ui_chart:
                 egx_item["_ui_chart"] = ui_chart
+            if total_requested_syms <= 4 and close_price and close_price > 0:
+                try:
+                    from api.agentic_chat.quant_engine import build_quant_intelligence_for_stock
+                    fv_est, _, _ = _compute_fundamental_fair_value(
+                        close_price,
+                        vwap_20 or close_price,
+                        ema_50 or close_price,
+                        fd if isinstance(fd, dict) else None,
+                        market="EGX",
+                        split_factor=split_factor,
+                    )
+                    eps_val = _safe_float(fundamentals.get("eps"), 4)
+                    ni_val = _safe_float(fundamentals.get("net_income"), 2)
+                    loss_flag = bool((eps_val is not None and eps_val < 0) or (ni_val is not None and ni_val < 0))
+                    qi = build_quant_intelligence_for_stock(
+                        symbol=sym,
+                        exchange="EGX",
+                        currency=sym_currency,
+                        close=close_price,
+                        rsi_14=rsi,
+                        macd_histogram=macd_hist,
+                        ema_50=ema_50,
+                        ema_200=ema_200,
+                        vwap_20=vwap_20,
+                        r_vol=_safe_float(latest_tech.get("r_vol")),
+                        support_1=support_1,
+                        resistance_1=resistance_1,
+                        stop_loss=stop_loss,
+                        tactical_stop_loss=ctx_metrics.get("tactical_stop_loss"),
+                        support_1_is_distant=bool(ctx_metrics.get("support_1_is_distant")),
+                        acc_score=acc_score,
+                        dist_score=dist_score,
+                        king_ai_score=king_score,
+                        fair_value=fv_est,
+                        fund_score=fundamentals.get("fund_score"),
+                        roe=fundamentals.get("roe_pct"),
+                        pe_ratio=fundamentals.get("pe_ratio"),
+                        debt_to_equity=fundamentals.get("debt_to_equity"),
+                        is_loss_making=loss_flag,
+                        is_sharia_compliant=sharia,
+                        ohlcv_rows=by_sym.get(sym, []) if "by_sym" in locals() else [],
+                        last_date=_raw_dt,
+                    )
+                    if qi:
+                        egx_item["quant_intelligence"] = qi
+                except Exception as qi_err:
+                    logger.debug(f"[get_stock] quant_engine skipped for {sym}: {qi_err}")
             stocks_data.append(egx_item)
 
     # ── 2. Unified Non-EGX Exchanges (TADAWUL/TASI, QSE, DFM, ADX, KSE, and any future exchange) ─
@@ -3106,6 +3295,46 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     )
                     if ui_chart_sa:
                         sa_item["_ui_chart"] = ui_chart_sa
+                    if total_requested_syms <= 4 and close_price and close_price > 0:
+                        try:
+                            from api.agentic_chat.quant_engine import build_quant_intelligence_for_stock
+                            fv_sa, _, _ = _compute_fundamental_fair_value(
+                                close_price, vwap_20 or close_price, ema_50 or close_price, fd if isinstance(fd, dict) else None, market=exch_code
+                            )
+                            eps_sa = _safe_float(sa_item.get("eps"), 4)
+                            ni_sa = _safe_float(sa_item.get("net_income"), 2)
+                            loss_sa = bool((eps_sa is not None and eps_sa < 0) or (ni_sa is not None and ni_sa < 0))
+                            qi_sa = build_quant_intelligence_for_stock(
+                                symbol=sym,
+                                exchange=exch_code,
+                                currency=item_currency,
+                                close=close_price,
+                                rsi_14=rsi,
+                                macd_histogram=macd_h,
+                                ema_50=ema_50,
+                                ema_200=ema_200,
+                                vwap_20=vwap_20,
+                                r_vol=r_vol,
+                                support_1=support_1,
+                                resistance_1=resistance_1,
+                                stop_loss=stop_loss,
+                                tactical_stop_loss=ctx_metrics_sa.get("tactical_stop_loss"),
+                                support_1_is_distant=bool(ctx_metrics_sa.get("support_1_is_distant")),
+                                king_ai_score=king_score,
+                                fair_value=fv_sa,
+                                fund_score=sa_item.get("fund_score"),
+                                roe=sa_item.get("roe_pct"),
+                                pe_ratio=sa_item.get("pe_ratio"),
+                                debt_to_equity=sa_item.get("debt_to_equity"),
+                                is_loss_making=loss_sa,
+                                is_sharia_compliant=sharia_sa,
+                                ohlcv_rows=sa_ohlcv_map.get(sym, []),
+                                last_date=_raw_sa_dt,
+                            )
+                            if qi_sa:
+                                sa_item["quant_intelligence"] = qi_sa
+                        except Exception as qi_sa_err:
+                            logger.debug(f"[get_stock] quant_engine skipped for {sym} ({exch_code}): {qi_sa_err}")
                     stocks_data.append(sa_item)
 
     # If any requested symbol had no price/indicator data, suggest closest real DB matches in the user's market
@@ -3148,7 +3377,7 @@ def _sync_get_stock_levels_for_market(
     currency = _currency_for_market(exchange_code)
     levels: List[Dict[str, Any]] = []
 
-    # Batch-fetch price history & open recommendations for all symbols in 2 queries (instead of 2*N)
+    # Batch-fetch price history, indicators, fundamentals & open recs for all symbols
     rows_by_sym: Dict[str, List[Dict[str, Any]]] = {}
     if syms:
         try:
@@ -3158,15 +3387,57 @@ def _sync_get_stock_levels_for_market(
                 .eq("exchange", exchange_code)
                 .in_("symbol", syms)
                 .order("date", desc=True)
-                .limit(min(len(syms) * 60, 1500))
+                .limit(min(max(len(syms) * 120, 120), 2400))
                 .execute()
             )
             for r in (res_p.data or []):
                 s_k = str(r.get("symbol") or "").upper()
                 if s_k:
                     lst = rows_by_sym.setdefault(s_k, [])
-                    if len(lst) < 60:
+                    if len(lst) < 120:
                         lst.append(r)
+        except Exception:
+            pass
+
+    ti_by_sym: Dict[str, Dict[str, Any]] = {}
+    if syms:
+        try:
+            ti_cols = (
+                "symbol,ema_50,ema_200,vwap_20,rsi_14,r_vol,king_ai_score"
+                if exchange_code == "EGX"
+                else "symbol,ema_50,ema_200,vwap_20,rsi_14,r_vol"
+            )
+            res_ti = (
+                sb.from_("stock_technical_indicators")
+                .select(ti_cols)
+                .eq("exchange", exchange_code)
+                .in_("symbol", syms)
+                .order("date", desc=True)
+                .limit(max(len(syms) * 3, 20))
+                .execute()
+            )
+            for r in (res_ti.data or []):
+                s_k = str(r.get("symbol") or "").upper()
+                if s_k and s_k not in ti_by_sym:
+                    ti_by_sym[s_k] = r
+        except Exception:
+            pass
+
+    fund_lv_by_sym: Dict[str, Dict[str, Any]] = {}
+    if syms:
+        try:
+            res_fl = (
+                sb.from_("stock_fundamentals")
+                .select("symbol,fund_score,data")
+                .eq("exchange", exchange_code)
+                .in_("symbol", syms)
+                .limit(len(syms) + 5)
+                .execute()
+            )
+            for r in (res_fl.data or []):
+                s_k = str(r.get("symbol") or "").upper()
+                if s_k and s_k not in fund_lv_by_sym:
+                    fund_lv_by_sym[s_k] = r
         except Exception:
             pass
 
@@ -3206,6 +3477,24 @@ def _sync_get_stock_levels_for_market(
 
         close = _safe_price(rows[0].get("close"))
         date = rows[0].get("date")
+        ti_row = ti_by_sym.get(sym) or {}
+        vwap_20 = _safe_price(ti_row.get("vwap_20"))
+        ema_50, ema_200, split_factor, split_adjusted_ema = _detect_and_adjust_price_split(
+            rows,
+            _safe_price(ti_row.get("ema_50")),
+            _safe_price(ti_row.get("ema_200")),
+            close,
+        )
+
+        f_row = fund_lv_by_sym.get(sym) or {}
+        f_score = _safe_float(f_row.get("fund_score"))
+        norm_fd, _ = _normalize_split_adjusted_fundamentals(f_row.get("data"), close, split_factor=split_factor)
+        f_eps = _safe_float(norm_fd.get("eps") if norm_fd.get("eps") is not None else norm_fd.get("trailing_eps"), 4)
+        f_ni = _safe_float(norm_fd.get("netIncome") if norm_fd.get("netIncome") is not None else norm_fd.get("net_income"), 2)
+        f_bvps = _safe_float(norm_fd.get("bookValuePerShare") if norm_fd.get("bookValuePerShare") is not None else norm_fd.get("bvps"), 4)
+        f_pe = _safe_float(norm_fd.get("peRatio") if norm_fd.get("peRatio") is not None else norm_fd.get("pe_ratio"))
+        is_loss_making = bool((f_eps is not None and f_eps < 0) or (f_ni is not None and f_ni < 0))
+        is_neg_eq = bool(f_bvps is not None and f_bvps <= 0)
 
         recent_20 = rows[:20]
         recent_lows = [float(r["low"]) for r in recent_20 if r.get("low")]
@@ -3238,20 +3527,31 @@ def _sync_get_stock_levels_for_market(
 
         lvl_ctx = _compute_stock_context_metrics(
             close=close,
-            ema_50=None,
-            ema_200=None,
-            vwap_20=None,
+            ema_50=ema_50,
+            ema_200=ema_200,
+            vwap_20=vwap_20,
             support_1=support_1,
             resistance_1=resistance_1,
             stop_loss=stop_loss,
         )
-        levels.append({
+        lvl_item: Dict[str, Any] = {
             "symbol": sym,
             "market": ui_mkt,
             "exchange": exchange_code,
             "currency": currency,
             "close": close,
             "date": date,
+            "ema_50": ema_50,
+            "ema_200": ema_200,
+            "vwap_20": vwap_20,
+            "rsi_14": _safe_float(ti_row.get("rsi_14")),
+            "r_vol": _safe_float(ti_row.get("r_vol")),
+            "king_ai_score": _normalize_king_ai_score(ti_row.get("king_ai_score")),
+            "fund_score": f_score,
+            "pe_ratio": f_pe,
+            "is_loss_making": is_loss_making,
+            "is_negative_equity": is_neg_eq,
+            "is_sharia_compliant": is_sharia_compliant(sym, market=exchange_code) if exchange_code in ("EGX", "TADAWUL") else None,
             "support_1": support_1,
             "support_2": support_2,
             "resistance_1": resistance_1,
@@ -3263,7 +3563,10 @@ def _sync_get_stock_levels_for_market(
             "has_active_recommendation": has_rec,
             "active_recommendation": rec_data,
             **lvl_ctx,
-        })
+        }
+        if split_adjusted_ema:
+            lvl_item["split_adjusted_ema"] = True
+        levels.append(lvl_item)
     return levels
 
 
@@ -4261,7 +4564,7 @@ def _sync_get_accumulation_stocks(
                         s["support_2"] = _safe_price(s1 * 0.96) if s1 else None
                         s["resistance_2"] = _safe_price(r1 * 1.05) if r1 else None
                         s["stop_loss"] = _safe_price(s1 * 0.98) if s1 else None
-                        s["king_ai_score"] = _safe_float(ti.get("king_ai_score"))
+                        s["king_ai_score"] = _normalize_king_ai_score(ti.get("king_ai_score"))
                         s["verdict"] = verdict
 
                     out_sum: Dict[str, Any] = {
@@ -4327,7 +4630,7 @@ def _sync_get_accumulation_stocks(
                 "support_2": r.get("support_2"),
                 "resistance_2": r.get("resistance_2"),
                 "stop_loss": r.get("stop_loss"),
-                "king_ai_score": r.get("king_ai_score"),
+                "king_ai_score": _normalize_king_ai_score(r.get("king_ai_score")),
                 "verdict": verdict,
                 "date": r.get("date"),
                 "is_sharia_compliant": None,
@@ -4439,8 +4742,8 @@ def _sync_get_accumulation_stocks(
                 s["support_2"] = _safe_price(s1 * 0.96) if s1 else None
                 s["resistance_2"] = _safe_price(r1 * 1.05) if r1 else None
                 s["stop_loss"] = _safe_price(s1 * 0.98) if s1 else None
-                s["king_ai_score"] = _safe_float(ti.get("king_ai_score"))
-                s["egx_ai_score"] = _safe_float(ti.get("egx_ai_score"))
+                s["king_ai_score"] = _normalize_king_ai_score(ti.get("king_ai_score"))
+                s["egx_ai_score"] = _normalize_king_ai_score(ti.get("egx_ai_score"))
                 s["verdict"] = verdict
         except Exception:
             pass
@@ -4792,10 +5095,11 @@ def _sync_get_fair_value(
         )
         if latest_date:
             query = query.eq("date", latest_date)
-        query = query.order("date", desc=True).limit(50)
         if symbols:
             clean_syms = [_normalize_symbol(s) for s in symbols if s][:25]
-            query = query.in_("symbol", clean_syms)
+            query = query.in_("symbol", clean_syms).order("date", desc=True).limit(max(50, len(clean_syms) * 3))
+        else:
+            query = query.order("date", desc=True).limit(50)
         res = query.execute()
         rows = res.data or []
     except Exception as e:
@@ -4915,6 +5219,16 @@ def _load_dividends_calendar_cached(market_key: str) -> Dict[str, Any]:
     return {"market": market_key, "dividends": [], "summary": {}}
 
 
+def _dividend_entitlement_rule_ar(ex_date: Any, record_date: Any = None) -> str:
+    ex_s = str(ex_date or "غير محدد")[:10]
+    rec_s = str(record_date or "غير محدد")[:10]
+    return (
+        f"قاعدة استحقاق الكوبون الحتمية: يوم التداول بدون كوبون (Ex-Date: {ex_s}) هو أول جلسة لا يستحق فيها المشتري الجديد الكوبون؛ "
+        f"أما مالك السهم عند إغلاق آخر جلسة تسبق الـ Ex-Date فيستحق الكوبون كاملاً حتى لو باع أسهمه في يوم الـ Ex-Date نفسه ({ex_s}) أو بعده. "
+        f"تاريخ التسجيل (Record Date: {rec_s}) تاريخ مقاصة إداري وليس آخر يوم للشراء أو البيع."
+    )
+
+
 def _lookup_upcoming_dividend(symbol: str, market: Optional[str] = "EGX") -> Optional[Dict[str, Any]]:
     """Fast O(1) cached lookup for a stock's upcoming or pending-pay cash dividend."""
     if not symbol:
@@ -4937,6 +5251,7 @@ def _lookup_upcoming_dividend(symbol: str, market: Optional[str] = "EGX") -> Opt
                     "yield_pct": item.get("yield_pct"),
                     "days_until_ex": item.get("days_until_ex"),
                     "status": item.get("status"),
+                    "entitlement_rule_ar": _dividend_entitlement_rule_ar(item.get("ex_date"), item.get("record_date")),
                 }
             break
     return None
@@ -4952,6 +5267,16 @@ def _sync_get_dividends(
     mkey = _div_market_key(market)
     cal = _load_dividends_calendar_cached(mkey)
     all_rows = cal.get("dividends") or []
+
+    def _with_rule(rows_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out_rows = []
+        for r in rows_list:
+            if not isinstance(r, dict):
+                continue
+            item = dict(r)
+            item["entitlement_rule_ar"] = _dividend_entitlement_rule_ar(r.get("ex_date"), r.get("record_date"))
+            out_rows.append(item)
+        return out_rows
 
     if symbols:
         want = {_normalize_symbol(s) for s in symbols if s}
@@ -4972,7 +5297,8 @@ def _sync_get_dividends(
             "status": "success",
             "market": mkey.upper(),
             "updated_at": cal.get("updatedAt"),
-            "dividends": matched[:lim],
+            "entitlement_rule_general_ar": "مالك السهم عند إغلاق آخر جلسة قبل الـ Ex-Date يستحق الكوبون كاملاً حتى لو باع يوم الـ Ex-Date نفسه أو بعده؛ المشتري يوم Ex-Date لا يستحق.",
+            "dividends": _with_rule(matched[:lim]),
             "calendar_url": "/dividends" if mkey == "egx" else f"/dividends/{mkey}",
         }
 
@@ -4988,8 +5314,9 @@ def _sync_get_dividends(
         "status": "success",
         "market": mkey.upper(),
         "updated_at": cal.get("updatedAt"),
+        "entitlement_rule_general_ar": "مالك السهم عند إغلاق آخر جلسة قبل الـ Ex-Date يستحق الكوبون كاملاً حتى لو باع يوم الـ Ex-Date نفسه أو بعده؛ المشتري يوم Ex-Date لا يستحق.",
         "summary": cal.get("summary") or {},
-        "dividends": filtered[:lim],
+        "dividends": _with_rule(filtered[:lim]),
         "calendar_url": "/dividends" if mkey == "egx" else f"/dividends/{mkey}",
     }
 
@@ -5189,12 +5516,14 @@ def _sync_calculate_position(
     quantity: Optional[float] = None,
     entry_price: Optional[float] = None,
     total_cost: Optional[float] = None,
+    dca_budget: Optional[float] = None,
 ) -> Dict[str, Any]:
     clean_sym, sym_mkt = _resolve_symbol_and_market(symbol)
     ui_mkt = _ui_market_label(sym_mkt)
     currency = _currency_for_market(sym_mkt)
 
     close = 1.0
+    ohlcv_rows: List[Dict[str, Any]] = []
     if sym_mkt != "EGX":
         sb_sa = _get_sb_for_market(sym_mkt)
         if sb_sa is None:
@@ -5212,18 +5541,18 @@ def _sync_calculate_position(
             )
             if res.data and res.data[0].get("close"):
                 close = _safe_float(res.data[0].get("close")) or 1.0
-            else:
-                res_p = (
-                    sb_sa.from_("stock_prices")
-                    .select("close,date")
-                    .eq("exchange", sym_mkt)
-                    .eq("symbol", clean_sym)
-                    .order("date", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if res_p.data and res_p.data[0].get("close"):
-                    close = _safe_float(res_p.data[0].get("close")) or 1.0
+            res_p = (
+                sb_sa.from_("stock_prices")
+                .select("high,low,close,date")
+                .eq("exchange", sym_mkt)
+                .eq("symbol", clean_sym)
+                .order("date", desc=True)
+                .limit(60)
+                .execute()
+            )
+            ohlcv_rows = res_p.data or []
+            if close == 1.0 and ohlcv_rows and ohlcv_rows[0].get("close"):
+                close = _safe_float(ohlcv_rows[0].get("close")) or 1.0
         except Exception:
             pass
     else:
@@ -5238,8 +5567,18 @@ def _sync_calculate_position(
                 .limit(1)
                 .execute()
             )
-            if res.data:
+            if res.data and res.data[0].get("close"):
                 close = _safe_float(res.data[0].get("close")) or 1.0
+            res_p = (
+                sb.from_("stock_prices")
+                .select("high,low,close,date")
+                .eq("exchange", "EGX")
+                .eq("symbol", clean_sym)
+                .order("date", desc=True)
+                .limit(60)
+                .execute()
+            )
+            ohlcv_rows = res_p.data or []
         except Exception:
             pass
 
@@ -5267,6 +5606,54 @@ def _sync_calculate_position(
         out["profit_loss_sar"] = profit_loss
     elif sym_mkt == "EGX":
         out["profit_loss_egp"] = profit_loss
+
+    eff_entry = float(entry_price or 0.0)
+    if (eff_entry == 0.0 and qty > 0 and cost > 0):
+        eff_entry = cost / qty
+    wants_dca = bool((dca_budget and float(dca_budget) > 0) or (close > 0 and eff_entry > close * 1.015))
+    if wants_dca and close > 0:
+        try:
+            from api.portfolio_or_optimizer import build_smart_dca_plan
+            stock_info: Dict[str, Any] = {}
+            stock_res = _sync_get_stock([clean_sym], market=sym_mkt)
+            if isinstance(stock_res, dict) and isinstance(stock_res.get("stocks"), list) and stock_res["stocks"]:
+                stock_info = stock_res["stocks"][0] or {}
+            qi = stock_info.get("quant_intelligence") if isinstance(stock_info.get("quant_intelligence"), dict) else {}
+            ref_used = qty <= 0
+            eff_qty = float(qty) if qty > 0 else 100.0
+            eff_stop = (
+                stock_info.get("tactical_stop_loss")
+                if stock_info.get("support_1_is_distant") and stock_info.get("tactical_stop_loss")
+                else stock_info.get("stop_loss")
+            )
+            eps_chk = _safe_float(stock_info.get("eps"), 4)
+            ni_chk = _safe_float(stock_info.get("net_income"), 2)
+            loss_flag = bool(
+                stock_info.get("is_loss_making")
+                or (eps_chk is not None and eps_chk < 0)
+                or (ni_chk is not None and ni_chk < 0)
+            )
+            out["smart_dca_plan"] = build_smart_dca_plan(
+                symbol=clean_sym,
+                exchange=sym_mkt,
+                currency=currency,
+                current_price=close,
+                old_shares=eff_qty,
+                old_avg_price=eff_entry if eff_entry > 0 else close,
+                dca_budget=dca_budget,
+                support_1=stock_info.get("support_1"),
+                support_2=stock_info.get("support_2"),
+                stop_loss=eff_stop,
+                setup_regime=qi.get("setup_regime"),
+                dist_score=stock_info.get("distribution_score"),
+                fund_score=stock_info.get("fund_score"),
+                is_loss_making=loss_flag,
+                ohlcv_rows=ohlcv_rows,
+                reference_shares_used=ref_used,
+            )
+        except Exception as dca_err:
+            logger.debug(f"[calculate_position] Smart DCA skipped for {clean_sym}: {dca_err}")
+
     return out
 
 
@@ -5275,8 +5662,9 @@ async def execute_calculate_position(
     quantity: Optional[float] = None,
     entry_price: Optional[float] = None,
     total_cost: Optional[float] = None,
+    dca_budget: Optional[float] = None,
 ) -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_calculate_position, symbol, quantity, entry_price, total_cost)
+    return await asyncio.to_thread(_sync_calculate_position, symbol, quantity, entry_price, total_cost, dca_budget)
 
 
 # ---------------------------------------------------------------------------
@@ -5630,11 +6018,14 @@ def _build_portfolio_view_payload(
     tech_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
     wyckoff_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
+    fund_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    price_hist_by_sym: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+
     if egx_syms:
         try:
             tech_res = (
                 sb.from_("stock_technical_indicators")
-                .select("symbol, exchange, close, change_pct, date, rsi_14, ema_50, ema_200, macd_histogram, bb_lower, bb_upper, king_ai_score")
+                .select("symbol, exchange, close, change_pct, date, rsi_14, ema_50, ema_200, macd_histogram, bb_lower, bb_upper, r_vol, king_ai_score")
                 .in_("symbol", egx_syms)
                 .order("date", desc=True)
                 .limit(max(len(egx_syms) * 5, 30))
@@ -5667,6 +6058,41 @@ def _build_portfolio_view_payload(
                 k = ("EGX", s)
                 if s and k not in wyckoff_map:
                     wyckoff_map[k] = row
+        except Exception:
+            pass
+
+        try:
+            sf_res = (
+                sb.from_("stock_fundamentals")
+                .select("symbol, fund_score, data")
+                .eq("exchange", "EGX")
+                .in_("symbol", egx_syms)
+                .limit(len(egx_syms) + 5)
+                .execute()
+            )
+            for row in sf_res.data or []:
+                s = str(row.get("symbol", "")).upper()
+                if s and ("EGX", s) not in fund_map:
+                    fund_map[("EGX", s)] = row
+        except Exception:
+            pass
+
+        try:
+            sp_hist_res = (
+                sb.from_("stock_prices")
+                .select("symbol, date, close, volume")
+                .eq("exchange", "EGX")
+                .in_("symbol", egx_syms)
+                .order("date", desc=True)
+                .limit(min(max(len(egx_syms) * 120, 120), 2400))
+                .execute()
+            )
+            for row in sp_hist_res.data or []:
+                s = str(row.get("symbol", "")).upper()
+                if s:
+                    lst = price_hist_by_sym.setdefault(("EGX", s), [])
+                    if len(lst) < 120:
+                        lst.append(row)
         except Exception:
             pass
 
@@ -5730,6 +6156,7 @@ def _build_portfolio_view_payload(
                             change_map[k] = _safe_float(((c0 - c1) / c1) * 100.0)
 
     enriched = []
+    fcf_by_pos_key: Dict[str, Optional[float]] = {}
     for p in holdings:
         s = str(p.get("symbol", "")).upper()
         norm_s, mkt = _resolve_symbol_and_market(s)
@@ -5747,7 +6174,52 @@ def _build_portfolio_view_payload(
 
         t_row = tech_map.get((mkt, s)) or tech_map.get((mkt, norm_s)) or {}
         w_row = wyckoff_map.get((mkt, s)) or wyckoff_map.get((mkt, norm_s)) or {}
-        enriched.append({
+        hist_rows = price_hist_by_sym.get((mkt, s)) or price_hist_by_sym.get((mkt, norm_s)) or []
+        adj_ema50, adj_ema200, sp_factor, sp_adj_flag = _detect_and_adjust_price_split(
+            hist_rows,
+            _safe_price(t_row.get("ema_50")),
+            _safe_price(t_row.get("ema_200")),
+            last_price,
+        )
+        f_row = fund_map.get((mkt, s)) or fund_map.get((mkt, norm_s)) or {}
+        f_score = _safe_float(f_row.get("fund_score"))
+        norm_fd, _ = _normalize_split_adjusted_fundamentals(f_row.get("data"), last_price, split_factor=sp_factor)
+        f_eps = _safe_float(norm_fd.get("eps") if norm_fd.get("eps") is not None else norm_fd.get("trailing_eps"), 4)
+        f_ni = _safe_float(norm_fd.get("netIncome") if norm_fd.get("netIncome") is not None else norm_fd.get("net_income"), 2)
+        f_bvps = _safe_float(norm_fd.get("bookValuePerShare") if norm_fd.get("bookValuePerShare") is not None else norm_fd.get("bvps"), 4)
+        f_pe = _safe_float(norm_fd.get("peRatio") if norm_fd.get("peRatio") is not None else norm_fd.get("pe_ratio"))
+        f_roe = _safe_float(norm_fd.get("roe") if norm_fd.get("roe") is not None else norm_fd.get("return_on_equity"))
+        f_fcf = _safe_float(norm_fd.get("freeCashFlow") if norm_fd.get("freeCashFlow") is not None else norm_fd.get("free_cash_flow"), 2)
+        fcf_by_pos_key[s] = f_fcf
+
+        vols = [float(r["volume"]) for r in hist_rows[:10] if r.get("volume") is not None]
+        has_vol_hist = len(vols) >= 3
+        avg_vol_5 = (sum(vols[:5]) / len(vols[:5])) if vols else None
+        avg_vol_10 = (sum(vols) / len(vols)) if vols else None
+        zero_vol_days_10 = sum(1 for v in vols if v <= 0)
+        avg_turnover_10 = (avg_vol_10 * last_price) if (avg_vol_10 is not None and last_price) else None
+        r_vol = _safe_float(t_row.get("r_vol"))
+        is_illiquid = bool(
+            has_vol_hist and (
+                (avg_vol_5 is not None and avg_vol_5 <= 0)
+                or zero_vol_days_10 >= 4
+                or (mkt == "EGX" and avg_turnover_10 is not None and avg_turnover_10 < 50_000.0)
+            )
+        )
+        is_thin_liquidity = bool(
+            is_illiquid
+            or (r_vol is not None and r_vol < 0.45)
+            or (mkt == "EGX" and avg_turnover_10 is not None and avg_turnover_10 < 1_500_000.0)
+        )
+        is_loss_making = bool(
+            (f_eps is not None and f_eps < 0)
+            or (f_ni is not None and f_ni < 0)
+            or (f_roe is not None and f_roe < 0)
+        )
+        is_negative_equity = bool(f_bvps is not None and f_bvps <= 0)
+        is_sharia = is_sharia_compliant(s, market=mkt) if mkt in ("EGX", "TADAWUL") else None
+
+        pos_entry: Dict[str, Any] = {
             "id": p.get("id"),
             "symbol": s,
             "market": _ui_market_label(mkt),
@@ -5762,17 +6234,34 @@ def _build_portfolio_view_payload(
             "profit_value": round(profit_value, 2) if profit_value is not None else None,
             "profit_pct": round(profit_pct, 2) if profit_pct is not None else None,
             "rsi_14": _safe_float(t_row.get("rsi_14")),
-            "ema_50": _safe_price(t_row.get("ema_50")),
-            "ema_200": _safe_price(t_row.get("ema_200")),
+            "ema_50": adj_ema50,
+            "ema_200": adj_ema200,
             "macd_histogram": _safe_float(t_row.get("macd_histogram"), 4),
             "support_est": _safe_price(t_row.get("bb_lower")),
             "resistance_est": _safe_price(t_row.get("bb_upper")),
+            "r_vol": r_vol,
             "king_ai_score": _normalize_king_ai_score(t_row.get("king_ai_score")),
             "wyckoff_phase": w_row.get("wyckoff_phase"),
             "acc_score": _safe_float(w_row.get("acc_score")),
             "dist_score": _safe_float(w_row.get("dist_score")),
+            "fund_score": f_score,
+            "pe_ratio": f_pe,
+            "eps": f_eps,
+            "roe_pct": f_roe,
+            "is_loss_making": is_loss_making,
+            "is_negative_equity": is_negative_equity,
+            "is_illiquid": is_illiquid,
+            "is_thin_liquidity": is_thin_liquidity,
+            "is_sharia_compliant": is_sharia,
             "added_at": p.get("added_at"),
-        })
+        }
+        if last_price and adj_ema50:
+            pos_entry["ema50_position_ar"] = f"فوق EMA50 ({adj_ema50}) ✅" if last_price >= adj_ema50 else f"تحت EMA50 ({adj_ema50}) 🔴"
+        if last_price and adj_ema200:
+            pos_entry["ema200_position_ar"] = f"فوق EMA200 ({adj_ema200}) ✅" if last_price >= adj_ema200 else f"تحت EMA200 ({adj_ema200}) 🔴"
+        if sp_adj_flag:
+            pos_entry["split_adjusted_ema"] = True
+        enriched.append(pos_entry)
 
     has_unknown_cost = any(p["cost_basis"] is None for p in enriched)
     total_cost = None if has_unknown_cost else sum(p["cost_basis"] or 0 for p in enriched)
@@ -5781,6 +6270,78 @@ def _build_portfolio_view_payload(
     total_profit = (total_value - total_cost) if (total_cost is not None and total_value is not None) else None
     total_profit_pct = ((total_profit / total_cost) * 100) if (total_cost and total_cost > 0 and total_profit is not None) else None
     equity = (total_value + cash) if total_value is not None else cash
+
+    denom_w = equity if equity and equity > 0 else (total_cost if total_cost and total_cost > 0 else 0.0)
+    exit_priority_syms: List[str] = []
+    trim_excess_syms: List[str] = []
+    hold_core_syms: List[str] = []
+    hold_watch_syms: List[str] = []
+    do_not_buy_syms: List[str] = []
+    conc_warnings: List[str] = []
+    est_cash_freed = 0.0
+
+    for item in enriched:
+        val_i = item.get("market_value") if item.get("market_value") is not None else (item.get("cost_basis") or 0.0)
+        w_pct = round((float(val_i) / float(denom_w)) * 100.0, 1) if denom_w > 0 and val_i is not None else 0.0
+        item["weight_pct"] = w_pct
+        lp = _safe_float(item.get("last_price"))
+        e50 = _safe_float(item.get("ema_50"))
+        e200 = _safe_float(item.get("ema_200"))
+        below_both = bool(lp and e50 and e200 and lp < e50 and lp < e200)
+        pe_v = _safe_float(item.get("pe_ratio"))
+        fs_v = _safe_float(item.get("fund_score"))
+        chk_fcf = fcf_by_pos_key.get(str(item.get("symbol") or "").upper())
+        sym_u = str(item.get("symbol") or "").upper()
+        loss_mk = bool(item.get("is_loss_making"))
+        neg_eq = bool(item.get("is_negative_equity"))
+        illq = bool(item.get("is_illiquid"))
+        thin = bool(item.get("is_thin_liquidity"))
+
+        if w_pct >= 16.0:
+            conc_warnings.append(f"{sym_u} يمثل {w_pct}% من المحفظة (تركّز مرتفع)")
+
+        reasons: List[str] = []
+        over_and_weak = bool(pe_v is not None and pe_v > 30.0 and ((chk_fcf is not None and chk_fcf < 0) or (lp and e50 and lp < e50)))
+        heavy_trim = bool(w_pct >= 16.0 and ((pe_v is not None and pe_v > 30.0) or (fs_v is not None and fs_v < 55.0) or below_both))
+
+        if illq or neg_eq or (loss_mk and (fs_v is None or fs_v < 50.0)):
+            rot_act = "EXIT_PRIORITY"
+            forbidden = True
+            if illq:
+                reasons.append("سيولة منعدمة / تداول صفري")
+            if neg_eq:
+                reasons.append("حقوق ملكية سالبة")
+            if loss_mk:
+                reasons.append("شركة خاسرة وتقييم مالي ضعيف")
+            est_cash_freed += float(val_i or 0.0)
+            exit_priority_syms.append(sym_u)
+        elif heavy_trim or over_and_weak:
+            rot_act = "TRIM_EXCESS"
+            forbidden = bool((pe_v is not None and pe_v > 30.0) or loss_mk)
+            if w_pct >= 16.0:
+                reasons.append(f"تركّز وزن مرتفع ({w_pct}%)")
+            if pe_v is not None and pe_v > 30.0:
+                reasons.append(f"مكرر ربحية متضخم (P/E={pe_v:.1f}x)")
+            if below_both:
+                reasons.append("اتجاه هابط تحت EMA50 و EMA200")
+            est_cash_freed += float(val_i or 0.0) * 0.33
+            trim_excess_syms.append(sym_u)
+        elif (not loss_mk) and (fs_v is not None and fs_v >= 65.0) and (pe_v is None or pe_v <= 22.0):
+            rot_act = "HOLD_CORE"
+            forbidden = False
+            reasons.append(f"أساسيات قوية (تقييم مالي {fs_v:.0f}/100)" + (" + سيولة ضعيفة نسبياً (لا تتجاوز 15%)" if thin else ""))
+            hold_core_syms.append(sym_u)
+        else:
+            rot_act = "HOLD_WATCH"
+            forbidden = bool(loss_mk or (pe_v is not None and pe_v > 30.0))
+            reasons.append("يُحتفظ به بمراقبة الوقف دون اندفاع للشراء")
+            hold_watch_syms.append(sym_u)
+
+        if forbidden and sym_u not in do_not_buy_syms:
+            do_not_buy_syms.append(sym_u)
+        item["rotation_action"] = rot_act
+        item["rotation_reason_ar"] = " — ".join(reasons)
+        item["forbidden_to_buy"] = forbidden
 
     totals_by_market: Dict[str, Dict[str, Any]] = {}
     if non_egx_by_mkt:
@@ -5826,6 +6387,21 @@ def _build_portfolio_view_payload(
     }
     if totals_by_market:
         res_payload["totals_by_market"] = totals_by_market
+    if enriched:
+        res_payload["portfolio_rotation_matrix"] = {
+            "exit_priority_symbols": exit_priority_syms,
+            "trim_excess_symbols": trim_excess_syms,
+            "hold_core_symbols": hold_core_syms,
+            "hold_watch_symbols": hold_watch_syms,
+            "do_not_buy_symbols": do_not_buy_syms,
+            "estimated_cash_freed_from_exits": round(est_cash_freed, 2),
+            "current_cash_pct": round((cash / equity) * 100.0, 1) if equity and equity > 0 else 0.0,
+            "concentration_warnings": conc_warnings,
+            "note_ar": (
+                "مصفوفة القرار الحتمية: يُمنع منعاً باتاً اقتراح شراء أو تعزيز أي سهم في do_not_buy_symbols أو exit_priority_symbols "
+                "(شركات خاسرة، حقوق ملكية سالبة، أو سيولة منعدمة). الأسهم في hold_core_symbols ذات أساسيات قوية."
+            ),
+        }
 
     # Enrich portfolio view with upcoming/pending cash dividends for user's held stocks
     port_divs: List[Dict[str, Any]] = []
@@ -5853,6 +6429,7 @@ def _build_portfolio_view_payload(
                 "pay_date": udiv.get("pay_date"),
                 "days_until_ex": udiv.get("days_until_ex"),
                 "status": udiv.get("status"),
+                "entitlement_rule_ar": _dividend_entitlement_rule_ar(udiv.get("ex_date"), udiv.get("record_date")),
             })
     if port_divs:
         res_payload["upcoming_dividends"] = port_divs
@@ -6109,6 +6686,42 @@ def _manage_tg_json_portfolio(
 # ---------------------------------------------------------------------------
 # Tool: manage_portfolio (with prompt-injection safeguard)
 # ---------------------------------------------------------------------------
+def _fetch_compact_portfolio_summary(sb: Any, user_id: str) -> Dict[str, Any]:
+    """Read compact post-mutation cost basis & cash balance so replies never quote stale totals."""
+    try:
+        pos_res = (
+            sb.from_("positions")
+            .select("quantity,entry_price")
+            .eq("user_id", user_id)
+            .eq("status", "open")
+            .limit(80)
+            .execute()
+        )
+        open_rows = pos_res.data or []
+        total_cost = 0.0
+        open_cnt = 0
+        for row in open_rows:
+            q = _safe_float(row.get("quantity"), 4) or 0.0
+            ep = _safe_float(row.get("entry_price"), 4) or 0.0
+            if q > 0:
+                open_cnt += 1
+                total_cost += q * ep
+        cash_bal = 0.0
+        try:
+            prof = sb.from_("profiles").select("cash_balance").eq("id", user_id).limit(1).execute()
+            if prof.data:
+                cash_bal = _safe_float(prof.data[0].get("cash_balance")) or 0.0
+        except Exception:
+            pass
+        return {
+            "open_positions_count": open_cnt,
+            "total_cost_basis": round(total_cost, 2),
+            "cash_balance": round(cash_bal, 2),
+        }
+    except Exception:
+        return {}
+
+
 def _sync_manage_portfolio(
     user_id: Optional[str],
     operation: str,
@@ -6304,6 +6917,7 @@ def _sync_manage_portfolio(
                 "market": _ui_market_label(sym_mkt),
                 "currency": curr_lbl,
                 "message": msg,
+                "updated_portfolio_totals": _fetch_compact_portfolio_summary(sb, user_id),
             }
 
         elif op in ("update",):
@@ -6322,6 +6936,7 @@ def _sync_manage_portfolio(
                 "operation": op,
                 "symbol": clean_sym,
                 "message": f"تم تعديل مركز سهم {clean_sym} بنجاح.",
+                "updated_portfolio_totals": _fetch_compact_portfolio_summary(sb, user_id),
             }
 
         elif op in ("remove", "delete"):
@@ -6336,6 +6951,7 @@ def _sync_manage_portfolio(
                 "operation": op,
                 "symbol": clean_sym,
                 "message": f"تم حذف سهم {clean_sym} من محفظتك بنجاح.",
+                "updated_portfolio_totals": _fetch_compact_portfolio_summary(sb, user_id),
             }
 
         elif op in ("sell",):
@@ -6373,6 +6989,7 @@ def _sync_manage_portfolio(
                 "operation": op,
                 "symbol": clean_sym,
                 "message": msg,
+                "updated_portfolio_totals": _fetch_compact_portfolio_summary(sb, user_id),
             }
         else:
             return {"status": "error", "message": f"العملية {op} غير مدعومة."}
@@ -6633,12 +7250,12 @@ def _sync_optimize_portfolio(
     try:
         pr_res = (
             mkt_sb.from_("stock_prices")
-            .select("symbol, date, close")
+            .select("symbol, date, close, volume")
             .eq("exchange", exch)
             .in_("symbol", resolved_syms)
             .gte("date", cutoff_date)
             .order("date", desc=True)
-            .limit(min(2200, len(resolved_syms) * 110))
+            .limit(min(2400, max(120, len(resolved_syms) * 120)))
             .execute()
         )
         price_rows = pr_res.data or []
@@ -6647,11 +7264,21 @@ def _sync_optimize_portfolio(
 
     returns_map = compute_returns_by_date(price_rows)
     latest_close_map: Dict[str, float] = {}
+    vols_by_sym: Dict[str, List[float]] = {}
+    price_rows_by_sym: Dict[str, List[Dict[str, Any]]] = {}
     for row in price_rows:
         s_u = str(row.get("symbol") or "").strip().upper()
+        if s_u:
+            lst = price_rows_by_sym.setdefault(s_u, [])
+            if len(lst) < 120:
+                lst.append(row)
         c_val = _safe_float(row.get("close"))
         if s_u and c_val and c_val > 0 and s_u not in latest_close_map:
             latest_close_map[s_u] = c_val
+        if s_u and row.get("volume") is not None:
+            v_val = _safe_float(row.get("volume"))
+            if v_val is not None and v_val >= 0 and len(vols_by_sym.get(s_u, [])) < 10:
+                vols_by_sym.setdefault(s_u, []).append(v_val)
 
     # Optional Fair Value upside map for ALL 4 markets (cached, zero extra DB queries on warm cache)
     fv_upside_map: Dict[str, float] = {}
@@ -6674,15 +7301,15 @@ def _sync_optimize_portfolio(
     except Exception:
         _resolve_sector_ar = None
 
-    # 3. Assemble AssetInput list (combining Fair Value + Fundamental Quality + Technical Health)
-    assets: List[AssetInput] = []
+    # 3. Assemble AssetInput list (combining Fair Value + Fundamental Quality + Liquidity + Technical Health)
+    candidate_items: List[Dict[str, Any]] = []
     missing_syms: List[str] = []
     fund_summary_by_sym: Dict[str, Dict[str, Any]] = {}
     for sym in resolved_syms:
         ind = ind_map.get(sym) or {}
         meta = stock_meta.get(sym) or {}
         sf_row = fund_opt_map.get(sym) or {}
-        sf_data = sf_row.get("data") if isinstance(sf_row.get("data"), dict) else {}
+        raw_sf_data = sf_row.get("data") if isinstance(sf_row.get("data"), dict) else {}
         price = _safe_float(ind.get("close")) or latest_close_map.get(sym)
         if not price or not _math.isfinite(price) or price <= 0:
             missing_syms.append(sym)
@@ -6690,12 +7317,63 @@ def _sync_optimize_portfolio(
         atr = _safe_float(ind.get("atr_14"))
         fallback_vol = max(0.008, min(0.08, (atr / price) if (atr and price > 0) else 0.022))
 
+        adj_ema50, _, sp_factor, _ = _detect_and_adjust_price_split(
+            price_rows_by_sym.get(sym) or [],
+            _safe_float(ind.get("ema_50")),
+            None,
+            price,
+        )
+        sf_data, _ = _normalize_split_adjusted_fundamentals(raw_sf_data, price, split_factor=sp_factor)
+
         f_score = _safe_float(sf_row.get("fund_score"))
         f_dy = _safe_float(sf_data.get("dividendYield") or sf_data.get("dividend_yield"))
         f_eps = _safe_float(sf_data.get("eps") or sf_data.get("trailing_eps"), 4)
         f_ni = _safe_float(sf_data.get("netIncome") or sf_data.get("net_income"), 2)
+        f_bvps = _safe_float(
+            sf_data.get("bookValuePerShare")
+            if sf_data.get("bookValuePerShare") is not None
+            else (sf_data.get("book_value_per_share") if sf_data.get("book_value_per_share") is not None else sf_data.get("bvps")),
+            4,
+        )
         f_pe = _safe_float(sf_data.get("peRatio") or sf_data.get("pe_ratio"))
         f_roe = _safe_float(sf_data.get("roe") or sf_data.get("return_on_equity"))
+        f_fcf = _safe_float(
+            sf_data.get("freeCashFlow")
+            if sf_data.get("freeCashFlow") is not None
+            else sf_data.get("free_cash_flow"),
+            2,
+        )
+        is_loss_making = bool(
+            (f_eps is not None and f_eps < 0)
+            or (f_ni is not None and f_ni < 0)
+            or (f_roe is not None and f_roe < 0)
+        )
+        is_negative_equity = bool(f_bvps is not None and f_bvps <= 0)
+
+        recent_vols = vols_by_sym.get(sym) or []
+        has_vol_history = len(recent_vols) >= 3
+        avg_vol_5 = (sum(recent_vols[:5]) / len(recent_vols[:5])) if recent_vols else None
+        avg_vol_10 = (sum(recent_vols) / len(recent_vols)) if recent_vols else None
+        zero_vol_days_10 = sum(1 for v in recent_vols if v <= 0)
+        avg_turnover_10 = (avg_vol_10 * price) if avg_vol_10 is not None else None
+        is_illiquid = bool(
+            has_vol_history
+            and (
+                (avg_vol_5 is not None and avg_vol_5 <= 0)
+                or zero_vol_days_10 >= 4
+                or (exch == "EGX" and avg_turnover_10 is not None and avg_turnover_10 < 50_000.0)
+            )
+        )
+        r_vol = _safe_float(ind.get("r_vol"))
+        is_thin_liquidity = bool(
+            (not is_illiquid)
+            and (
+                (r_vol is not None and r_vol < 0.45)
+                or (exch == "EGX" and avg_turnover_10 is not None and avg_turnover_10 < 1_500_000.0)
+            )
+        )
+        is_unhealthy_loss = bool(is_negative_equity or (is_loss_making and (f_score is None or f_score < 50.0)))
+
         fund_summary_by_sym[sym] = {
             k: v
             for k, v in {
@@ -6703,6 +7381,8 @@ def _sync_optimize_portfolio(
                 "dividend_yield_pct": f_dy,
                 "pe_ratio": f_pe,
                 "roe_pct": f_roe,
+                "is_illiquid": True if is_illiquid else None,
+                "is_thin_liquidity": True if is_thin_liquidity else None,
             }.items()
             if v is not None
         }
@@ -6712,17 +7392,25 @@ def _sync_optimize_portfolio(
         if f_score is not None:
             # Map fund_score (0..100, centered at 55) into [-0.30, +0.30]
             score += max(-0.30, min(0.30, (f_score - 55.0) / 130.0))
-        if (f_eps is not None and f_eps < 0) or (f_ni is not None and f_ni < 0):
-            score -= 0.25  # Penalize loss-making companies inside portfolio optimizer
-        elif f_dy is not None and f_dy >= 3.0:
-            score += min(0.12, f_dy / 50.0)
+        if is_loss_making:
+            score -= 0.35  # Penalize loss-making companies inside portfolio optimizer
+        else:
+            if f_fcf is not None and f_fcf < 0:
+                score -= 0.18
+            if f_pe is not None and f_pe > 30.0:
+                score -= 0.25
+            if f_dy is not None and f_dy >= 3.0:
+                score += min(0.12, f_dy / 50.0)
 
         up_pct = fv_upside_map.get(sym)
         if up_pct is not None:
-            score += max(-0.35, min(0.35, up_pct / 75.0))
-        ema50 = _safe_float(ind.get("ema_50"))
-        if ema50 and ema50 > 0:
-            score += 0.20 if price >= ema50 else -0.15
+            # Never apply an upside valuation bonus to loss-making or illiquid stocks
+            if not is_loss_making and not is_illiquid:
+                score += max(-0.35, min(0.35, up_pct / 75.0))
+            elif up_pct < 0:
+                score += max(-0.35, up_pct / 75.0)
+        if adj_ema50 and adj_ema50 > 0:
+            score += 0.20 if price >= adj_ema50 else -0.15
         rsi = _safe_float(ind.get("rsi_14"))
         if rsi is not None:
             if 45.0 <= rsi <= 65.0:
@@ -6731,8 +7419,7 @@ def _sync_optimize_portfolio(
                 score -= 0.18
             elif rsi < 35.0:
                 score -= 0.08
-        r_vol = _safe_float(ind.get("r_vol"))
-        if r_vol is not None and r_vol >= 1.1:
+        if r_vol is not None and r_vol >= 1.1 and not is_illiquid:
             score += 0.08
         score = max(-1.0, min(1.0, score))
 
@@ -6744,16 +7431,56 @@ def _sync_optimize_portfolio(
             sector_label = str(raw_sec or "أخرى").strip() or "أخرى"
         name_ar = str(meta.get("name_ar") or sf_data.get("name_ar") or meta.get("name") or sf_data.get("name") or sym).strip()
 
+        candidate_items.append({
+            "sym": sym,
+            "price": price,
+            "name_ar": name_ar,
+            "sector_label": sector_label,
+            "existing_shares": existing_shares_map.get(sym, 0.0),
+            "score": score,
+            "fallback_vol": fallback_vol,
+            "returns": returns_map.get(sym) or {},
+            "is_illiquid": is_illiquid,
+            "is_thin_liquidity": is_thin_liquidity,
+            "is_unhealthy_loss": is_unhealthy_loss,
+            "is_loss_making": is_loss_making,
+            "is_negative_equity": is_negative_equity,
+            "zero_vol_days_10": zero_vol_days_10,
+        })
+
+    healthy_count = sum(1 for item in candidate_items if not item["is_illiquid"] and not item["is_unhealthy_loss"])
+    eff_default_max_w = 25.0 if healthy_count >= 5 else 35.0
+    eff_cap_pct = float(max_weight_pct) if max_weight_pct is not None else eff_default_max_w
+    assets: List[AssetInput] = []
+    for item in candidate_items:
+        max_w_ov = None
+        excl_reason = None
+        sc = item["score"]
+        if healthy_count >= 2 and (item["is_illiquid"] or item["is_unhealthy_loss"]):
+            max_w_ov = 0.0
+            sc = -0.85
+            if item["is_illiquid"] and item["is_loss_making"]:
+                excl_reason = f"سيولة شبه منعدمة ({item['zero_vol_days_10']} جلسات تداول صفري) وخسائر صافية — مستبعد من الشراء"
+            elif item["is_illiquid"]:
+                excl_reason = f"سيولة منعدمة أو ضعيفة جداً ({item['zero_vol_days_10']} جلسات تداول صفري) — مستبعد من الشراء"
+            elif item["is_negative_equity"]:
+                excl_reason = "شركة خاسرة وحقوق ملكية سالبة — مستبعد من الشراء أو التعزيز"
+            else:
+                excl_reason = "شركة خاسرة وتقييم مالي ضعيف — مستبعد من زيادة الوزن"
+        elif healthy_count >= 3 and item["is_thin_liquidity"]:
+            max_w_ov = min(eff_cap_pct / 100.0, 0.15)
         assets.append(
             AssetInput(
-                symbol=sym,
-                price=price,
-                name_ar=name_ar,
-                sector=sector_label,
-                current_shares=existing_shares_map.get(sym, 0.0),
-                expected_score=score,
-                fallback_daily_vol=fallback_vol,
-                returns_by_date=returns_map.get(sym) or {},
+                symbol=item["sym"],
+                price=item["price"],
+                name_ar=item["name_ar"],
+                sector=item["sector_label"],
+                current_shares=item["existing_shares"],
+                expected_score=sc,
+                fallback_daily_vol=item["fallback_vol"],
+                returns_by_date=item["returns"],
+                max_weight_override=max_w_ov,
+                exclusion_reason=excl_reason,
             )
         )
 
@@ -6784,7 +7511,7 @@ def _sync_optimize_portfolio(
         assets,
         total_capital=total_capital,
         objective=normalize_objective(objective),
-        max_weight_pct=float(max_weight_pct) if max_weight_pct is not None else 35.0,
+        max_weight_pct=eff_cap_pct,
         max_sector_pct=float(max_sector_pct) if max_sector_pct is not None else 45.0,
         min_cash_pct=float(min_cash_pct) if min_cash_pct is not None else 0.0,
         exchange=exch,
@@ -7521,8 +8248,11 @@ async def dispatch_tool(
             result = await execute_get_comparison(symbols=arguments.get("symbols", []))
 
         elif tool_name == "get_fair_value":
+            fv_syms = arguments.get("symbols")
+            if not fv_syms and arguments.get("symbol"):
+                fv_syms = [arguments.get("symbol")]
             result = await execute_get_fair_value(
-                symbols=arguments.get("symbols"),
+                symbols=fv_syms,
                 mode=arguments.get("mode", "screen_undervalued"),
                 sharia_only=arguments.get("sharia_only", False),
                 limit=arguments.get("limit", 10),
@@ -7578,6 +8308,7 @@ async def dispatch_tool(
                 quantity=arguments.get("quantity"),
                 entry_price=arguments.get("entry_price"),
                 total_cost=arguments.get("total_cost"),
+                dca_budget=arguments.get("dca_budget"),
             )
 
         elif tool_name == "optimize_portfolio":
@@ -7585,7 +8316,7 @@ async def dispatch_tool(
                 user_id=user_id,
                 symbols=arguments.get("symbols"),
                 capital=arguments.get("capital"),
-                use_my_portfolio=bool(arguments.get("use_my_portfolio", False)),
+                use_my_portfolio=bool(arguments.get("use_my_portfolio") or arguments.get("use_user_portfolio")),
                 objective=str(arguments.get("objective") or "balanced"),
                 max_weight_pct=arguments.get("max_weight_pct"),
                 max_sector_pct=arguments.get("max_sector_pct"),

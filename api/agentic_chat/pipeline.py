@@ -11,7 +11,7 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple
+from typing import AsyncGenerator, Dict, Any, List, Optional, Sequence, Tuple
 import httpx
 import pytz
 
@@ -376,6 +376,69 @@ def _collect_structured_outputs(
             for n in news_list[:8]
             if isinstance(n, dict) and (n.get("title") or n.get("symbol"))
         ]
+
+    # 9. Quantitative Intelligence Scorecard & Monte Carlo Visual
+    if isinstance(result.get("stocks"), list):
+        quant_items = []
+        for s in result["stocks"][:3]:
+            if isinstance(s, dict) and isinstance(s.get("quant_intelligence"), dict) and s["quant_intelligence"].get("monte_carlo"):
+                q_copy = dict(s["quant_intelligence"])
+                if not q_copy.get("name_ar"):
+                    q_copy["name_ar"] = s.get("name_ar") or s.get("name") or s.get("symbol")
+                if q_copy.get("close") is None and s.get("close") is not None:
+                    q_copy["close"] = s.get("close")
+                quant_items.append(q_copy)
+        if quant_items:
+            visuals_data["quant_analysis"] = quant_items
+
+    # 10. Smart DCA & Break-Even Plan Visual
+    if isinstance(result.get("smart_dca_plan"), dict) and result["smart_dca_plan"].get("symbol"):
+        visuals_data["dca_plan"] = result["smart_dca_plan"]
+
+
+_TOOL_STAGE_LABELS: Dict[str, str] = {
+    "get_stock": "الأسعار والمؤشرات",
+    "get_stock_levels": "الدعوم والمقاومات",
+    "get_fair_value": "القيمة العادلة",
+    "calculate_position": "حساب المركز والتبريد",
+    "optimize_portfolio": "تحسين أوزان المحفظة",
+    "manage_portfolio": "بيانات المحفظة",
+    "get_news": "الأخبار",
+    "get_disclosures": "الإفصاحات",
+    "get_price_traps": "رادار المصائد",
+    "get_recommendations": "التوصيات",
+    "get_dividends": "الكوبونات",
+    "get_sharia_cleanser": "الضوابط الشرعية",
+    "get_market": "مسح السوق والسيولة",
+    "get_technical_scan": "مسح السوق والسيولة",
+    "get_accumulation_stocks": "مسح السوق والسيولة",
+    "screen_stocks": "مسح السوق والسيولة",
+    "search_stocks": "البحث عن الرموز",
+}
+
+
+def _build_tools_stage_label(tool_names: Sequence[str]) -> str:
+    """Build a concise Arabic stage label listing deduplicated live sources fetched."""
+    labels: List[str] = []
+    for t_name in tool_names:
+        lbl = _TOOL_STAGE_LABELS.get(str(t_name or "").strip())
+        if lbl and lbl not in labels:
+            labels.append(lbl)
+    if not labels:
+        count = len(list(tool_names))
+        return f"جلب أحدث بيانات السوق ({count} مصادر)" if count else "جلب بيانات السوق الحية"
+    shown = labels[:4]
+    suffix = " • ..." if len(labels) > 4 else ""
+    return f"جلب البيانات الحية ({' • '.join(shown)}{suffix})"
+
+
+def _build_quant_stage_label(tool_names: Sequence[str], visuals_data: Dict[str, Any]) -> str:
+    """Build an accurate Arabic quantitative/verification stage label for the tool outputs."""
+    if visuals_data.get("quant_analysis") or visuals_data.get("dca_plan"):
+        return "تشغيل المحرك الكمي ومحاكاة مونت كارلو (5,000 مسار) وحسم التعارض"
+    if "optimize_portfolio" in tool_names:
+        return "حساب التوزيع الرياضي الأمثل للمحفظة وفلاتر المخاطرة"
+    return "تدقيق ومطابقة البيانات المالية والفنية المستخرجة"
 
 
 _KEEP_NULL_LLM_KEYS = frozenset({
@@ -821,7 +884,14 @@ _CANONICAL_BUTTON_INPUTS = frozenset({
     "أفضل أسهم السوق اليوم",
     "أقوى أسهم التجميع والسيولة الذكية اليوم",
     "هات كل التوصيات المفتوحة حالياً",
+    "التوصيات المفتوحة حالياً",
+    "التوصيات المفتوحة حاليا",
     "ملخص السوق اليوم",
+    "ملخص السوق الان",
+    "ملخص السوق الآن",
+    "تحليل السوق",
+    "تحليل السوق الان",
+    "تحليل السوق الآن",
     "أهم أخبار وإفصاحات السوق اليوم",
     "أفضل الأسهم فنياً اليوم حسب المسح الفني والمؤشرات",
 })
@@ -991,7 +1061,7 @@ async def _run_agentic_chat_stream_impl(
         if ui_exch != "EGX"
         else "جاري تحليل استفسارك عبر EGX BOTS..."
     )
-    yield f"data: {json.dumps({'type': 'status', 'status': 'thinking', 'message': thinking_msg}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'type': 'status', 'status': 'thinking', 'step_id': 'understand', 'message': thinking_msg}, ensure_ascii=False)}\n\n"
 
     # Static system prompt first (enables DeepSeek prefix caching)
     formatted_messages = [{"role": "system", "content": AGENTIC_SYSTEM_PROMPT}]
@@ -1026,9 +1096,15 @@ async def _run_agentic_chat_stream_impl(
             )
     cairo_day_ar = _ARABIC_WEEKDAYS[now_cairo.weekday()]
     riyadh_day_ar = _ARABIC_WEEKDAYS[now_riyadh.weekday()]
+    is_cairo_weekend = now_cairo.weekday() in (4, 5)
+    session_day_note = (
+        f"اليوم ({cairo_day_ar}) عطلة نهاية الأسبوع الرسمية (الجمعة/السبت) في مصر والخليج."
+        if is_cairo_weekend
+        else f"تنبيه تقويمي: اليوم ({cairo_day_ar}) يوم عمل وتداول رسمي في البورصة المصرية وليس عطلة الجمعة/السبت — اعتمد تاريخ أحدث جلسة في الأدوات ولا تصف يوم {cairo_day_ar} بالعطلة."
+    )
     date_context = (
         f"📅 التوقيت الحالي: القاهرة {cairo_day_ar} {now_cairo.strftime('%Y-%m-%d %H:00')} | "
-        f"الرياض {riyadh_day_ar} {now_riyadh.strftime('%Y-%m-%d %H:00')} (الجمعة والسبت عطلة البورصات العربية). "
+        f"الرياض {riyadh_day_ar} {now_riyadh.strftime('%Y-%m-%d %H:00')}. {session_day_note} "
         f"تبويب السوق النشط حالياً في الواجهة: {active_mkt_desc} "
         "(يُستخدم فقط كخيار افتراضي للأسئلة العامة غير المحددة، ويمكنك دائماً خدمة جميع الأسواق المتاحة في قاعدة البيانات معاً). "
         f"{telegram_channel_guidance} "
@@ -1085,7 +1161,7 @@ async def _run_agentic_chat_stream_impl(
     valid_images = [img for img in (images or []) if img and isinstance(img, str) and img.strip()]
     vision_data = None
     if valid_images:
-        yield f"data: {json.dumps({'type': 'status', 'status': 'vision', 'message': 'قراءة الصورة مع حفظ درجة الثقة وحدودها...'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'status', 'status': 'vision', 'step_id': 'understand', 'message': 'قراءة الصورة مع حفظ درجة الثقة وحدودها...'}, ensure_ascii=False)}\n\n"
         try:
             vision_data, vision_err = await analyze_image(
                 image_url=valid_images,
@@ -1222,7 +1298,7 @@ async def _run_agentic_chat_stream_impl(
     # 0. Check Two-Tier Analysis Cache for Direct Repeatable Canonical Queries (ALL Markets: EGX, TASI, QSE, DFM, ADX, ...)
     if (
         not is_cross_market
-        and not has_conversation_history
+        and (not has_conversation_history or _is_unambiguous_standalone_input(message, market=effective_market))
         and not has_user_rules
         and not vision_data
         and (not images or len(images) == 0)
@@ -1243,7 +1319,7 @@ async def _run_agentic_chat_stream_impl(
             if cached_hit:
                 origin_label = "قاعدة البيانات السحابية" if cached_hit.get("origin") == "supabase_market_cache" else "الذاكرة اللحظية"
                 logger.info(f"[agentic_chat] Serving from Early Two-Tier Cache: {early_key} ({cached_hit.get('origin')})")
-                yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'message': f'تم استرجاع أحدث قراءة فنية موثقة من {origin_label}...'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'step_id': 'fetch_data', 'message': f'تم استرجاع أحدث قراءة فنية موثقة من {origin_label}...'}, ensure_ascii=False)}\n\n"
 
                 cached_reply = cached_hit["reply"]
                 words = cached_reply.split(" ")
@@ -1275,6 +1351,7 @@ async def _run_agentic_chat_stream_impl(
 
     max_rounds = 3
     round_count = 0
+    emitted_generating_status = False
 
     # Single-Stock Fast-Track: works identically across ALL registered exchanges (EGX, TASI, QSE, DFM, ADX, ...).
     # Covers both general analysis (`vip_stock_SYM`) and dedicated financial/fundamental analysis (`vip_stock_SYM_financials`).
@@ -1309,7 +1386,8 @@ async def _run_agentic_chat_stream_impl(
                 ("get_disclosures", {"symbol": fast_sym, "market": fast_mkt_ui}),
                 ("get_price_traps", {"symbol": fast_sym, "market": fast_mkt_ui}),
             ]
-        yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': f'جاري جلب أحدث بيانات السوق ({len(fast_tool_specs)} مصادر)...'}, ensure_ascii=False)}\n\n"
+        fast_tool_names = [t_name for t_name, _ in fast_tool_specs]
+        yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'step_id': 'fetch_data', 'message': _build_tools_stage_label(fast_tool_names)}, ensure_ascii=False)}\n\n"
         t_tools_start = time.time()
         fast_results = await asyncio.gather(
             *[
@@ -1330,6 +1408,7 @@ async def _run_agentic_chat_stream_impl(
                     has_missing_stock_data = True
                 _collect_structured_outputs(r, tables_data, recommendations_data, visuals_data)
                 fast_ctx_payload[t_name] = _strip_ui_only_fields_for_llm(r)
+        yield f"data: {json.dumps({'type': 'status', 'status': 'quant_engine', 'step_id': 'quant_verify', 'message': _build_quant_stage_label(fast_tool_names, visuals_data)}, ensure_ascii=False)}\n\n"
 
         fast_mode_note = (
             "السؤال يطلب تحليلاً مالياً وأساسياً: طبّق قاعدة التحليل المالي والأساسي الاحترافي (ابدأ بـ «🎯 الخلاصة من الآخر»، اشرح الأرقام بمعناها العملي، اعتمد على `fundamental_diagnosis`، وإذا ورد في الأخبار نتائج مالية ربعية أحدث تتعارض مع آخر قوائم سنوية فنبّه المستخدم بوضوح لهذا الفرق الزمني، اعرض نقاط القوة مقابل المخاطر بوضوح، واختصر الفني في سطرين للتوقيت فقط)، وذلك بدون كتابة أي وسوم استدعاء أدوات أو DSML."
@@ -1365,6 +1444,9 @@ async def _run_agentic_chat_stream_impl(
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             while round_count < max_rounds:
                 round_count += 1
+                if round_count >= 2 and tools_executed_count > 0 and not emitted_generating_status:
+                    yield f"data: {json.dumps({'type': 'status', 'status': 'generating', 'step_id': 'synthesize', 'message': 'جاري صياغة التقرير النهائي ومراجعة الحارس الآلي للأرقام...'}, ensure_ascii=False)}\n\n"
+                    emitted_generating_status = True
 
                 req_payload = {
                     "model": "deepseek-chat",
@@ -1468,7 +1550,8 @@ async def _run_agentic_chat_stream_impl(
 
                 batch_followup_true, batch_explicit_standalone = inspect_tool_calls_followup_flags(tool_calls)
                 cache_tool_calls = tool_calls
-                if batch_followup_true and _is_unambiguous_standalone_input(message, market=effective_market):
+                is_unambiguous_turn = _is_unambiguous_standalone_input(message, market=effective_market)
+                if batch_followup_true and is_unambiguous_turn:
                     normalized_calls = []
                     for tc in tool_calls:
                         if isinstance(tc, dict) and isinstance(tc.get("function"), dict):
@@ -1489,6 +1572,9 @@ async def _run_agentic_chat_stream_impl(
                         batch_followup_true = False
                         batch_explicit_standalone = True
                         cache_tool_calls = normalized_calls
+                elif not batch_followup_true and is_unambiguous_turn and not batch_explicit_standalone:
+                    if resolve_tool_calls_to_cache_key(cache_tool_calls) is not None:
+                        batch_explicit_standalone = True
 
                 if batch_followup_true:
                     has_followup_flag = True
@@ -1521,7 +1607,12 @@ async def _run_agentic_chat_stream_impl(
                         model_confirmed_standalone = False
                     else:
                         preserved_special = False
-                        if candidate_cache_key and candidate_cache_key.startswith("vip_stock_"):
+                        if candidate_cache_key == "vip_market_summary" and (
+                            dynamic_key in ("vip_market_summary", "vip_market_and_screener")
+                            or (allow_recommendations and dynamic_key == "vip_market_pulse_and_recs")
+                        ):
+                            preserved_special = True
+                        elif candidate_cache_key and candidate_cache_key.startswith("vip_stock_"):
                             cand_parts = candidate_cache_key.split("_")
                             if len(cand_parts) >= 4:
                                 cand_sym = cand_parts[2]
@@ -1555,7 +1646,7 @@ async def _run_agentic_chat_stream_impl(
                         if cached_hit and cached_hit.get("reply"):
                             origin_label = "قاعدة البيانات السحابية" if cached_hit.get("origin") == "supabase_market_cache" else "الذاكرة اللحظية"
                             logger.info(f"[agentic_chat] Serving from Model-Driven Two-Tier Cache: {lookup_key} ({cached_hit.get('origin')})")
-                            yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'message': f'تم استرجاع أحدث قراءة فنية موثقة من {origin_label}...'}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'step_id': 'fetch_data', 'message': f'تم استرجاع أحدث قراءة فنية موثقة من {origin_label}...'}, ensure_ascii=False)}\n\n"
 
                             cached_reply = cached_hit["reply"]
                             words = cached_reply.split(" ")
@@ -1590,7 +1681,9 @@ async def _run_agentic_chat_stream_impl(
 
                 # Tool calls requested:
                 tools_executed_count += len(tool_calls)
-                yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': f'جاري جلب أحدث بيانات السوق ({len(tool_calls)} مصادر)...'}, ensure_ascii=False)}\n\n"
+                round_tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls if isinstance(tc, dict)]
+                yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'step_id': 'fetch_data', 'message': _build_tools_stage_label(round_tool_names)}, ensure_ascii=False)}\n\n"
+                emitted_generating_status = False
 
                 # Append assistant tool-call intent to message history
                 formatted_messages.append(assistant_msg)
@@ -1696,6 +1789,7 @@ async def _run_agentic_chat_stream_impl(
                     visuals_data,
                     acc_fallback_rows=acc_fallback_rows,
                 )
+                yield f"data: {json.dumps({'type': 'status', 'status': 'quant_engine', 'step_id': 'quant_verify', 'message': _build_quant_stage_label(round_tool_names, visuals_data)}, ensure_ascii=False)}\n\n"
 
                 # For confirmed standalone requests inside a multi-turn session, strip prior turns
                 # before Round 2 synthesis so saved shared cache contains zero cross-stock bleed and saves input tokens.
@@ -1739,7 +1833,9 @@ async def _run_agentic_chat_stream_impl(
                     synthesis_payload["tools"] = active_tools_schema
                     synthesis_payload["tool_choice"] = "none"  # Forbid tools so DeepSeek produces only synthesis text
 
-                yield f"data: {json.dumps({'type': 'status', 'status': 'generating', 'message': 'جاري صياغة التقرير والتحليل الفني...'}, ensure_ascii=False)}\n\n"
+                if not emitted_generating_status:
+                    yield f"data: {json.dumps({'type': 'status', 'status': 'generating', 'step_id': 'synthesize', 'message': 'جاري صياغة التقرير النهائي ومراجعة الحارس الآلي للأرقام...'}, ensure_ascii=False)}\n\n"
+                    emitted_generating_status = True
 
                 t_turn2_start = time.time()
                 synth_resp = None
@@ -2064,6 +2160,7 @@ async def _run_agentic_chat_stream_impl(
         and can_save_for_history
         and not has_user_rules
         and not visuals_data.get("portfolio")
+        and not visuals_data.get("dca_plan")
         and accumulated_reply
         and not vision_data
         and (not images or len(images) == 0)

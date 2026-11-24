@@ -21,6 +21,7 @@ FILES_TO_SYNC = [
     "api/agentic_chat/output_guard.py",
     "api/agentic_chat/pipeline.py",
     "api/agentic_chat/prompts.py",
+    "api/agentic_chat/quant_engine.py",
     "api/agentic_chat/router.py",
     "api/agentic_chat/tools_execution.py",
     "api/agentic_chat/tools_schema.py",

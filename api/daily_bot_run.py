@@ -411,6 +411,29 @@ def _build_divergence_summary(rsi_div: str, macd_div: str, stoch_div: str, stren
     return f"تباعد {' و '.join(divs)} خلال {periods} فترة بقوة {strength_pct}%"
 
 
+def _adjust_df_for_unadjusted_splits(df: pd.DataFrame) -> pd.DataFrame:
+    """Detect unadjusted corporate splits (>55% overnight close drop) and rebase prior bars backward."""
+    if df is None or len(df) < 5 or "close" not in df.columns:
+        return df
+    out = df.copy()
+    closes = pd.to_numeric(out["close"], errors="coerce")
+    vals = closes.to_numpy(dtype=float, copy=True)
+    price_cols = [c for c in ("open", "high", "low", "close") if c in out.columns]
+    has_vol = "volume" in out.columns
+    for i in range(1, len(vals)):
+        prev_c = vals[i - 1]
+        cur_c = vals[i]
+        if prev_c > 0 and cur_c > 0 and np.isfinite(prev_c) and np.isfinite(cur_c):
+            ratio = cur_c / prev_c
+            if ratio < 0.45:
+                for col in price_cols:
+                    out.iloc[:i, out.columns.get_loc(col)] = pd.to_numeric(out.iloc[:i][col], errors="coerce") * ratio
+                if has_vol and ratio > 0:
+                    out.iloc[:i, out.columns.get_loc("volume")] = pd.to_numeric(out.iloc[:i]["volume"], errors="coerce") / ratio
+                vals[:i] = vals[:i] * ratio
+    return out
+
+
 def calculate_indicators_for_symbol(
     symbol: str,
     exchange: str = "EGX",
@@ -453,6 +476,8 @@ def calculate_indicators_for_symbol(
 
     if len(df) < 20:
         return []
+
+    df = _adjust_df_for_unadjusted_splits(df)
 
     # Skip delisted/suspended stocks
     last_close_val = float(df["close"].iloc[-1]) if not df["close"].empty else 0.0

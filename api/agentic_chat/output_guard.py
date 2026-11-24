@@ -28,6 +28,7 @@ _TOOL_NAME_LABELS: Dict[str, str] = {
     "get_dividends": "تقويم التوزيعات",
     "manage_portfolio": "إدارة المحفظة",
     "optimize_portfolio": "محرك التحسين الرياضي للمحفظة",
+    "calculate_position": "حاسبة المراكز والتبريد الذكي",
     "manage_automations": "إدارة الاستشارات المجدولة",
     "search_stocks": "البحث في قاعدة البيانات",
     "get_stock": "بيانات السهم",
@@ -38,21 +39,37 @@ _ORDERED_TOOL_PATTERNS: List[Tuple[str, re.Pattern[str], str]] = [
 ]
 
 _LEAKED_FIELD_EXPR_RE = re.compile(
-    r"\s*\(\s*`?(?:is_sharia_compliant|data_is_stale|support_1_is_distant|has_active_recommendation)`?\s*[:=]\s*(?:true|false|null)\s*\)",
+    r"\s*\(?`?(?:is_sharia_compliant|data_is_stale|support_1_is_distant|has_active_recommendation|distribution_score|dist_score|acc_score|consecutive)`?\s*[:=]\s*(?:true|false|null|\d+(?:\.\d+)?)\s*`?\)?",
     re.IGNORECASE,
 )
 _LEAKED_FIELD_LABELS: Dict[str, str] = {
     "has_active_recommendation": "التوصية المفتوحة",
+    "calibrated_target_prob_pct": "احتمال الصعود المعاير",
+    "prob_hit_target_first_pct": "احتمال بلوغ الهدف أولاً",
+    "prob_hit_stop_first_pct": "احتمال كسر الوقف أولاً",
     "support_1_is_distant": "بعد الدعم الهيكلي",
     "fundamental_diagnosis": "التشخيص المالي",
+    "quant_intelligence": "التحليل الكمي ومحاكاة مونت كارلو",
     "is_sharia_compliant": "التوافق الشرعي",
+    "consecutive_acc_days": "أيام التجميع المتتالية",
     "value_trap_warning": "تحذير فخ القيمة",
+    "distribution_score": "درجة التصريف المؤسسي",
+    "max_diversification": "أقصى تنويع ممكن",
+    "weak_distribution": "تصريف ضعيف",
     "upcoming_dividend": "التوزيع النقدي القادم",
     "upcoming_events": "الأحداث القادمة ومواعيد النتائج",
+    "smart_dca_plan": "خطة التبريد الذكي",
     "king_ai_score": "تقييم الذكاء الاصطناعي",
     "data_is_stale": "قدم البيانات",
+    "setup_regime": "التصنيف الكمي للإعداد",
+    "brier_score": "دقة المعايرة التاريخية",
+    "risk_parity": "توزيع متكافئ للمخاطرة",
+    "consecutive": "أيام التتالي",
+    "dist_score": "درجة التصريف",
     "fund_score": "التقييم المالي",
+    "acc_score": "درجة التجميع",
     "vol_ratio": "السيولة النسبية",
+    "min_risk": "أقل مخاطرة",
     "r_vol": "السيولة النسبية",
 }
 _REDUNDANT_PAREN_FIELD_RE = re.compile(
@@ -64,6 +81,19 @@ _ORDERED_FIELD_PATTERNS: List[Tuple[str, re.Pattern[str], str]] = [
     (name, re.compile(rf"`?\b{re.escape(name)}\b`?"), label)
     for name, label in sorted(_LEAKED_FIELD_LABELS.items(), key=lambda kv: len(kv[0]), reverse=True)
 ]
+_DUP_LIQUIDITY_RE = re.compile(r"(?:السيولة(?:\s+النسبية)?\s+){1,2}(السيولة\s+النسبية)`?")
+_SHARIA_TAX_TYPO_RE = re.compile(r"الضريبة\s+الشرعية")
+_EX_DATE_INVERTED_RE = re.compile(
+    r"(?:"
+    r"البيع\s+(?:هنا|يوم[^\n]{0,25}Ex-?Date)\s*[=:]\s*بدون\s+كوبون"
+    r"|(?:لو\s+بعت|البيع|أي\s+شراء\s+أو\s+بيع|عند\s+البيع)[^\n.]{0,75}(?:يوم\s+[^\n.]{0,30}|في\s+هذا\s+اليوم)[^\n.]{0,55}(?:مش\s+هتستحق|لا\s+تستحق|لا\s+يمنحك|بدون\s+كوبون|لن\s+تستحق)"
+    r")",
+    re.IGNORECASE,
+)
+_EX_DATE_CORRECTION_BANNER = (
+    "> ⚠️ **تصحيح قاعدة الـ Ex-Date الرسمية:** يوم الـ `Ex-Date` هو أول جلسة يتداول فيها السهم **بدون كوبون للمشتري الجديد فقط**. "
+    "أما إذا كنت تمتلك الأسهم عند إغلاق الجلسة السابقة للـ `Ex-Date` (`Cum-Date`)، **فإنك تستحق الكوبون كاملاً حتى لو بعت أسهمك في يوم الـ `Ex-Date` نفسه أو بعده.**"
+)
 
 _AUTOMATION_NO_QUOTA_LINE_RE = re.compile(
     r"^[^\n]*(?:الأتمتة\s+المجدولة|الاتمتة\s+المجدولة|الاتوميشن|Scheduled\s+Automations)[^\n]*"
@@ -74,6 +104,58 @@ _AUTOMATION_QUOTA_CORRECTION_LINE = (
     "- **الأتمتة المجدولة (Scheduled Automations)** — ⚠️ **تستهلك من الكوتة** "
     "(كل تقرير مجدول يتنفذ تلقائياً يخصم رسالة واحدة `1` من كوتة الشات الشهرية الموحدة)."
 )
+
+
+_BUY_INCREASE_CUES_RE = re.compile(
+    r"(?:زيادة|تعزيز|شراء|زود|تزود|أضف|إضافة|التعزيز|الزيادة|ادخل|دخول|شراء\s+إضافي)"
+)
+_EXIT_OR_NEGATION_CUES_RE = re.compile(
+    r"(?:لا\s+تزيد|لا\s+ينصح|لا\s+أنصح|تجنب|ممنوع|مستبعد|مستبعدة|بيع|تصفية|تخارج|إلغاء|خروج|قبل\s+بيع|عوضاً\s+عن|بدلاً\s+من|عدم\s+الشراء|عدم\s+الزيادة|لا\s+تشتري|غير\s+مناسب)"
+)
+
+
+def _collect_excluded_portfolio_symbols(tool_payloads: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Collect symbols explicitly excluded from buying by optimizer or deterministic rotation matrix."""
+    excluded: Dict[str, str] = {}
+
+    def _visit(node: Any, depth: int) -> None:
+        if depth > 4:
+            return
+        if isinstance(node, list):
+            for item in node:
+                _visit(item, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+
+        if isinstance(node.get("excludedFromBuying"), list):
+            for item in node["excludedFromBuying"]:
+                if isinstance(item, dict) and item.get("symbol"):
+                    s = str(item["symbol"]).strip().upper()
+                    excluded.setdefault(s, str(item.get("reason") or "مستبعد من الشراء"))
+
+        rot = node.get("portfolio_rotation_matrix")
+        if isinstance(rot, dict) and isinstance(rot.get("exit_priority_symbols"), list):
+            for raw_s in rot["exit_priority_symbols"]:
+                if isinstance(raw_s, str) and raw_s.strip():
+                    excluded.setdefault(raw_s.strip().upper(), "مصنّف كمستبعد/تصفية أولوية في مصفوفة المحفظة")
+
+        if isinstance(node.get("positions"), list):
+            for p in node["positions"]:
+                if isinstance(p, dict) and p.get("symbol"):
+                    if p.get("rotation_action") == "EXIT_PRIORITY" or (p.get("forbidden_to_buy") and (p.get("is_loss_making") or p.get("is_illiquid") or p.get("is_negative_equity"))):
+                        excluded.setdefault(
+                            str(p["symbol"]).strip().upper(),
+                            str(p.get("rotation_reason_ar") or "شركة خاسرة أو سيولة منعدمة — ممنوع التعزيز"),
+                        )
+
+        for v in node.values():
+            if isinstance(v, (dict, list)):
+                _visit(v, depth + 1)
+
+    for payload in tool_payloads or []:
+        _visit(payload, 0)
+    return excluded
 
 
 def _collect_ground_truth(
@@ -201,10 +283,60 @@ def verify_and_guard_reply(
             guarded = fpat.sub(flabel, guarded)
             warnings.append(f"internal_field_leaked:{fname}")
 
+    if _DUP_LIQUIDITY_RE.search(guarded):
+        guarded = _DUP_LIQUIDITY_RE.sub(r"\1", guarded)
+    guarded = re.sub(r"`\s*السيولة النسبية\s*`?", "السيولة النسبية", guarded)
+
+    if _SHARIA_TAX_TYPO_RE.search(guarded):
+        guarded = _SHARIA_TAX_TYPO_RE.sub("الضوابط الشرعية", guarded)
+        warnings.append("sharia_typo_fixed")
+
+    has_div_context = any(
+        k in guarded for k in ("Ex-Date", "ex_date", "تاريخ التداول بدون كوبون", "الكوبون")
+    )
+    if has_div_context and _EX_DATE_INVERTED_RE.search(guarded):
+        guarded = re.sub(
+            r"(?:←|->)?\s*البيع\s+(?:هنا|يوم[^\n]{0,25}Ex-?Date)\s*[=:]\s*بدون\s+كوبون",
+            "← الشراء هنا = بدون كوبون (أما من امتلك السهم بإغلاق الجلسة السابقة وباع هنا فيستحق الكوبون)",
+            guarded,
+            flags=re.IGNORECASE,
+        )
+        if _EX_DATE_CORRECTION_BANNER not in guarded:
+            guarded = f"{_EX_DATE_CORRECTION_BANNER}\n\n{guarded}"
+        warnings.append("ex_date_rule_inverted_corrected")
+        block_cache = True
+
     if _AUTOMATION_NO_QUOTA_LINE_RE.search(guarded):
         guarded = _AUTOMATION_NO_QUOTA_LINE_RE.sub(_AUTOMATION_QUOTA_CORRECTION_LINE, guarded)
         warnings.append("automation_quota_misstatement_fixed")
         block_cache = True
+
+    # Check E: Portfolio Contradiction Guard (block recommending BUY/increase on excluded/loss-making stocks)
+    excluded_syms = _collect_excluded_portfolio_symbols(tool_payloads)
+    if excluded_syms:
+        conflict_syms: List[str] = []
+        for raw_line in guarded.splitlines():
+            clean_line = raw_line.replace("*", "").replace("`", "")
+            if not _BUY_INCREASE_CUES_RE.search(clean_line):
+                continue
+            if _EXIT_OR_NEGATION_CUES_RE.search(clean_line):
+                continue
+            for sym in excluded_syms:
+                if re.search(rf"(?<![A-Z0-9]){re.escape(sym)}(?![A-Z0-9])", clean_line):
+                    if sym not in conflict_syms:
+                        conflict_syms.append(sym)
+        if conflict_syms:
+            for sym in conflict_syms:
+                warnings.append(f"excluded_stock_buy_conflict:{sym}")
+            block_cache = True
+            prepended_warning = True
+            banner = (
+                f"> ⚠️ **تنبيه اتساق المحفظة التلقائي:** الأسهم التالية (**{', '.join(conflict_syms)}**) "
+                "مصنّفة برمجياً كمراكز مستبعدة من الشراء أو التوسع لوجود خسائر صافية أو حقوق ملكية سالبة أو سيولة منعدمة — "
+                "تجاهل أي إشارة تعزيز لها وأولِ الأولوية للتصفية لصالح الأسهم السليمة مالياً."
+            )
+            if "تنبيه اتساق المحفظة التلقائي" not in guarded:
+                guarded = f"{banner}\n\n{guarded}"
 
     return {
         "reply": guarded,

@@ -69,6 +69,8 @@ class AssetInput:
     expected_score: float = 0.0  # Bounded quantitative score in [-1, 1]
     fallback_daily_vol: float = 0.022  # ~35% annualized fallback if history sparse
     returns_by_date: Dict[str, float] = field(default_factory=dict)
+    max_weight_override: Optional[float] = None  # Per-asset hard cap (0.0 excludes from buying)
+    exclusion_reason: Optional[str] = None
 
 
 def normalize_objective(raw: Optional[str]) -> str:
@@ -110,13 +112,23 @@ def compute_returns_by_date(price_rows: Sequence[Dict[str, Any]]) -> Dict[str, D
                 dedup[-1] = (d, c)
             else:
                 dedup.append((d, c))
+        # Rebase pre-split prices backward whenever an unadjusted split jump (>55% drop) occurs
+        adj_closes = [c for _, c in dedup]
+        for i in range(1, len(adj_closes)):
+            prev_raw = adj_closes[i - 1]
+            cur_raw = adj_closes[i]
+            if prev_raw > 0 and cur_raw > 0:
+                sp_ratio = cur_raw / prev_raw
+                if sp_ratio < 0.45:
+                    adj_closes[:i] = [v * sp_ratio for v in adj_closes[:i]]
+
         rets: Dict[str, float] = {}
         for i in range(1, len(dedup)):
-            prev_c = dedup[i - 1][1]
-            cur_c = dedup[i][1]
+            prev_c = adj_closes[i - 1]
+            cur_c = adj_closes[i]
             if prev_c > 0:
                 r = (cur_c - prev_c) / prev_c
-                # Winsorize extreme corporate-action/split spikes (> +/-25% single day)
+                # Winsorize extreme outliers (> +/-25% single day)
                 r = max(-0.25, min(0.25, r))
                 rets[dedup[i][0]] = r
         out[sym] = rets
@@ -197,22 +209,28 @@ def estimate_covariance_matrix(assets: Sequence[AssetInput]) -> Tuple[np.ndarray
     return cov_annual, corr_psd, common_dates
 
 
-def _project_capped_simplex(v: np.ndarray, total: float, cap: float) -> np.ndarray:
-    """Exact Euclidean projection onto {w : sum(w) = total, 0 <= w_i <= cap} via bisection."""
+def _project_capped_simplex(v: np.ndarray, total: float, cap: Any) -> np.ndarray:
+    """Exact Euclidean projection onto {w : sum(w) = total, 0 <= w_i <= u_i} via bisection."""
     n = len(v)
     if n == 0 or total <= 0:
         return np.zeros(n, dtype=float)
-    eff_cap = max(cap, total / n + 1e-12)
-    lo = float(np.min(v)) - eff_cap - 1.0
+    if isinstance(cap, (np.ndarray, list, tuple)):
+        ub = np.maximum(0.0, np.asarray(cap, dtype=float))
+        if float(np.sum(ub)) < total - 1e-9:
+            ub = np.maximum(ub, total / n + 1e-12)
+    else:
+        eff_cap = max(float(cap), total / n + 1e-12)
+        ub = np.full(n, eff_cap, dtype=float)
+    lo = float(np.min(v - ub)) - 1.0
     hi = float(np.max(v)) + 1.0
     for _ in range(60):
         mid = 0.5 * (lo + hi)
-        w = np.clip(v - mid, 0.0, eff_cap)
+        w = np.clip(v - mid, 0.0, ub)
         if float(np.sum(w)) > total:
             lo = mid
         else:
             hi = mid
-    w = np.clip(v - 0.5 * (lo + hi), 0.0, eff_cap)
+    w = np.clip(v - 0.5 * (lo + hi), 0.0, ub)
     s = float(np.sum(w))
     if s > 1e-12:
         w *= total / s
@@ -272,11 +290,20 @@ def project_onto_portfolio_constraints(
     max_weight: float,
     max_sector_weight: float,
     iters: int = 35,
+    upper_bounds: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Dykstra's alternating projections onto simplex + box + per-sector cap constraints."""
     n = len(v)
     if n == 0 or invested_total <= 0:
         return np.zeros(n, dtype=float)
+
+    ub = (
+        np.maximum(0.0, np.asarray(upper_bounds, dtype=float))
+        if upper_bounds is not None and len(upper_bounds) == n
+        else np.full(n, float(max_weight), dtype=float)
+    )
+    if float(np.sum(ub)) < invested_total - 1e-6:
+        ub = np.full(n, max(float(max_weight), invested_total / n + 1e-12), dtype=float)
 
     sector_groups: Dict[str, List[int]] = {}
     for idx, sec in enumerate(sectors):
@@ -284,9 +311,9 @@ def project_onto_portfolio_constraints(
 
     # Fast path if single-asset sectors or sector cap >= invested_total
     if max_sector_weight >= invested_total - 1e-9 or all(len(idxs) == 1 for idxs in sector_groups.values()):
-        return _project_capped_simplex(v, invested_total, max_weight)
+        return _project_capped_simplex(v, invested_total, ub)
 
-    x = _project_capped_simplex(v, invested_total, max_weight)
+    x = _project_capped_simplex(v, invested_total, ub)
     p_simplex = np.zeros(n, dtype=float)
     p_sectors = {sec: np.zeros(len(idxs), dtype=float) for sec, idxs in sector_groups.items()}
 
@@ -310,14 +337,14 @@ def project_onto_portfolio_constraints(
 
         # Project onto capped simplex
         y = x + p_simplex
-        x = _project_capped_simplex(y, invested_total, max_weight)
+        x = _project_capped_simplex(y, invested_total, ub)
         p_simplex = y - x
 
         if float(np.max(np.abs(x - prev))) < 1e-7:
             break
 
     # Final hard-repair pass so constraints hold to floating-point precision
-    x = np.clip(x, 0.0, max_weight)
+    x = np.clip(x, 0.0, ub)
     for _ in range(10):
         violated = False
         for sec, idxs in sector_groups.items():
@@ -335,7 +362,7 @@ def project_onto_portfolio_constraints(
                 sec_rem = max(0.0, max_sector_weight - float(np.sum(x[idxs])))
                 if sec_rem <= 1e-9:
                     continue
-                box_rems = np.maximum(0.0, max_weight - x[idxs])
+                box_rems = np.maximum(0.0, ub[idxs] - x[idxs])
                 tot_box = float(np.sum(box_rems))
                 if tot_box > 1e-9:
                     headroom[idxs] = box_rems * min(1.0, sec_rem / tot_box)
@@ -368,21 +395,47 @@ def solve_optimal_weights(
         return np.zeros(n, dtype=float), max_weight, max_sector_weight, []
 
     sectors = [a.sector or "أخرى" for a in assets]
-    eff_max_w, eff_max_sec, notes = _resolve_feasible_caps(sectors, invested_total, max_weight, max_sector_weight)
+    eligible_idx = [
+        i for i, a in enumerate(assets)
+        if a.max_weight_override is None or float(a.max_weight_override) > 1e-6
+    ]
+    if 2 <= len(eligible_idx) < n:
+        eff_max_w, eff_max_sec, notes = _resolve_feasible_caps(
+            [sectors[i] for i in eligible_idx], invested_total, max_weight, max_sector_weight
+        )
+    else:
+        eff_max_w, eff_max_sec, notes = _resolve_feasible_caps(sectors, invested_total, max_weight, max_sector_weight)
+
+    ub = np.array(
+        [
+            eff_max_w if a.max_weight_override is None else max(0.0, min(eff_max_w, float(a.max_weight_override)))
+            for a in assets
+        ],
+        dtype=float,
+    )
+    if float(np.sum(ub)) < invested_total - 1e-6:
+        ub = np.where(ub > 1e-9, eff_max_w, 0.0)
+        if float(np.sum(ub)) < invested_total - 1e-6:
+            ub = np.full(n, eff_max_w, dtype=float)
 
     if n == 1:
         return np.array([invested_total], dtype=float), eff_max_w, eff_max_sec, notes
 
     obj = normalize_objective(objective)
     vols = np.sqrt(np.maximum(np.diag(cov), 1e-8))
-    # Initial feasible point: inverse-volatility weights projected onto constraints
-    inv_vol = 1.0 / np.maximum(vols, 1e-4)
+    # Initial feasible point: inverse-volatility weights on eligible assets projected onto constraints
+    inv_vol = np.where(ub > 1e-6, 1.0 / np.maximum(vols, 1e-4), 0.0)
+    inv_sum = float(np.sum(inv_vol))
+    if inv_sum <= 1e-9:
+        inv_vol = 1.0 / np.maximum(vols, 1e-4)
+        inv_sum = float(np.sum(inv_vol))
     w = project_onto_portfolio_constraints(
-        inv_vol * (invested_total / float(np.sum(inv_vol))),
+        inv_vol * (invested_total / max(inv_sum, 1e-12)),
         sectors,
         invested_total,
         eff_max_w,
         eff_max_sec,
+        upper_bounds=ub,
     )
 
     # Quantitative expected-return proxy (conservatively scaled: [-8%, +14%] annualized)
@@ -470,6 +523,7 @@ def solve_optimal_weights(
                 eff_max_w,
                 eff_max_sec,
                 iters=25,
+                upper_bounds=ub,
             )
             cand_val = _objective_val(cand)
             if math.isfinite(cand_val) and cand_val <= cur_val - 1e-10:
@@ -484,10 +538,13 @@ def solve_optimal_weights(
         if not accepted:
             break
 
-    # Clean tiny dust weights (< 0.1%) and re-project
-    best_w = np.where(best_w < 1e-4, 0.0, best_w)
+    # Clean tiny dust weights (< 0.1%) and strictly enforce per-asset caps
+    best_w = np.where((best_w < 1e-4) | (ub <= 1e-9), 0.0, best_w)
     if float(np.sum(best_w)) > 1e-9:
-        best_w = project_onto_portfolio_constraints(best_w, sectors, invested_total, eff_max_w, eff_max_sec, iters=30)
+        best_w = project_onto_portfolio_constraints(
+            best_w, sectors, invested_total, eff_max_w, eff_max_sec, iters=30, upper_bounds=ub
+        )
+    best_w = np.where(ub <= 1e-9, 0.0, best_w)
     return best_w, eff_max_w, eff_max_sec, notes
 
 
@@ -536,7 +593,9 @@ def allocate_integer_shares(
 
         for i in range(n):
             p = prices[i]
-            if p > remaining + 1e-9 or target_vals[i] <= 0:
+            if p > remaining + 1e-9 or target_vals[i] <= 0 or (
+                assets[i].max_weight_override is not None and assets[i].max_weight_override <= 0.0
+            ):
                 continue
             cur_v = shares[i] * p
             new_v = cur_v + p
@@ -638,6 +697,8 @@ def optimize_portfolio_or(
                 expected_score=max(-1.0, min(1.0, _finite_or(a.expected_score, 0.0))),
                 fallback_daily_vol=max(0.005, min(0.10, _finite_or(a.fallback_daily_vol, 0.022))),
                 returns_by_date=a.returns_by_date,
+                max_weight_override=a.max_weight_override,
+                exclusion_reason=a.exclusion_reason,
             )
         )
     if not valid_assets:
@@ -707,35 +768,37 @@ def optimize_portfolio_or(
         sec_key = a.sector or "أخرى"
         sector_breakdown[sec_key] = round(sector_breakdown.get(sec_key, 0.0) + act_w_pct, 1)
 
+        is_excluded = a.max_weight_override is not None and float(a.max_weight_override) <= 0.0
         if has_existing:
-            if delta_sh > 0 and trade_val >= max(200.0, capital * 0.01):
+            if not is_excluded and delta_sh > 0 and trade_val >= max(200.0, capital * 0.01):
                 action = "BUY"
-            elif delta_sh < 0 and trade_val >= max(200.0, capital * 0.01):
+            elif delta_sh < 0 and (trade_val >= max(200.0, capital * 0.01) or is_excluded):
                 action = "SELL"
             else:
                 action = "HOLD"
         else:
-            action = "BUY" if tgt_sh > 0 else "SKIP"
+            action = "BUY" if (tgt_sh > 0 and not is_excluded) else "SKIP"
 
-        allocations.append(
-            {
-                "symbol": a.symbol,
-                "nameAr": a.name_ar or a.symbol,
-                "sector": sec_key,
-                "price": round(float(a.price), 2),
-                "currentShares": cur_sh,
-                "currentWeightPct": cur_w_pct,
-                "targetWeightPct": tgt_w_pct,
-                "actualWeightPct": act_w_pct,
-                "targetShares": tgt_sh,
-                "deltaShares": delta_sh,
-                "allocatedValue": round(float(actual_vals[i]), 2),
-                "tradeValue": round(trade_val, 2),
-                "action": action,
-                "riskContributionPct": round(max(0.0, float(risk_contribs[i])) * 100.0, 1),
-                "annualVolPct": round(math.sqrt(max(float(cov[i, i]), 0.0)) * 100.0, 1),
-            }
-        )
+        row_dict: Dict[str, Any] = {
+            "symbol": a.symbol,
+            "nameAr": a.name_ar or a.symbol,
+            "sector": sec_key,
+            "price": round(float(a.price), 2),
+            "currentShares": cur_sh,
+            "currentWeightPct": cur_w_pct,
+            "targetWeightPct": tgt_w_pct,
+            "actualWeightPct": act_w_pct,
+            "targetShares": tgt_sh,
+            "deltaShares": delta_sh,
+            "allocatedValue": round(float(actual_vals[i]), 2),
+            "tradeValue": round(trade_val, 2),
+            "action": action,
+            "riskContributionPct": round(max(0.0, float(risk_contribs[i])) * 100.0, 1),
+            "annualVolPct": round(math.sqrt(max(float(cov[i, i]), 0.0)) * 100.0, 1),
+        }
+        if a.exclusion_reason:
+            row_dict["exclusionReason"] = a.exclusion_reason
+        allocations.append(row_dict)
 
     allocations.sort(key=lambda r: r["actualWeightPct"], reverse=True)
 
@@ -788,6 +851,11 @@ def optimize_portfolio_or(
             if v > 0
         ],
         "highCorrelationPairs": top_corr_pairs[:5],
+        "excludedFromBuying": [
+            {"symbol": a.symbol, "reason": a.exclusion_reason}
+            for a in valid_assets
+            if a.exclusion_reason
+        ],
         "allocations": allocations,
     }
 
@@ -863,3 +931,172 @@ def select_diversified_candidates(
             picked_syms.add(sym)
 
     return selected
+
+
+def build_smart_dca_plan(
+    *,
+    symbol: str,
+    exchange: str = "EGX",
+    currency: str = "ج.م",
+    current_price: float,
+    old_shares: float,
+    old_avg_price: float,
+    dca_budget: Optional[float] = None,
+    support_1: Optional[float] = None,
+    support_2: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    setup_regime: Optional[str] = None,
+    dist_score: Optional[float] = None,
+    fund_score: Optional[float] = None,
+    is_loss_making: Optional[bool] = None,
+    ohlcv_rows: Optional[Sequence[Dict[str, Any]]] = None,
+    reference_shares_used: bool = False,
+) -> Dict[str, Any]:
+    """
+    Operations Research Smart DCA & Break-Even Optimizer.
+    Rejects averaging down on falling-knife / distribution / loss-making traps,
+    or computes a 2-tranche integer-share support ladder with brokerage fees
+    and calibrated 10-session Monte Carlo break-even probability boost.
+    """
+    sym_u = str(symbol or "").strip().upper()
+    ex_u = str(exchange or "EGX").strip().upper()
+    cur_p = float(current_price or 0.0)
+    if cur_p <= 0:
+        return {"symbol": sym_u, "dca_allowed": False, "verdict_ar": "⚠️ تعذّر الحساب لعدم توفر السعر الحالي"}
+
+    dec = 3 if cur_p < 5.0 else 2
+    old_qty = max(float(old_shares or 100.0), 1.0)
+    old_avg = float(old_avg_price or cur_p)
+    current_loss_pct = round(((cur_p - old_avg) / old_avg) * 100.0, 2) if old_avg > 0 else 0.0
+
+    # Eligibility Gate: block mathematically destructive averaging down on traps
+    reasons: List[str] = []
+    if setup_regime == "high_risk_avoid":
+        reasons.append("التصنيف الكمي يرصد مخاطرة مرتفعة أو ضغط بيعي غالب")
+    if dist_score is not None and float(dist_score) >= 65.0:
+        reasons.append(f"رصد تصريف مؤسسي قوي ({float(dist_score):.0f}/100)")
+    if is_loss_making is True:
+        reasons.append("الشركة تحقق خسائر مالية صافية حالياً")
+    if fund_score is not None and float(fund_score) < 32.0:
+        reasons.append(f"الجودة المالية ضعيفة جداً ({float(fund_score):.0f}/100)")
+
+    if reasons:
+        hard_stop = round(stop_loss if (stop_loss and 0 < stop_loss < cur_p) else (cur_p * 0.94), dec)
+        return {
+            "symbol": sym_u,
+            "exchange": ex_u,
+            "currency": currency,
+            "dca_allowed": False,
+            "verdict_ar": "⛔ غير مناسب للتبريد حالياً — أولوية حماية رأس المال",
+            "rejection_reason_ar": "؛ ".join(reasons),
+            "old_shares": round(old_qty, 2),
+            "old_avg_price": round(old_avg, dec),
+            "current_price": round(cur_p, dec),
+            "current_loss_pct": current_loss_pct,
+            "capital_protection_stop": hard_stop,
+            "reference_100_shares": bool(reference_shares_used),
+        }
+
+    budget_estimated = not (dca_budget is not None and float(dca_budget) > 0)
+    budget = float(dca_budget) if not budget_estimated else round(old_qty * cur_p * 0.50, 2)
+    fee_r = market_fee_rate(ex_u)
+
+    if support_1 and (cur_p * 0.90) <= float(support_1) <= cur_p:
+        t1_price = round(float(support_1), dec)
+    else:
+        t1_price = round(cur_p, dec)
+
+    if support_2 and (cur_p * 0.78) <= float(support_2) < t1_price:
+        t2_price = round(float(support_2), dec)
+    else:
+        t2_price = round(t1_price * 0.95, dec)
+
+    t1_alloc = budget * 0.45
+    t1_shares = int(math.floor(max(t1_alloc, 0.0) / max(t1_price * (1.0 + fee_r), 1e-6)))
+    t1_cost = round(t1_shares * t1_price, 2)
+    t1_fee = round(t1_cost * fee_r, 2)
+
+    remaining_budget = max(budget - t1_cost - t1_fee, 0.0)
+    t2_shares = int(math.floor(remaining_budget / max(t2_price * (1.0 + fee_r), 1e-6)))
+    t2_cost = round(t2_shares * t2_price, 2)
+    t2_fee = round(t2_cost * fee_r, 2)
+    total_dca_cash = round(t1_cost + t1_fee + t2_cost + t2_fee, 2)
+    leftover_cash = round(max(budget - total_dca_cash, 0.0), 2)
+
+    old_cost = old_qty * old_avg
+    qty_after_t1 = old_qty + t1_shares
+    new_avg_t1 = round((old_cost + t1_cost + t1_fee) / qty_after_t1, dec) if qty_after_t1 > 0 else round(old_avg, dec)
+    qty_after_full = old_qty + t1_shares + t2_shares
+    new_avg_full = round((old_cost + total_dca_cash) / qty_after_full, dec) if qty_after_full > 0 else round(old_avg, dec)
+
+    rally_before = round(((old_avg - cur_p) / cur_p) * 100.0, 2) if old_avg > cur_p else 0.0
+    rally_after = round(((new_avg_full - cur_p) / cur_p) * 100.0, 2) if new_avg_full > cur_p else 0.0
+    hard_stop = round(stop_loss if (stop_loss and 0 < stop_loss < t2_price) else (t2_price * 0.96), dec)
+
+    try:
+        from api.agentic_chat.quant_engine import prob_touch_level
+        prob_be_before = prob_touch_level(
+            ohlcv_rows,
+            close=cur_p,
+            target_level=old_avg,
+            exchange=ex_u,
+            symbol=sym_u,
+            horizon_days=10,
+        )
+        prob_be_after = prob_touch_level(
+            ohlcv_rows,
+            close=cur_p,
+            target_level=new_avg_full,
+            exchange=ex_u,
+            symbol=sym_u,
+            horizon_days=10,
+        )
+    except Exception:
+        prob_be_before = None
+        prob_be_after = None
+
+    return {
+        "symbol": sym_u,
+        "exchange": ex_u,
+        "currency": currency,
+        "dca_allowed": True,
+        "verdict_ar": "✅ خطة تبريد متدرجة محسوبة على الدعوم لتقريب نقطة التعادل",
+        "old_shares": round(old_qty, 2),
+        "old_avg_price": round(old_avg, dec),
+        "current_price": round(cur_p, dec),
+        "current_loss_pct": current_loss_pct,
+        "dca_budget": round(budget, 2),
+        "budget_estimated": bool(budget_estimated),
+        "reference_100_shares": bool(reference_shares_used),
+        "new_avg_price_t1": new_avg_t1,
+        "new_avg_price_full": new_avg_full,
+        "rally_needed_before_pct": rally_before,
+        "rally_needed_after_pct": rally_after,
+        "prob_breakeven_10d_before_pct": prob_be_before,
+        "prob_breakeven_10d_after_pct": prob_be_after,
+        "hard_invalidation_stop": hard_stop,
+        "estimated_fees": round(t1_fee + t2_fee, 2),
+        "leftover_cash": leftover_cash,
+        "tranches": [
+            {
+                "tranche": 1,
+                "label": "الدفعة الأولى (عند الدعم القريب / السعر الحالي)",
+                "weight_pct": 45,
+                "limit_price": t1_price,
+                "shares": t1_shares,
+                "cost": t1_cost,
+                "fee": t1_fee,
+                "avg_after": new_avg_t1,
+            },
+            {
+                "tranche": 2,
+                "label": "الدفعة الثانية (عند الدعم الثاني الاحتياطي)",
+                "weight_pct": 55,
+                "limit_price": t2_price,
+                "shares": t2_shares,
+                "cost": t2_cost,
+                "fee": t2_fee,
+                "avg_after": new_avg_full,
+            },
+        ],
+    }

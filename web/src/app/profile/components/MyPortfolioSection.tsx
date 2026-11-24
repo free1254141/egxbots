@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import {
@@ -74,6 +74,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
         menuOpen?: boolean;
     }
     const [showAdd, setShowAdd] = useState(false);
+    const addFormRef = useRef<HTMLDivElement | null>(null);
     const [addRows, setAddRows] = useState<AddRow[]>([{ id: "row-1", symbol: "", quantity: "", price: "" }]);
 
     const updateRow = (id: string, field: keyof AddRow, val: any) => {
@@ -273,7 +274,15 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                     {!isCollapsed && (
                         <>
                             <button
-                                onClick={() => setShowAdd((v) => !v)}
+                                onClick={() => {
+                                    setShowAdd((prev) => {
+                                        const next = !prev;
+                                        if (next) {
+                                            setTimeout(() => addFormRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 40);
+                                        }
+                                        return next;
+                                    });
+                                }}
                                 className="h-10 px-4 flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 text-black font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
                             >
                                 <Plus className="h-4 w-4" />
@@ -321,76 +330,9 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
             {!isCollapsed && (
               <>
 
-            {/* Summary tiles */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
-                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "القيمة السوقية" : "Market Value"}</span>
-                    <span dir="ltr" className={`${styles.amount} text-lg font-black text-black dark:text-white font-mono`}>{money(totals?.market_value)}</span>
-                    <span className="text-[9px] text-zinc-500 font-bold block">{isAr ? "ج.م" : "EGP"}</span>
-                </div>
-                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
-                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "الربح / الخسارة" : "P / L"}</span>
-                    <span className={`text-lg font-black font-mono flex items-center gap-1.5 ${profitTone}`}>
-                        {totalProfit === null ? null : totalProfit >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                        <bdi dir="ltr" className={styles.amount}>{money(totalProfit)}</bdi>
-                    </span>
-                    <span dir="ltr" className={`text-[9px] font-black font-mono block ${profitTone}`}>
-                        {totals?.profit_pct != null && totals.profit_pct >= 0 ? "+" : ""}{money(totals?.profit_pct)}%
-                    </span>
-                </div>
-                <div className={`${editingCash ? styles.cashEditing : ""} min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3`}>
-                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "السيولة" : "Cash"}</span>
-                    {editingCash ? (
-                        <div className={styles.cashEditor}>
-                            <input
-                                aria-label={isAr ? "مبلغ السيولة — ج.م" : "Cash amount — EGP"}
-                                dir="ltr"
-                                value={cashDraft}
-                                onChange={(e) => setCashDraft(numericOnly(e.target.value))}
-                                inputMode="decimal"
-                                className={`${styles.cashInput} border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 font-black font-mono text-black dark:text-white outline-none`}
-                            />
-                            <div className={styles.cashActions}>
-                                <button onClick={() => void handleSaveCash()} disabled={busy} className="flex items-center justify-center border-2 border-black dark:border-white bg-emerald-400 text-black" aria-label={isAr ? "حفظ القيمة" : "Save value"} title={isAr ? "حفظ القيمة" : "Save value"}>
-                                    <Check className="h-4 w-4" />
-                                </button>
-                                <button onClick={() => void handleDepositCash()} disabled={busy} className="flex items-center gap-1 px-2 border-2 border-black dark:border-white bg-amber-400 text-black" title={isAr ? "إيداع المبلغ على السيولة الحالية" : "Deposit amount on top of current cash"}>
-                                    <Plus className="h-4 w-4" />
-                                    <span className="text-[10px] font-black">{isAr ? "إيداع" : "Deposit"}</span>
-                                </button>
-                                <button onClick={() => { setEditingCash(false); setCashDraft(snapshot?.cash_balance ? String(Math.round(snapshot.cash_balance)) : "0"); }} className="flex items-center justify-center border-2 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white" aria-label={isAr ? "إلغاء تعديل السيولة" : "Cancel cash edit"} title={isAr ? "إلغاء" : "Cancel"}>
-                                    <X className="h-4 w-4" />
-                                </button>
-                            </div>
-                        </div>
-                    ) : (
-                        <button onClick={() => setEditingCash(true)} className="text-left group" title={isAr ? "اضغط للتعديل" : "Click to edit"}>
-                            <span className="text-lg font-black text-black dark:text-white font-mono flex items-center gap-1.5 group-hover:text-amber-500 transition-colors">
-                                <Coins className="w-4 h-4 text-amber-500" />
-                                <bdi dir="ltr" className={styles.amount}>{money(snapshot?.cash_balance)}</bdi>
-                            </span>
-                            <span className="text-[9px] text-zinc-500 font-bold block">{isAr ? "اضغط للتعديل" : "Click to edit"}</span>
-                        </button>
-                    )}
-                </div>
-                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
-                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "إجمالي المحفظة" : "Total Equity"}</span>
-                    <span className="text-lg font-black text-black dark:text-white font-mono flex items-center gap-1.5">
-                        <BadgeDollarSign className="w-4 h-4 text-indigo-500" />
-                        <bdi dir="ltr" className={styles.amount}>{money(totals?.equity)}</bdi>
-                    </span>
-                    <span className="text-[9px] text-zinc-500 font-bold block">{positions.length} {isAr ? "سهم" : "stocks"}</span>
-                </div>
-            </div>
-
-            <PortfolioOverview report={reportState.report} snapshot={snapshot} isAr={isAr} loading={reportState.loading} error={reportState.error} onRefresh={reportState.refresh} />
-            <PortfolioPerformanceDashboard userId={user?.id || null} snapshot={snapshot} isAr={isAr} supplied={reportState} />
-            <PortfolioTransactions snapshot={snapshot} events={reportState.report?.transactions || []} isAr={isAr} initialSale={saleDraft}
-                onSaved={async()=>{ await load(true); reportState.refresh(); onPortfolioUpdated?.(); }} />
-
             {/* Add form — Multi-stock bulk add */}
             {showAdd && (
-                <div className="border-4 border-dashed border-black/50 dark:border-white/40 bg-emerald-50 dark:bg-emerald-950/20 p-4 sm:p-5 space-y-4">
+                <div ref={addFormRef} className="border-4 border-dashed border-black/50 dark:border-white/40 bg-emerald-50 dark:bg-emerald-950/20 p-4 sm:p-5 space-y-4">
                     <div className="flex items-center justify-between border-b-2 border-emerald-200 dark:border-emerald-800 pb-2">
                         <span className="font-black text-xs uppercase tracking-widest text-emerald-800 dark:text-emerald-300">
                             {isAr ? "إضافة حيازاتك الحالية" : "Import current holdings"}
@@ -507,6 +449,73 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                     </div>
                 </div>
             )}
+
+            {/* Summary tiles */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
+                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "القيمة السوقية" : "Market Value"}</span>
+                    <span dir="ltr" className={`${styles.amount} text-lg font-black text-black dark:text-white font-mono`}>{money(totals?.market_value)}</span>
+                    <span className="text-[9px] text-zinc-500 font-bold block">{isAr ? "ج.م" : "EGP"}</span>
+                </div>
+                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
+                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "الربح / الخسارة" : "P / L"}</span>
+                    <span className={`text-lg font-black font-mono flex items-center gap-1.5 ${profitTone}`}>
+                        {totalProfit === null ? null : totalProfit >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                        <bdi dir="ltr" className={styles.amount}>{money(totalProfit)}</bdi>
+                    </span>
+                    <span dir="ltr" className={`text-[9px] font-black font-mono block ${profitTone}`}>
+                        {totals?.profit_pct != null && totals.profit_pct >= 0 ? "+" : ""}{money(totals?.profit_pct)}%
+                    </span>
+                </div>
+                <div className={`${editingCash ? styles.cashEditing : ""} min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3`}>
+                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "السيولة" : "Cash"}</span>
+                    {editingCash ? (
+                        <div className={styles.cashEditor}>
+                            <input
+                                aria-label={isAr ? "مبلغ السيولة — ج.م" : "Cash amount — EGP"}
+                                dir="ltr"
+                                value={cashDraft}
+                                onChange={(e) => setCashDraft(numericOnly(e.target.value))}
+                                inputMode="decimal"
+                                className={`${styles.cashInput} border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 font-black font-mono text-black dark:text-white outline-none`}
+                            />
+                            <div className={styles.cashActions}>
+                                <button onClick={() => void handleSaveCash()} disabled={busy} className="flex items-center justify-center border-2 border-black dark:border-white bg-emerald-400 text-black" aria-label={isAr ? "حفظ القيمة" : "Save value"} title={isAr ? "حفظ القيمة" : "Save value"}>
+                                    <Check className="h-4 w-4" />
+                                </button>
+                                <button onClick={() => void handleDepositCash()} disabled={busy} className="flex items-center gap-1 px-2 border-2 border-black dark:border-white bg-amber-400 text-black" title={isAr ? "إيداع المبلغ على السيولة الحالية" : "Deposit amount on top of current cash"}>
+                                    <Plus className="h-4 w-4" />
+                                    <span className="text-[10px] font-black">{isAr ? "إيداع" : "Deposit"}</span>
+                                </button>
+                                <button onClick={() => { setEditingCash(false); setCashDraft(snapshot?.cash_balance ? String(Math.round(snapshot.cash_balance)) : "0"); }} className="flex items-center justify-center border-2 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white" aria-label={isAr ? "إلغاء تعديل السيولة" : "Cancel cash edit"} title={isAr ? "إلغاء" : "Cancel"}>
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <button onClick={() => setEditingCash(true)} className="text-left group" title={isAr ? "اضغط للتعديل" : "Click to edit"}>
+                            <span className="text-lg font-black text-black dark:text-white font-mono flex items-center gap-1.5 group-hover:text-amber-500 transition-colors">
+                                <Coins className="w-4 h-4 text-amber-500" />
+                                <bdi dir="ltr" className={styles.amount}>{money(snapshot?.cash_balance)}</bdi>
+                            </span>
+                            <span className="text-[9px] text-zinc-500 font-bold block">{isAr ? "اضغط للتعديل" : "Click to edit"}</span>
+                        </button>
+                    )}
+                </div>
+                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
+                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "إجمالي المحفظة" : "Total Equity"}</span>
+                    <span className="text-lg font-black text-black dark:text-white font-mono flex items-center gap-1.5">
+                        <BadgeDollarSign className="w-4 h-4 text-indigo-500" />
+                        <bdi dir="ltr" className={styles.amount}>{money(totals?.equity)}</bdi>
+                    </span>
+                    <span className="text-[9px] text-zinc-500 font-bold block">{positions.length} {isAr ? "سهم" : "stocks"}</span>
+                </div>
+            </div>
+
+            <PortfolioOverview report={reportState.report} snapshot={snapshot} isAr={isAr} loading={reportState.loading} error={reportState.error} onRefresh={reportState.refresh} />
+            <PortfolioPerformanceDashboard userId={user?.id || null} snapshot={snapshot} isAr={isAr} supplied={reportState} />
+            <PortfolioTransactions snapshot={snapshot} events={reportState.report?.transactions || []} isAr={isAr} initialSale={saleDraft}
+                onSaved={async()=>{ await load(true); reportState.refresh(); onPortfolioUpdated?.(); }} />
 
             {/* Positions */}
             {loading ? (

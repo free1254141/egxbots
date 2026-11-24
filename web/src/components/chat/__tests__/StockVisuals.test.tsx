@@ -15,8 +15,10 @@ import {
     PortfolioVisualCard,
     PriceLadderSvg,
     PriceTrapsRadarCard,
+    QuantIntelligenceCard,
     RecommendationsTrackerCard,
     ShariaPurificationCard,
+    SmartDcaPlanCard,
 } from "../StockVisuals";
 
 jest.mock("next/navigation", () => ({
@@ -395,5 +397,84 @@ describe("StockVisuals & Website Chat Visual Enrichment", () => {
         const halalBar = container.querySelector('[data-testid="sharia-purification-card"] .bg-emerald-500\\/85');
         expect(halalBar?.getAttribute("style")).toContain("width: 100%");
         expect(screen.queryByText(/تطهير:\s*\d/)).toBeNull();
+    });
+
+    test("QuantIntelligenceCard and SmartDcaPlanCard (allowed & blocked) render cleanly", () => {
+        render(
+            <>
+                <QuantIntelligenceCard
+                    items={[
+                        {
+                            symbol: "MFPC",
+                            name_ar: "موبكو للأسمدة",
+                            currency: "ج.م",
+                            setup_regime: "value_in_downtrend",
+                            setup_regime_label_ar: "⚖️ قيمة مالية في تصحيح فني — مراقبة الانعكاس",
+                            conflict_resolution_ar: "تعارض واضح: رخيص مالياً لكن هابط فنياً",
+                            technical_score: 36,
+                            fundamental_score: 82,
+                            conviction_score: 54,
+                            bull_case: ["تحت القيمة العادلة بنسبة +48%"],
+                            bear_case: ["كسر متوسط EMA50"],
+                            monte_carlo: {
+                                paths_count: 5000,
+                                horizon_days: 10,
+                                daily_limit_pct: 20,
+                                target_barrier: 39.8,
+                                stop_barrier: 34.5,
+                                prob_hit_target_first_pct: 38.4,
+                                prob_hit_stop_first_pct: 31.2,
+                                prob_stay_in_range_pct: 30.4,
+                                expected_10d_range: { p10: 33.8, p50: 36.7, p90: 40.9 },
+                            },
+                            self_learning: {
+                                learned_lesson_ar: "معايرة بايزية بسجل السهم (40 نافذة)",
+                            },
+                            macro_sensitivity: {
+                                summary_ar: "تحوط الماكرو: ارتباط الدولار +0.35",
+                            },
+                        },
+                    ]}
+                />
+                <SmartDcaPlanCard
+                    plan={{
+                        symbol: "MFPC",
+                        currency: "ج.م",
+                        dca_allowed: true,
+                        old_avg_price: 38.15,
+                        new_avg_price_full: 37.1,
+                        prob_breakeven_10d_before_pct: 29.0,
+                        prob_breakeven_10d_after_pct: 46.5,
+                        hard_invalidation_stop: 33.4,
+                        tranches: [
+                            { tranche: 1, label: "الدفعة الأولى", weight_pct: 45, limit_price: 36.2, shares: 120, cost: 4344, fee: 7.82, avg_after: 37.9 },
+                            { tranche: 2, label: "الدفعة الثانية", weight_pct: 55, limit_price: 34.5, shares: 155, cost: 5347.5, fee: 9.63, avg_after: 37.1 },
+                        ],
+                    }}
+                />
+                <SmartDcaPlanCard
+                    plan={{
+                        symbol: "CRST",
+                        currency: "ج.م",
+                        dca_allowed: false,
+                        verdict_ar: "⛔ غير مناسب للتبريد حالياً",
+                        rejection_reason_ar: "رصد تصريف مؤسسي قوي (80/100)",
+                        current_loss_pct: -24.5,
+                        capital_protection_stop: 1.48,
+                    }}
+                />
+            </>
+        );
+
+        expect(screen.getByTestId("quant-intelligence-card")).toBeTruthy();
+        expect(screen.getByText(/ثقة كمية 54\/100/)).toBeTruthy();
+        expect(screen.getByText(/هدف \(39\.8\): 38\.4%/)).toBeTruthy();
+        expect(screen.getByText(/تحت القيمة العادلة بنسبة \+48%/)).toBeTruthy();
+
+        const dcaCards = screen.getAllByTestId("smart-dca-plan-card");
+        expect(dcaCards.length).toBe(2);
+        expect(screen.getByText(/احتمال التعادل خلال 10 جلسات: 29% ⬅️ 46\.5%/)).toBeTruthy();
+        expect(screen.getByText(/حارس التبريد — CRST/)).toBeTruthy();
+        expect(screen.getByText(/رصد تصريف مؤسسي قوي \(80\/100\)/)).toBeTruthy();
     });
 });

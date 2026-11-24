@@ -46,7 +46,19 @@ from api.agentic_chat.market_registry import (
 
 # Canonical whitelist of known EGX tickers so arbitrary English words (e.g. "ANALYZE", "PRICE", "SWING")
 # are never mistaken for ticker symbols in string-based cache key detection.
-_VALID_LATIN_TICKERS = frozenset(_KNOWN_SYMBOLS | {"COMI", "FWRY", "TMGH", "SWDY", "PHDC", "SKPC", "ATQA"})
+_VALID_LATIN_TICKERS = frozenset(
+    _KNOWN_SYMBOLS
+    | set(ARABIC_STOCK_MAPPINGS.values())
+    | {
+        "COMI", "FWRY", "TMGH", "SWDY", "PHDC", "SKPC", "ATQA",
+        "CRST", "COSG", "INEG", "ACTF", "EPPK", "VALU", "BIOC",
+        "POUL", "EFIC", "EFID", "CERA", "TAQA", "ETRS", "ORHD",
+        "OIH", "GBCO", "PRCL", "HDBK", "AMOC", "SUGR", "MFPC",
+        "ABUK", "MOSC", "RKAZ", "AIDC", "FTNS", "CNFN", "AMER",
+        "CPME", "ICFC", "FERC", "HRHO", "ESRS", "ETEL", "EAST",
+        "OCDI", "EMFD", "ADIB", "QNBA", "ISPH", "CLHO", "DSCW",
+    }
+)
 
 logger = logging.getLogger("agentic_chat.cache")
 
@@ -561,6 +573,31 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
             return f"vip_traps_{sym}" if sym else None
         return "vip_price_traps"
 
+    # 11. Sharia Cleanser (default non-custom stock check -> isolated vip_stock_{sym}_sharia; multi-tool batch resolves to vip_stock_{sym})
+    if tool_name == "get_sharia_cleanser":
+        if safe_args.get("coupon_per_share") is not None or safe_args.get("purification_rate_pct") is not None:
+            return None
+        sh = safe_args.get("shares_count")
+        if sh not in (None, 1000, 1000.0):
+            return None
+        raw_sym = safe_args.get("symbol")
+        if raw_sym:
+            sym = _normalize_ticker_for_cache(raw_sym)
+            return f"vip_stock_{sym}_sharia" if sym else None
+        return None
+
+    # 12. Dividends (single stock -> isolated vip_stock_{sym}_divs; multi-tool batch resolves to vip_stock_{sym})
+    if tool_name == "get_dividends":
+        raw_syms = safe_args.get("symbols")
+        if isinstance(raw_syms, list) and len(raw_syms) == 1:
+            sym = _normalize_ticker_for_cache(raw_syms[0])
+            return f"vip_stock_{sym}_divs" if sym else None
+        raw_sym = safe_args.get("symbol")
+        if raw_sym and str(raw_sym).strip().upper() not in _MARKET_KEYWORDS:
+            sym = _normalize_ticker_for_cache(raw_sym)
+            return f"vip_stock_{sym}_divs" if sym else None
+        return None
+
     return None
 
 
@@ -594,7 +631,7 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
     if len(set(keys)) == 1:
         return keys[0]
 
-    # Parallel single-stock tools for one symbol (technical + fair value + news/disclosures + traps)
+    # Parallel single-stock tools for one symbol (technical + fair value + news/disclosures + traps + sharia + dividends)
     stock_tool_names = {
         "get_stock",
         "get_stock_levels",
@@ -602,6 +639,8 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
         "get_news",
         "get_disclosures",
         "get_price_traps",
+        "get_sharia_cleanser",
+        "get_dividends",
     }
     names_set = {p[0] for p in parsed}
     if names_set.issubset(stock_tool_names) and (
@@ -628,33 +667,60 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
 
     # Parallel open recommendations discovery (keep pure recommendations isolated from full market-pulse + screener)
     if "get_recommendations" in names_set and names_set.issubset(
-        {"get_recommendations", "get_technical_scan", "screen_stocks", "get_accumulation_stocks", "get_market"}
+        {
+            "get_recommendations",
+            "get_technical_scan",
+            "screen_stocks",
+            "get_accumulation_stocks",
+            "get_market",
+            "get_price_traps",
+            "get_news",
+            "get_disclosures",
+        }
     ):
         recs_keys = [p[2] for p in parsed if p[0] == "get_recommendations"]
         market_ok = all(p[2] == "vip_market_summary" for p in parsed if p[0] == "get_market")
         if recs_keys and market_ok and len(set(recs_keys)) == 1:
             if names_set == {"get_recommendations", "get_market"}:
                 return recs_keys[0]
-            if recs_keys[0] == "vip_open_recommendations":
-                if "get_market" in names_set and (
-                    "get_technical_scan" in names_set
-                    or "screen_stocks" in names_set
-                    or "get_accumulation_stocks" in names_set
+            scan_ok = all(
+                p[2] == "vip_tech_screener"
+                for p in parsed
+                if p[0] in ("get_technical_scan", "screen_stocks")
+            )
+            acc_ok = all(
+                p[2] == "vip_accumulation"
+                for p in parsed
+                if p[0] == "get_accumulation_stocks"
+            )
+            traps_ok = all(
+                p[2] == "vip_price_traps"
+                for p in parsed
+                if p[0] == "get_price_traps"
+            )
+            news_ok = all(
+                p[2] == "vip_market_news"
+                for p in parsed
+                if p[0] in ("get_news", "get_disclosures")
+            )
+            if recs_keys[0] in ("vip_open_recommendations", "vip_recs_this_week"):
+                if "get_market" in names_set and any(
+                    t in names_set
+                    for t in (
+                        "get_technical_scan",
+                        "screen_stocks",
+                        "get_accumulation_stocks",
+                        "get_price_traps",
+                        "get_news",
+                        "get_disclosures",
+                    )
                 ):
-                    scan_ok = all(
-                        p[2] == "vip_tech_screener"
-                        for p in parsed
-                        if p[0] in ("get_technical_scan", "screen_stocks")
-                    )
-                    acc_ok = all(
-                        p[2] == "vip_accumulation"
-                        for p in parsed
-                        if p[0] == "get_accumulation_stocks"
-                    )
-                    if scan_ok and acc_ok:
+                    if scan_ok and acc_ok and traps_ok and news_ok:
                         return "vip_market_pulse_and_recs"
                     return None
-                return "vip_open_recommendations"
+                if recs_keys[0] == "vip_open_recommendations" and scan_ok and acc_ok and traps_ok and news_ok:
+                    return "vip_open_recommendations"
+                return None
 
     # Parallel Market Overview / Accumulation / Screener discovery (e.g. "أقوى الأسهم اللي بتجمع سيولة وأحجام تداول")
     if names_set.issubset({"get_market", "get_accumulation_stocks", "get_technical_scan", "screen_stocks"}):
@@ -669,6 +735,13 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
                 if "get_market" in names_set and scan_keys[0] == "vip_tech_screener":
                     return "vip_market_and_screener"
                 return scan_keys[0]
+
+    # Parallel Market Summary + Market-Wide News/Disclosures -> canonical vip_market_summary
+    if "get_market" in names_set and names_set.issubset({"get_market", "get_news", "get_disclosures"}):
+        market_ok = all(p[2] == "vip_market_summary" for p in parsed if p[0] == "get_market")
+        news_ok = all(p[2] == "vip_market_news" for p in parsed if p[0] in ("get_news", "get_disclosures"))
+        if market_ok and news_ok:
+            return "vip_market_summary"
 
     return None
 
@@ -833,7 +906,10 @@ def build_analysis_cache_key(
 
     # Canonical Market-Wide Buttons & Direct Queries (only when NOT narrowed by OTC/Sharia/Saudi/sector/price filters)
     if not has_scope_constraint:
-        if any(k in norm for k in (" ملخص السوق ", " حاله السوق ", " وضع السوق ", " market summary ")):
+        if any(k in norm for k in (
+            " ملخص السوق ", " حاله السوق ", " وضع السوق ", " market summary ",
+            " تحليل السوق ", " تحليل السوق الان ", " وضع السوق الان ", " حاله السوق الان ",
+        )):
             return "vip_market_summary"
         if any(k in norm for k in (
             " اسهم التجميع ", " تجميع وايكوف ", " السيوله الذكيه ", " accumulation ",
@@ -845,11 +921,14 @@ def build_analysis_cache_key(
         if any(k in norm for k in (" اقوي الاسهم ", " افضل الاسهم ", " top stocks ")) and not any(k in norm for k in ("تجميع", "تجمع", "بتجمع", "سيوله", "قطاع", "فني", "مسح")):
             return "vip_top_stocks"
         if any(k in norm for k in (
-            " اخبار البورصه ", " اخبار السوق ", " افصاحات السوق ",
+            " اخبار البورصه ", " اخبار السوق ", " افصاحات السوق ", " اخبار السوق الان ",
             " اخبار وافصاحات ", " اهم اخبار وافصاحات ", " افصاحات البورصه ", " market news ",
         )):
             return "vip_market_news"
-        if any(k in norm for k in (" التوصيات المفتوحه ", " كل التوصيات المفتوحه ", " صفقات السوينغ ", " صفقات السوينج ", " توصيات اليوم ")):
+        if any(k in norm for k in (
+            " التوصيات المفتوحه ", " كل التوصيات المفتوحه ", " التوصيات المفتوحه حاليا ",
+            " كل التوصيات المفتوحه حاليا ", " صفقات السوينغ ", " صفقات السوينج ", " توصيات اليوم ",
+        )):
             return "vip_open_recommendations"
         if any(k in norm for k in (" توصيات الاسبوع الحالي ", " توصيات هذا الاسبوع ")):
             return "vip_recs_this_week"
