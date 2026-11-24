@@ -260,7 +260,7 @@ export function StockCard({
 
     // Mathematically calculated Risk/Reward ratio if not directly provided
     const rawTarget1Num = parseFirstNum(target1) ?? parseFirstNum(resistance1);
-    const rawStopLossNum = parseFirstNum(stopLoss) ?? parseFirstNum(support1);
+    const rawStopLossNum = parseFirstNum(stopLoss) ?? parseFirstNum(support1) ?? parseFirstNum(support2);
     let calculatedRR: string | undefined = riskReward ? String(riskReward) : undefined;
     if (!calculatedRR && rawTarget1Num !== undefined && rawStopLossNum !== undefined && !isNaN(rawPrice) && rawPrice > 0) {
         const reward = Math.abs(rawTarget1Num - rawPrice);

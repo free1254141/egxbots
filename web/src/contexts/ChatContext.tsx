@@ -351,6 +351,19 @@ export type ChatTable = {
             exchange?: string;
             currency?: string;
             close?: number | null;
+            change_pct?: number | null;
+            rsi_14?: number | null;
+            r_vol?: number | null;
+            ema_50?: number | null;
+            ema_200?: number | null;
+            stop_loss?: number | null;
+            support_1?: number | null;
+            support_2?: number | null;
+            resistance_1?: number | null;
+            resistance_2?: number | null;
+            king_ai_score?: number | null;
+            wyckoff_phase?: string | null;
+            macd?: number | null;
             setup_regime?: string;
             setup_regime_label_ar?: string;
             conflict_resolution_ar?: string;
@@ -881,6 +894,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const sessionMessagesCache = useRef<Record<string, ChatMessage[]>>({});
 
     const loadingSessionIds = useRef<Record<string, boolean>>({});
+    const sessionMutationVersionRef = useRef<Record<string, number>>({});
+    const lastLocalTurnAtRef = useRef<Record<string, number>>({});
     const lastSubmitRef = useRef<{ sessionId: string; text: string; ts: number } | null>(null);
 
     const activeSessionIdRef = useRef<string | null>(activeSessionId);
@@ -1119,13 +1134,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const fetchSessionMessages = useCallback((sessionId: string): Promise<void> => {
 
+        if (loadingSessionIds.current[sessionId]) return Promise.resolve();
+
         const pending = sessionFetchesRef.current[sessionId];
 
         if (pending) return pending;
 
-
-
         const request = (async () => {
+
+            const fetchStartVersion = sessionMutationVersionRef.current[sessionId] || 0;
 
             try {
 
@@ -1138,6 +1155,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 const data = await res.json();
 
                 if (!Array.isArray(data.history) || data.history.length === 0) return;
+
+                if (loadingSessionIds.current[sessionId] || (sessionMutationVersionRef.current[sessionId] || 0) !== fetchStartVersion) {
+                    return;
+                }
 
 
 
@@ -1229,15 +1250,51 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 
 
-                // Keep an in-flight assistant response visible while syncing history.
+                const latestExisting = sessionMessagesCache.current[sessionId] || getStoredMessages(sessionId);
+
+                if (loadingSessionIds.current[sessionId] || (sessionMutationVersionRef.current[sessionId] || 0) !== fetchStartVersion) {
+                    return;
+                }
+
+                if (Date.now() - (lastLocalTurnAtRef.current[sessionId] || 0) < 15_000 && latestExisting.length > mergedHistory.length) {
+                    const newestServerTs = mergedHistory.reduce((mx, m) => Math.max(mx, m.timestamp || 0), 0);
+                    const newestLocalTs = latestExisting.reduce((mx, m) => Math.max(mx, m.timestamp || 0), 0);
+                    if (newestLocalTs > newestServerTs) {
+                        return;
+                    }
+                }
+
+                // Keep an in-flight optimistic turn (both user question and streaming assistant bubble) visible while syncing history.
 
                 if (loadingSessionIds.current[sessionId]) {
 
-                    const streamingMsg = existing.find(m => m.isStreaming);
+                    const streamingIdx = latestExisting.findIndex(m => m.isStreaming);
 
-                    if (streamingMsg && !mergedHistory.some(m => m.id === streamingMsg.id)) {
+                    if (streamingIdx >= 0) {
 
-                        mergedHistory.push(streamingMsg);
+                        const precedingUserMsg = streamingIdx > 0 && latestExisting[streamingIdx - 1]?.role === "user"
+                            ? latestExisting[streamingIdx - 1]
+                            : null;
+
+                        if (
+                            precedingUserMsg &&
+                            !mergedHistory.some(m =>
+                                (m.id && m.id === precedingUserMsg.id) ||
+                                (m.role === "user" && m.timestamp === precedingUserMsg.timestamp && m.content === precedingUserMsg.content)
+                            )
+                        ) {
+
+                            mergedHistory.push(precedingUserMsg);
+
+                        }
+
+                        const streamingMsg = latestExisting[streamingIdx];
+
+                        if (streamingMsg && !mergedHistory.some(m => m.id === streamingMsg.id)) {
+
+                            mergedHistory.push(streamingMsg);
+
+                        }
 
                     }
 
@@ -1656,6 +1713,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         delete sessionMessagesCache.current[sessionId];
 
         delete loadingSessionIds.current[sessionId];
+        delete sessionMutationVersionRef.current[sessionId];
+        delete lastLocalTurnAtRef.current[sessionId];
 
         if (typeof window !== "undefined") {
 
@@ -1835,7 +1894,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const isVoiceNote = Boolean(options?.isVoiceNote);
         const isVoiceCall = Boolean(options?.isVoiceCall ?? (options?.isVoice && !options?.isVoiceNote));
 
+        const userMsgId = typeof crypto !== "undefined" && crypto.randomUUID
+            ? `user-${crypto.randomUUID()}`
+            : `user-${nowSubmitTs}-${Math.random().toString(36).slice(2, 8)}`;
+
         const newUserMsg: ChatMessage = {
+
+            id: userMsgId,
 
             role: "user",
 
@@ -1869,13 +1934,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 
 
-        setSessionMessages(currentSessionId, nextMessages);
-
-
-
-        // Mark loading state for this session
+        sessionMutationVersionRef.current[currentSessionId] = (sessionMutationVersionRef.current[currentSessionId] || 0) + 1;
 
         loadingSessionIds.current[currentSessionId] = true;
+
+        setSessionMessages(currentSessionId, nextMessages);
 
         if (activeSessionIdRef.current === currentSessionId) {
 
@@ -1928,13 +1991,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                     const updated = [...prevMsgs];
 
-                    updated[existingIndex] = updatedMsg;
+                    updated[existingIndex] = { ...updatedMsg };
 
                     return updated;
 
                 } else {
 
-                    return [...prevMsgs, updatedMsg];
+                    return [...prevMsgs, { ...updatedMsg }];
 
                 }
 
@@ -2641,6 +2704,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         } finally {
 
             abortControllerRef.current = null;
+
+            lastLocalTurnAtRef.current[currentSessionId] = Date.now();
+            sessionMutationVersionRef.current[currentSessionId] = (sessionMutationVersionRef.current[currentSessionId] || 0) + 1;
 
             loadingSessionIds.current[currentSessionId] = false;
 

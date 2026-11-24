@@ -102,3 +102,104 @@ test("deduplicates same-room history reads and ignores a late response after swi
   });
   expect(chat.messages.map(({ content }) => content)).toEqual(["تاريخ ب من الخادم"]);
 });
+
+const jsonResponse = (body: unknown) => ({
+  ok: true,
+  status: 200,
+  headers: {
+    get: (name: string) => (name.toLowerCase() === "content-type" ? "application/json" : null),
+  },
+  json: async () => body,
+});
+
+test("preserves the newly sent user question and streaming assistant bubble when a stale history fetch resolves mid-stream", async () => {
+  const roomA = session("room-a", "2026-10-15T12:00:00Z");
+  saveLocalRoom(roomA.id, "رسالة سابقة");
+
+  let resolveStaleHistory!: (value: unknown) => void;
+  let resolvePost!: (value: unknown) => void;
+  let staleHistoryStarted = false;
+
+  (fetch as jest.Mock).mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("action=sessions")) {
+      return Promise.resolve(accessResponse([roomA]));
+    }
+    if (url.includes(`session_id=${roomA.id}`) && (!init || init.method !== "DELETE")) {
+      staleHistoryStarted = true;
+      return new Promise(resolve => { resolveStaleHistory = resolve; });
+    }
+    if (url === "/api/ai-chat" && init?.method === "POST") {
+      return new Promise(resolve => { resolvePost = resolve; });
+    }
+    return Promise.resolve(response({ ok: true }));
+  });
+
+  await act(async () => { render(tree()); });
+  await waitFor(() => expect(chat.activeSessionId).toBe(roomA.id));
+  await waitFor(() => expect(staleHistoryStarted).toBe(true));
+
+  let sendPromise!: Promise<unknown>;
+  await act(async () => {
+    sendPromise = chat.sendMessage("ما وضع سهم COMI؟");
+  });
+
+  expect(chat.messages.map(m => m.content)).toContain("ما وضع سهم COMI؟");
+  expect(chat.messages.some(m => m.role === "assistant" && m.isStreaming)).toBe(true);
+
+  await act(async () => {
+    resolveStaleHistory(historyResponse("تاريخ قديم قبل السؤال"));
+    await Promise.resolve();
+  });
+
+  expect(chat.messages.map(m => m.content)).toContain("ما وضع سهم COMI؟");
+  expect(chat.messages.some(m => m.role === "assistant" && m.isStreaming)).toBe(true);
+  expect(chat.messages.map(m => m.content)).not.toContain("تاريخ قديم قبل السؤال");
+
+  await act(async () => {
+    resolvePost(jsonResponse({ reply: "تحليل COMI محدث", remaining_quota: 4 }));
+    await sendPromise;
+  });
+
+  expect(chat.messages.map(m => m.content)).toContain("ما وضع سهم COMI؟");
+  expect(chat.messages.some(m => m.role === "assistant" && m.content.includes("تحليل COMI محدث"))).toBe(true);
+});
+
+test("does not erase a freshly completed local turn when a lagging server history read returns fewer messages", async () => {
+  const roomA = session("room-a", "2026-10-15T12:00:00Z");
+
+  (fetch as jest.Mock).mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("action=sessions")) {
+      return Promise.resolve(accessResponse([roomA]));
+    }
+    if (url.includes(`session_id=${roomA.id}`) && (!init || init.method !== "DELETE")) {
+      return Promise.resolve(response({
+        history: [{ role: "assistant", content: "رسالة أولى", timestamp: 1000 }],
+      }));
+    }
+    if (url === "/api/ai-chat" && init?.method === "POST") {
+      return Promise.resolve(jsonResponse({ reply: "رد جديد عن ABUK", remaining_quota: 4 }));
+    }
+    return Promise.resolve(response({ ok: true }));
+  });
+
+  await act(async () => { render(tree()); });
+  await waitFor(() => expect(chat.messages.map(m => m.content)).toEqual(["رسالة أولى"]));
+
+  await act(async () => {
+    await chat.sendMessage("سؤال جديد عن ABUK");
+  });
+
+  expect(chat.messages).toHaveLength(3);
+  expect(chat.messages[0].content).toBe("رسالة أولى");
+  expect(chat.messages[1].content).toBe("سؤال جديد عن ABUK");
+  expect(chat.messages[2].content).toContain("رد جديد عن ABUK");
+
+  await act(async () => {
+    await chat.switchSession(roomA.id);
+  });
+
+  expect(chat.messages).toHaveLength(3);
+  expect(chat.messages[0].content).toBe("رسالة أولى");
+  expect(chat.messages[1].content).toBe("سؤال جديد عن ABUK");
+  expect(chat.messages[2].content).toContain("رد جديد عن ABUK");
+});

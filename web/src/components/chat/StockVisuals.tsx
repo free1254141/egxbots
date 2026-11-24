@@ -64,7 +64,7 @@ export function PriceLadderSvg({
 
     const curPrice = typeof price === "number" && Number.isFinite(price) && price > 0 ? price : undefined;
     const primaryTarget = target1 ?? resistance1;
-    const primaryStop = stopLoss ?? support2 ?? support1;
+    const primaryStop = stopLoss ?? support1 ?? support2;
 
     const canSwitchBreakout = Boolean(
         curPrice &&

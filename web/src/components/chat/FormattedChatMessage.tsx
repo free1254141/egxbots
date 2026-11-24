@@ -338,6 +338,7 @@ export function tryParseAnalysisTable(
     let support2: number | undefined;
     let resistance1: number | undefined;
     let resistance2: number | undefined;
+    let stopLoss: number | undefined;
     let rsi: number | undefined;
     let macdVal: string | undefined;
     let volRatio: number | undefined;
@@ -416,6 +417,9 @@ export function tryParseAnalysisTable(
             } else {
                 resistance1 = parseNum(val);
             }
+        } else if (!isDistanceOrPctRow && /(?:^|[\s\/\-_]|ال)وقف(?:\s*الخسارة)?|stop[\s_-]*loss/i.test(key) && !/موقف/i.test(key)) {
+            hasSupport = true;
+            stopLoss = parseNum(val);
         } else if (/RSI/i.test(key)) {
             hasRsi = true;
             rsi = parseNum(val);
@@ -662,7 +666,7 @@ export function tryParseAnalysisTable(
         resistance2,
         target1: undefined,
         target2: undefined,
-        stopLoss: undefined,
+        stopLoss,
         recommendation: recommendation || wyckoffPhase || "حيادي للمراقبة",
         signal: recommendation || "مراقبة فنية",
         rsi,
@@ -1110,6 +1114,31 @@ function parseContentBlocks(content: string): ContentBlock[] {
                 }
             }
         }
+        if (cardStock.rsi === undefined || cardStock.rVol === undefined) {
+            const combinedProse = finalBlocks
+                .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+                .map(b => b.content.replace(/[\*`]/g, ""))
+                .join("\n");
+            if (cardStock.rsi === undefined) {
+                const rsiMatch = combinedProse.match(/\bRSI(?:\s*(?:\(\s*14\s*\)|14(?!\.\d)(?=\s*(?:عند|[:=\-]|هو|\d))))?\s*(?:عند|[:=])?\s*(\d{1,2}(?:\.\d+)?)/i);
+                if (rsiMatch) {
+                    const parsedRsi = parseFloat(rsiMatch[1]);
+                    if (!isNaN(parsedRsi) && parsedRsi >= 0 && parsedRsi <= 100) {
+                        cardStock.rsi = parsedRsi;
+                    }
+                }
+            }
+            if (cardStock.rVol === undefined) {
+                const rvolMatch = combinedProse.match(/(?:السيولة النسبية|الحجم النسبي|RVol)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*x/i);
+                if (rvolMatch) {
+                    const parsedRvol = parseFloat(rvolMatch[1]);
+                    if (!isNaN(parsedRvol) && parsedRvol >= 0) {
+                        cardStock.rVol = parsedRvol;
+                        cardStock.volumeRatio = parsedRvol;
+                    }
+                }
+            }
+        }
     }
 
     // Consolidate consecutive stock_card blocks into stock_cards grid/carousel
@@ -1473,6 +1502,39 @@ export function FormattedChatMessage({
             if (t.visuals.dca_plan) mergedVisuals.dca_plan = t.visuals.dca_plan;
         }
     }
+    const quantBySymbol: Record<string, NonNullable<ChatVisualsPayload["quant_analysis"]>[number]> = {};
+    for (const q of (mergedVisuals.quant_analysis || [])) {
+        if (q?.symbol) {
+            quantBySymbol[String(q.symbol).toUpperCase().replace(".CA", "")] = q;
+        }
+    }
+    const hydrateStockFromQuant = (s: StockData, cleanSym: string) => {
+        const q = quantBySymbol[cleanSym];
+        if (!q) return;
+        if (s.rsi === undefined && q.rsi_14 != null) s.rsi = q.rsi_14;
+        if (s.rVol === undefined && s.r_vol === undefined && q.r_vol != null) {
+            s.rVol = q.r_vol;
+            s.volumeRatio = q.r_vol;
+        }
+        if (s.ema50 === undefined && q.ema_50 != null) s.ema50 = q.ema_50;
+        if (s.ema200 === undefined && q.ema_200 != null) s.ema200 = q.ema_200;
+        if (s.stopLoss === undefined && s.stop_loss === undefined && q.stop_loss != null) {
+            s.stopLoss = q.stop_loss;
+        }
+        if (s.support1 === undefined && q.support_1 != null) s.support1 = q.support_1;
+        if (s.support2 === undefined && q.support_2 != null) s.support2 = q.support_2;
+        if (s.resistance1 === undefined && q.resistance_1 != null) s.resistance1 = q.resistance_1;
+        if (s.resistance2 === undefined && q.resistance_2 != null) s.resistance2 = q.resistance_2;
+        if (s.king_ai_score === undefined && s.kingScore === undefined && q.king_ai_score != null) {
+            s.king_ai_score = q.king_ai_score;
+            s.kingScore = q.king_ai_score;
+        }
+        if (!s.wyckoffPhase && q.wyckoff_phase) s.wyckoffPhase = q.wyckoff_phase;
+        if ((s.changePercent === undefined || s.changePercent === 0) && !s.change_percent && q.change_pct != null) {
+            s.changePercent = q.change_pct;
+        }
+    };
+
     let hasAttachedStockCard = false;
     for (const block of blocks) {
         if (block.type === "stock_card") {
@@ -1481,6 +1543,7 @@ export function FormattedChatMessage({
             if (!block.stock.chartData && chartsBySymbol[cleanSym]) {
                 block.stock.chartData = chartsBySymbol[cleanSym];
             }
+            hydrateStockFromQuant(block.stock, cleanSym);
         } else if (block.type === "stock_cards") {
             hasAttachedStockCard = true;
             for (const s of block.stocks) {
@@ -1488,6 +1551,7 @@ export function FormattedChatMessage({
                 if (!s.chartData && chartsBySymbol[cleanSym]) {
                     s.chartData = chartsBySymbol[cleanSym];
                 }
+                hydrateStockFromQuant(s, cleanSym);
             }
         }
     }

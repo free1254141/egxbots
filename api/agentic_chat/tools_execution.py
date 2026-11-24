@@ -5517,10 +5517,58 @@ def _sync_calculate_position(
     entry_price: Optional[float] = None,
     total_cost: Optional[float] = None,
     dca_budget: Optional[float] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     clean_sym, sym_mkt = _resolve_symbol_and_market(symbol)
     ui_mkt = _ui_market_label(sym_mkt)
     currency = _currency_for_market(sym_mkt)
+
+    quantity_source: Optional[str] = None
+    if quantity is None and total_cost is None and not _GROUP_PORTFOLIO_BLOCKED_CTX.get():
+        effective_tg_id = _TG_PORTFOLIO_CTX.get()
+        sb_pf = _get_sb()
+        if sb_pf is not None and (user_id or effective_tg_id is not None):
+            try:
+                found_qty = 0.0
+                weighted_cost = 0.0
+                weighted_qty = 0.0
+                if effective_tg_id is not None:
+                    tg_state = _load_tg_portfolio_state(sb_pf, int(effective_tg_id))
+                    for row in (tg_state.get("positions") or []):
+                        rsym = _resolve_symbol_and_market(str(row.get("symbol") or ""))[0]
+                        if str(rsym or "").upper() == clean_sym:
+                            rq = _safe_float(row.get("quantity")) or 0.0
+                            re_p = _safe_float(row.get("entry_price")) or 0.0
+                            if rq > 0:
+                                found_qty += rq
+                                if re_p > 0:
+                                    weighted_cost += rq * re_p
+                                    weighted_qty += rq
+                elif user_id:
+                    pos_res = (
+                        sb_pf.from_("positions")
+                        .select("quantity, entry_price")
+                        .eq("user_id", user_id)
+                        .eq("status", "open")
+                        .eq("symbol", clean_sym)
+                        .limit(5)
+                        .execute()
+                    )
+                    for row in (pos_res.data or []):
+                        rq = _safe_float(row.get("quantity")) or 0.0
+                        re_p = _safe_float(row.get("entry_price")) or 0.0
+                        if rq > 0:
+                            found_qty += rq
+                            if re_p > 0:
+                                weighted_cost += rq * re_p
+                                weighted_qty += rq
+                if found_qty > 0:
+                    quantity = found_qty
+                    quantity_source = "user_portfolio"
+                    if entry_price is None and weighted_qty > 0:
+                        entry_price = round(weighted_cost / weighted_qty, 4)
+            except Exception as pf_lookup_err:
+                logger.debug(f"[calculate_position] Portfolio lookup skipped for {clean_sym}: {pf_lookup_err}")
 
     close = 1.0
     ohlcv_rows: List[Dict[str, Any]] = []
@@ -5602,6 +5650,8 @@ def _sync_calculate_position(
         "profit_loss": profit_loss,
         "profit_loss_pct": profit_pct,
     }
+    if quantity_source:
+        out["quantity_source"] = quantity_source
     if sym_mkt == "TADAWUL":
         out["profit_loss_sar"] = profit_loss
     elif sym_mkt == "EGX":
@@ -5663,8 +5713,9 @@ async def execute_calculate_position(
     entry_price: Optional[float] = None,
     total_cost: Optional[float] = None,
     dca_budget: Optional[float] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_calculate_position, symbol, quantity, entry_price, total_cost, dca_budget)
+    return await asyncio.to_thread(_sync_calculate_position, symbol, quantity, entry_price, total_cost, dca_budget, user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -7192,7 +7243,7 @@ def _sync_optimize_portfolio(
 
     try:
         if exch == "EGX":
-            ti_cols = "symbol, date, close, rsi_14, ema_50, r_vol, atr_14, change_pct, exchange"
+            ti_cols = "symbol, date, close, rsi_14, ema_50, ema_200, r_vol, atr_14, change_pct, exchange"
             ti_order = "date"
         else:
             ti_cols, ti_order = _saudi_ti_select_and_order(mkt_sb)
@@ -7317,10 +7368,10 @@ def _sync_optimize_portfolio(
         atr = _safe_float(ind.get("atr_14"))
         fallback_vol = max(0.008, min(0.08, (atr / price) if (atr and price > 0) else 0.022))
 
-        adj_ema50, _, sp_factor, _ = _detect_and_adjust_price_split(
+        adj_ema50, adj_ema200, sp_factor, _ = _detect_and_adjust_price_split(
             price_rows_by_sym.get(sym) or [],
             _safe_float(ind.get("ema_50")),
-            None,
+            _safe_float(ind.get("ema_200")),
             price,
         )
         sf_data, _ = _normalize_split_adjusted_fundamentals(raw_sf_data, price, split_factor=sp_factor)
@@ -7373,6 +7424,13 @@ def _sync_optimize_portfolio(
             )
         )
         is_unhealthy_loss = bool(is_negative_equity or (is_loss_making and (f_score is None or f_score < 50.0)))
+        over_and_weak = bool(
+            f_pe is not None
+            and f_pe > 30.0
+            and ((f_fcf is not None and f_fcf < 0) or (adj_ema50 and price < adj_ema50))
+        )
+        is_hard_excluded = bool(is_illiquid or is_negative_equity or is_loss_making or over_and_weak)
+        is_hold_core = bool((not is_hard_excluded) and (f_score is not None and f_score >= 65.0) and (f_pe is None or f_pe <= 22.0))
 
         fund_summary_by_sym[sym] = {
             k: v
@@ -7445,18 +7503,49 @@ def _sync_optimize_portfolio(
             "is_unhealthy_loss": is_unhealthy_loss,
             "is_loss_making": is_loss_making,
             "is_negative_equity": is_negative_equity,
+            "is_hard_excluded": is_hard_excluded,
+            "is_hold_core": is_hold_core,
+            "over_and_weak": over_and_weak,
+            "f_pe": f_pe,
             "zero_vol_days_10": zero_vol_days_10,
         })
 
-    healthy_count = sum(1 for item in candidate_items if not item["is_illiquid"] and not item["is_unhealthy_loss"])
+    holdings_eq_pre = sum(it["existing_shares"] * it["price"] for it in candidate_items)
+    if parsed_capital is not None:
+        if use_pf and holdings_eq_pre > 0 and parsed_capital < holdings_eq_pre:
+            est_total_eq = holdings_eq_pre + existing_cash + parsed_capital
+        else:
+            est_total_eq = max(holdings_eq_pre, parsed_capital)
+    else:
+        est_total_eq = holdings_eq_pre + existing_cash
+
+    healthy_count = sum(1 for item in candidate_items if not item["is_hard_excluded"])
+    core_count = sum(1 for item in candidate_items if item["is_hold_core"])
     eff_default_max_w = 25.0 if healthy_count >= 5 else 35.0
     eff_cap_pct = float(max_weight_pct) if max_weight_pct is not None else eff_default_max_w
+    eff_cap_frac = eff_cap_pct / 100.0
+    eff_invested_frac = max(0.0, min(1.0, 1.0 - max(0.0, min(0.80, float(min_cash_pct or 0.0) / 100.0))))
+    core_cap_sum = sum(
+        min(eff_cap_frac, 0.15) if (healthy_count >= 3 and it["is_thin_liquidity"]) else eff_cap_frac
+        for it in candidate_items
+        if it["is_hold_core"]
+    )
+    watch_cap_sum = sum(
+        min(
+            min(eff_cap_frac, 0.15) if (healthy_count >= 3 and it["is_thin_liquidity"]) else eff_cap_frac,
+            ((it["existing_shares"] * it["price"]) / est_total_eq) if est_total_eq > 0 else 0.0,
+        )
+        for it in candidate_items
+        if (not it["is_hard_excluded"] and not it["is_hold_core"])
+    )
+    cap_hold_watch = bool(use_pf and core_count >= 3 and (core_cap_sum + watch_cap_sum) >= eff_invested_frac + 1e-6)
+
     assets: List[AssetInput] = []
     for item in candidate_items:
         max_w_ov = None
         excl_reason = None
         sc = item["score"]
-        if healthy_count >= 2 and (item["is_illiquid"] or item["is_unhealthy_loss"]):
+        if healthy_count >= 2 and item["is_hard_excluded"]:
             max_w_ov = 0.0
             sc = -0.85
             if item["is_illiquid"] and item["is_loss_making"]:
@@ -7465,10 +7554,18 @@ def _sync_optimize_portfolio(
                 excl_reason = f"سيولة منعدمة أو ضعيفة جداً ({item['zero_vol_days_10']} جلسات تداول صفري) — مستبعد من الشراء"
             elif item["is_negative_equity"]:
                 excl_reason = "شركة خاسرة وحقوق ملكية سالبة — مستبعد من الشراء أو التعزيز"
+            elif item["is_loss_making"]:
+                excl_reason = "شركة تحقق صافي خسائر — مستبعد من الشراء أو التعزيز"
+            elif item["over_and_weak"]:
+                excl_reason = f"مكرر ربحية متضخم (P/E={float(item['f_pe']):.1f}x) مع اتجاه هابط أو تدفق نقدي سالب — مستبعد من الشراء"
             else:
                 excl_reason = "شركة خاسرة وتقييم مالي ضعيف — مستبعد من زيادة الوزن"
+        elif cap_hold_watch and (not item["is_hold_core"]):
+            curr_w_frac = ((item["existing_shares"] * item["price"]) / est_total_eq) if est_total_eq > 0 else 0.0
+            base_watch_cap = min(eff_cap_frac, 0.15) if (healthy_count >= 3 and item["is_thin_liquidity"]) else eff_cap_frac
+            max_w_ov = min(base_watch_cap, curr_w_frac)
         elif healthy_count >= 3 and item["is_thin_liquidity"]:
-            max_w_ov = min(eff_cap_pct / 100.0, 0.15)
+            max_w_ov = min(eff_cap_frac, 0.15)
         assets.append(
             AssetInput(
                 symbol=item["sym"],
@@ -8309,6 +8406,7 @@ async def dispatch_tool(
                 entry_price=arguments.get("entry_price"),
                 total_cost=arguments.get("total_cost"),
                 dca_budget=arguments.get("dca_budget"),
+                user_id=user_id,
             )
 
         elif tool_name == "optimize_portfolio":

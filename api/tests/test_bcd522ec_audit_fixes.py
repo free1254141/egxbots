@@ -675,3 +675,305 @@ def test_optimizer_relaxation_preserves_excluded_zero_caps_and_prompt_param() ->
     with patch("api.agentic_chat.tools_execution.execute_optimize_portfolio", side_effect=_fake_opt):
         asyncio.run(dispatch_tool("optimize_portfolio", {"use_user_portfolio": True}))
     assert captured["use_my_portfolio"] is True
+
+
+def test_optimize_portfolio_excludes_loss_making_acamd_and_caps_hold_watch_actf() -> None:
+    """Loss-making stocks (even with high fund_score like ACAMD) must be excluded, and HOLD_WATCH (ACTF) capped at current weight."""
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import patch
+    from api.agentic_chat.tools_execution import _sync_optimize_portfolio
+
+    pos_rows = [
+        {"symbol": "ABUK", "quantity": 100, "entry_price": 75.0},
+        {"symbol": "ETRS", "quantity": 1000, "entry_price": 10.5},
+        {"symbol": "ALCN", "quantity": 800, "entry_price": 21.0},
+        {"symbol": "ACAP", "quantity": 2000, "entry_price": 3.0},
+        {"symbol": "ACAMD", "quantity": 5000, "entry_price": 1.0},
+        {"symbol": "ACTF", "quantity": 2000, "entry_price": 2.1},
+    ]
+    ind_rows = [
+        {"symbol": "ABUK", "date": "2026-11-23", "close": 74.41, "rsi_14": 42.3, "ema_50": 82.07, "ema_200": 77.28, "r_vol": 0.9, "atr_14": 2.0, "change_pct": 0.5, "exchange": "EGX"},
+        {"symbol": "ETRS", "date": "2026-11-23", "close": 11.10, "rsi_14": 60.0, "ema_50": 10.7, "ema_200": 9.6, "r_vol": 1.1, "atr_14": 0.3, "change_pct": 1.0, "exchange": "EGX"},
+        {"symbol": "ALCN", "date": "2026-11-23", "close": 22.0, "rsi_14": 55.0, "ema_50": 21.0, "ema_200": 19.5, "r_vol": 1.2, "atr_14": 0.5, "change_pct": 0.8, "exchange": "EGX"},
+        {"symbol": "ACAP", "date": "2026-11-23", "close": 3.20, "rsi_14": 58.0, "ema_50": 3.0, "ema_200": 2.7, "r_vol": 1.3, "atr_14": 0.1, "change_pct": 1.5, "exchange": "EGX"},
+        {"symbol": "ACAMD", "date": "2026-11-23", "close": 0.95, "rsi_14": 45.0, "ema_50": 1.10, "ema_200": 1.20, "r_vol": 0.9, "atr_14": 0.04, "change_pct": -1.0, "exchange": "EGX"},
+        {"symbol": "ACTF", "date": "2026-11-23", "close": 2.05, "rsi_14": 44.0, "ema_50": 2.25, "ema_200": 2.40, "r_vol": 0.9, "atr_14": 0.08, "change_pct": -0.5, "exchange": "EGX"},
+    ]
+    st_rows = [
+        {"symbol": "ABUK", "name": "Abou Kir", "name_ar": "أبو قير للأسمدة", "exchange": "EGX"},
+        {"symbol": "ETRS", "name": "Egytrans", "name_ar": "إيجيترانس", "exchange": "EGX"},
+        {"symbol": "ALCN", "name": "Alex Containers", "name_ar": "الإسكندرية للحاويات", "exchange": "EGX"},
+        {"symbol": "ACAP", "name": "A Capital", "name_ar": "أيه كابيتال", "exchange": "EGX"},
+        {"symbol": "ACAMD", "name": "Arab Co Asset", "name_ar": "أكامد", "exchange": "EGX"},
+        {"symbol": "ACTF", "name": "Act Financial", "name_ar": "أكت فاينانشال", "exchange": "EGX"},
+    ]
+    sf_rows = [
+        {"symbol": "ABUK", "fund_score": 73.0, "data": {"eps": 3.69, "netIncome": 4.66e9, "peRatio": 20.69, "bookValuePerShare": 18.4, "roe": 16.5, "sector": "Basic Materials"}},
+        {"symbol": "ETRS", "fund_score": 84.0, "data": {"eps": 1.0, "netIncome": 1.2e8, "peRatio": 11.4, "bookValuePerShare": 4.5, "roe": 22.5, "sector": "Industrials"}},
+        {"symbol": "ALCN", "fund_score": 82.0, "data": {"eps": 2.5, "netIncome": 3.0e8, "peRatio": 10.5, "bookValuePerShare": 6.0, "roe": 81.7, "sector": "Logistics"}},
+        {"symbol": "ACAP", "fund_score": 76.0, "data": {"eps": 0.4, "netIncome": 5.0e7, "peRatio": 9.3, "bookValuePerShare": 1.5, "roe": 20.0, "sector": "Financials"}},
+        {"symbol": "ACAMD", "fund_score": 82.0, "data": {"eps": 0.146, "netIncome": -1453247.0, "peRatio": 13.22, "bookValuePerShare": 0.0335, "roe": 227.4, "sector": "Real Estate"}},
+    ]
+    base_dt = datetime(2026, 11, 23, tzinfo=timezone.utc)
+    price_rows = []
+    for s_row in ind_rows:
+        base_c = s_row["close"]
+        for d in range(25):
+            dt_str = (base_dt - timedelta(days=d)).strftime("%Y-%m-%d")
+            drift = 1.0 + ((d % 5) - 2) * 0.008
+            price_rows.append({"symbol": s_row["symbol"], "date": dt_str, "close": round(base_c * drift, 4), "volume": 500000})
+
+    class _MockRes:
+        def __init__(self, data):
+            self.data = data
+
+    class _MockQuery:
+        def __init__(self, tbl):
+            self._tbl = tbl
+        def select(self, *_a): return self
+        def eq(self, *_a): return self
+        def in_(self, *_a): return self
+        def gte(self, *_a): return self
+        def order(self, *_a, **_kw): return self
+        def limit(self, *_a): return self
+        def execute(self):
+            return {
+                "positions": _MockRes(pos_rows),
+                "profiles": _MockRes([{"cash_balance": 20000.0}]),
+                "stock_technical_indicators": _MockRes(ind_rows),
+                "stocks": _MockRes(st_rows),
+                "stock_fundamentals": _MockRes(sf_rows),
+                "stock_prices": _MockRes(price_rows),
+            }.get(self._tbl, _MockRes([]))
+
+    class _MockSB:
+        def from_(self, tbl): return _MockQuery(tbl)
+
+    mock_sb = _MockSB()
+    with (
+        patch("api.agentic_chat.tools_execution._get_sb", return_value=mock_sb),
+        patch("api.agentic_chat.tools_execution._get_sb_for_market", return_value=mock_sb),
+        patch("api.routers.offload_public._get_fair_value", return_value={"stocks": []}),
+        patch("api.agentic_chat.tools_execution._resolve_symbol_and_market", side_effect=lambda s, explicit_market=None: (str(s).upper(), "EGX")),
+    ):
+        res = _sync_optimize_portfolio(user_id="u-acamd-test", use_my_portfolio=True, objective="balanced")
+
+    assert res["status"] == "success"
+    opt = res["optimization"]
+    excl_syms = {row["symbol"] for row in (opt.get("excludedFromBuying") or [])}
+    assert "ACAMD" in excl_syms
+    alloc_map = {row["symbol"]: row for row in opt["allocations"]}
+    assert alloc_map["ACAMD"]["targetWeightPct"] == 0.0
+    assert alloc_map["ACAMD"]["action"] != "BUY"
+    assert alloc_map["ACTF"]["targetWeightPct"] <= alloc_map["ACTF"]["currentWeightPct"] + 1e-6
+    assert alloc_map["ACTF"]["action"] != "BUY"
+
+
+def test_quant_engine_overvalued_text_contradiction_guard() -> None:
+    """Strong financials above fair value in a downtrend must NOT say 'تقييمه رخيص'."""
+    from datetime import datetime, timedelta, timezone
+    from api.agentic_chat.quant_engine import build_quant_intelligence_for_stock
+
+    base_dt = datetime(2026, 11, 23, tzinfo=timezone.utc)
+    bars = [
+        {
+            "date": (base_dt - timedelta(days=i)).strftime("%Y-%m-%d"),
+            "close": round(74.41 + i * 0.15, 2),
+            "high": round(75.2 + i * 0.15, 2),
+            "low": round(73.5 + i * 0.15, 2),
+        }
+        for i in range(45)
+    ]
+    res = build_quant_intelligence_for_stock(
+        symbol="ABUK",
+        exchange="EGX",
+        currency="ج.م",
+        close=74.41,
+        ema_50=82.07,
+        ema_200=77.28,
+        rsi_14=42.28,
+        r_vol=0.19,
+        fund_score=73.0,
+        fair_value=68.26,
+        valuation_upside_pct=-8.3,
+        resistance_1=92.33,
+        stop_loss=72.13,
+        ohlcv_rows=bars,
+        record_ledger=False,
+    )
+    assert res["setup_regime"] == "value_in_downtrend"
+    assert "تقييمه رخيص" not in res["conflict_resolution_ar"]
+    assert "أعلى من القيمة العادلة" in res["conflict_resolution_ar"]
+    assert "أعلى من القيمة العادلة" in res["setup_regime_label_ar"]
+
+
+def test_smart_dca_abuk_fair_breakeven_reference() -> None:
+    """DCA breakeven rally & 10d probability must measure from post-tranche fill price, not pre-dip price."""
+    from datetime import datetime, timedelta, timezone
+    from api.portfolio_or_optimizer import build_smart_dca_plan
+
+    base_dt = datetime(2026, 11, 23, tzinfo=timezone.utc)
+    bars = [
+        {
+            "date": (base_dt - timedelta(days=i)).strftime("%Y-%m-%d"),
+            "close": round(74.41 + (i % 7 - 3) * 0.7, 2),
+            "high": round(75.5 + (i % 7 - 3) * 0.7, 2),
+            "low": round(73.1 + (i % 7 - 3) * 0.7, 2),
+        }
+        for i in range(60)
+    ]
+    res = build_smart_dca_plan(
+        symbol="ABUK",
+        exchange="EGX",
+        currency="ج.م",
+        current_price=74.41,
+        old_shares=100,
+        old_avg_price=85.0,
+        dca_budget=20000.0,
+        support_1=73.60,
+        support_2=66.66,
+        stop_loss=63.99,
+        setup_regime="value_in_downtrend",
+        fund_score=73.0,
+        is_loss_making=False,
+        ohlcv_rows=bars,
+    )
+    assert res["dca_allowed"] is True
+    assert res["breakeven_reference_price"] == 66.66
+    assert res["rally_needed_after_pct"] > 5.0
+    assert res["rally_needed_after_pct"] < res["rally_needed_before_pct"]
+    assert res["prob_breakeven_10d_after_pct"] < 100.0
+    assert res["prob_breakeven_10d_after_pct"] >= res["prob_breakeven_10d_before_pct"]
+
+
+def test_calculate_position_auto_loads_user_portfolio_shares() -> None:
+    """When user omits quantity, _sync_calculate_position reads real held shares from positions."""
+    from unittest.mock import patch
+    from api.agentic_chat.tools_execution import _sync_calculate_position
+
+    class _MockRes:
+        def __init__(self, data):
+            self.data = data
+
+    class _MockQuery:
+        def __init__(self, tbl):
+            self._tbl = tbl
+        def select(self, *_a): return self
+        def eq(self, *_a): return self
+        def order(self, *_a, **_kw): return self
+        def limit(self, *_a): return self
+        def execute(self):
+            return {
+                "positions": _MockRes([{"quantity": 1888, "entry_price": 85.0}]),
+                "stock_technical_indicators": _MockRes([{"close": 74.41, "date": "2026-11-23"}]),
+                "stock_prices": _MockRes([{"high": 75.0, "low": 73.5, "close": 74.41, "date": "2026-11-23"}] * 15),
+            }.get(self._tbl, _MockRes([]))
+
+    class _MockSB:
+        def from_(self, tbl): return _MockQuery(tbl)
+
+    mock_stock = {
+        "status": "success",
+        "stocks": [{
+            "symbol": "ABUK",
+            "close": 74.41,
+            "support_1": 73.60,
+            "support_2": 66.66,
+            "stop_loss": 63.99,
+            "fund_score": 73.0,
+            "quant_intelligence": {"setup_regime": "value_in_downtrend"},
+        }],
+    }
+    with (
+        patch("api.agentic_chat.tools_execution._get_sb", return_value=_MockSB()),
+        patch("api.agentic_chat.tools_execution._sync_get_stock", return_value=mock_stock),
+        patch("api.agentic_chat.tools_execution._resolve_symbol_and_market", return_value=("ABUK", "EGX")),
+    ):
+        res = _sync_calculate_position(
+            symbol="ABUK",
+            quantity=None,
+            entry_price=85.0,
+            dca_budget=20000.0,
+            user_id="user-abuk-123",
+        )
+
+    assert res["quantity"] == 1888.0
+    assert res.get("quantity_source") == "user_portfolio"
+    assert res["smart_dca_plan"]["old_shares"] == 1888.0
+    assert res["smart_dca_plan"]["reference_100_shares"] is False
+
+
+def test_optimize_portfolio_overweight_watch_and_thin_liquidity_never_wipes_caps() -> None:
+    """Overweight HOLD_WATCH (GBCO=34%) + thin-liquidity HOLD_CORE (ABUK=14.9%) must NOT trigger solver relaxation."""
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import patch
+    from api.agentic_chat.tools_execution import _sync_optimize_portfolio
+
+    # Core: ABUK (thin r_vol=0.19 -> 15% cap, cur~15%), ETRS (25%), ALCN (25%) -> core_cap_sum = 0.65
+    # Watch: GBCO (34% uncapped, capped to 0.25), ACTF (2.1%) -> watch_cap_sum = 0.271 -> total=0.921 < 1.0
+    pos_rows = [
+        {"symbol": "ABUK", "quantity": 200, "entry_price": 75.0},   # 14,882
+        {"symbol": "ETRS", "quantity": 2000, "entry_price": 10.5},  # 22,200
+        {"symbol": "ALCN", "quantity": 1200, "entry_price": 21.0},  # 26,400
+        {"symbol": "GBCO", "quantity": 1600, "entry_price": 22.0},  # 34,400 (~34%)
+        {"symbol": "ACTF", "quantity": 1000, "entry_price": 2.1},   # 2,050 (~2.1%)
+    ]
+    ind_rows = [
+        {"symbol": "ABUK", "date": "2026-11-23", "close": 74.41, "rsi_14": 42.3, "ema_50": 82.07, "ema_200": 77.28, "r_vol": 0.19, "atr_14": 2.0, "change_pct": 0.5, "exchange": "EGX"},
+        {"symbol": "ETRS", "date": "2026-11-23", "close": 11.10, "rsi_14": 60.0, "ema_50": 10.7, "ema_200": 9.6, "r_vol": 1.1, "atr_14": 0.3, "change_pct": 1.0, "exchange": "EGX"},
+        {"symbol": "ALCN", "date": "2026-11-23", "close": 22.0, "rsi_14": 55.0, "ema_50": 21.0, "ema_200": 19.5, "r_vol": 1.2, "atr_14": 0.5, "change_pct": 0.8, "exchange": "EGX"},
+        {"symbol": "GBCO", "date": "2026-11-23", "close": 21.50, "rsi_14": 48.0, "ema_50": 23.0, "ema_200": 24.0, "r_vol": 1.1, "atr_14": 0.5, "change_pct": -0.2, "exchange": "EGX"},
+        {"symbol": "ACTF", "date": "2026-11-23", "close": 2.05, "rsi_14": 44.0, "ema_50": 2.25, "ema_200": 2.40, "r_vol": 0.9, "atr_14": 0.08, "change_pct": -0.5, "exchange": "EGX"},
+    ]
+    sf_rows = [
+        {"symbol": "ABUK", "fund_score": 73.0, "data": {"eps": 3.69, "netIncome": 4.66e9, "peRatio": 20.69, "bookValuePerShare": 18.4, "roe": 16.5, "sector": "Materials"}},
+        {"symbol": "ETRS", "fund_score": 84.0, "data": {"eps": 1.0, "netIncome": 1.2e8, "peRatio": 11.4, "bookValuePerShare": 4.5, "roe": 22.5, "sector": "Logistics"}},
+        {"symbol": "ALCN", "fund_score": 82.0, "data": {"eps": 2.5, "netIncome": 3.0e8, "peRatio": 10.5, "bookValuePerShare": 6.0, "roe": 81.7, "sector": "Shipping"}},
+        {"symbol": "GBCO", "fund_score": 60.0, "data": {"eps": 1.2, "netIncome": 2.0e8, "peRatio": 18.0, "bookValuePerShare": 9.0, "roe": 14.0, "sector": "Autos"}},
+    ]
+    base_dt = datetime(2026, 11, 23, tzinfo=timezone.utc)
+    price_rows = [
+        {"symbol": s_row["symbol"], "date": (base_dt - timedelta(days=d)).strftime("%Y-%m-%d"), "close": round(s_row["close"] * (1 + ((d % 5) - 2) * 0.008), 4), "volume": 500000}
+        for s_row in ind_rows
+        for d in range(25)
+    ]
+
+    class _MockRes:
+        def __init__(self, data):
+            self.data = data
+
+    class _MockQuery:
+        def __init__(self, tbl):
+            self._tbl = tbl
+        def select(self, *_a): return self
+        def eq(self, *_a): return self
+        def in_(self, *_a): return self
+        def gte(self, *_a): return self
+        def order(self, *_a, **_kw): return self
+        def limit(self, *_a): return self
+        def execute(self):
+            return {
+                "positions": _MockRes(pos_rows),
+                "profiles": _MockRes([{"cash_balance": 100.0}]),
+                "stock_technical_indicators": _MockRes(ind_rows),
+                "stocks": _MockRes([{"symbol": r["symbol"], "name": r["symbol"], "name_ar": r["symbol"], "exchange": "EGX"} for r in ind_rows]),
+                "stock_fundamentals": _MockRes(sf_rows),
+                "stock_prices": _MockRes(price_rows),
+            }.get(self._tbl, _MockRes([]))
+
+    class _MockSB:
+        def from_(self, tbl): return _MockQuery(tbl)
+
+    mock_sb = _MockSB()
+    with (
+        patch("api.agentic_chat.tools_execution._get_sb", return_value=mock_sb),
+        patch("api.agentic_chat.tools_execution._get_sb_for_market", return_value=mock_sb),
+        patch("api.routers.offload_public._get_fair_value", return_value={"stocks": []}),
+        patch("api.agentic_chat.tools_execution._resolve_symbol_and_market", side_effect=lambda s, explicit_market=None: (str(s).upper(), "EGX")),
+    ):
+        res = _sync_optimize_portfolio(user_id="u-thin-watch", use_my_portfolio=True, objective="balanced")
+
+    alloc_map = {row["symbol"]: row for row in res["optimization"]["allocations"]}
+    # Thin-liquidity ABUK must keep its 15% cap intact (never wiped back to 25% by solver relaxation)
+    assert alloc_map["ABUK"]["targetWeightPct"] <= 15.1
+    assert res["optimization"]["constraints"]["relaxationNotes"] == []

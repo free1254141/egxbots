@@ -1029,15 +1029,19 @@ def build_smart_dca_plan(
     qty_after_full = old_qty + t1_shares + t2_shares
     new_avg_full = round((old_cost + total_dca_cash) / qty_after_full, dec) if qty_after_full > 0 else round(old_avg, dec)
 
-    rally_before = round(((old_avg - cur_p) / cur_p) * 100.0, 2) if old_avg > cur_p else 0.0
-    rally_after = round(((new_avg_full - cur_p) / cur_p) * 100.0, 2) if new_avg_full > cur_p else 0.0
+    post_full_ref = t2_price if (t2_shares > 0 and t2_price > 0) else min(cur_p, t1_price)
+    post_t1_ref = min(cur_p, t1_price) if (t1_shares > 0 and t1_price > 0) else cur_p
+    rally_from_cur_before = round(((old_avg - cur_p) / cur_p) * 100.0, 2) if old_avg > cur_p else 0.0
+    rally_before = round(((old_avg - post_full_ref) / post_full_ref) * 100.0, 2) if old_avg > post_full_ref else 0.0
+    rally_after = round(((new_avg_full - post_full_ref) / post_full_ref) * 100.0, 2) if new_avg_full > post_full_ref else 0.0
+    rally_after_t1 = round(((new_avg_t1 - post_t1_ref) / post_t1_ref) * 100.0, 2) if new_avg_t1 > post_t1_ref else 0.0
     hard_stop = round(stop_loss if (stop_loss and 0 < stop_loss < t2_price) else (t2_price * 0.96), dec)
 
     try:
         from api.agentic_chat.quant_engine import prob_touch_level
         prob_be_before = prob_touch_level(
             ohlcv_rows,
-            close=cur_p,
+            close=post_full_ref,
             target_level=old_avg,
             exchange=ex_u,
             symbol=sym_u,
@@ -1045,7 +1049,7 @@ def build_smart_dca_plan(
         )
         prob_be_after = prob_touch_level(
             ohlcv_rows,
-            close=cur_p,
+            close=post_full_ref,
             target_level=new_avg_full,
             exchange=ex_u,
             symbol=sym_u,
@@ -1070,8 +1074,17 @@ def build_smart_dca_plan(
         "reference_100_shares": bool(reference_shares_used),
         "new_avg_price_t1": new_avg_t1,
         "new_avg_price_full": new_avg_full,
+        "breakeven_reference_price": round(post_full_ref, dec),
+        "rally_needed_from_current_before_pct": rally_from_cur_before,
         "rally_needed_before_pct": rally_before,
         "rally_needed_after_pct": rally_after,
+        "rally_needed_after_t1_pct": rally_after_t1,
+        "breakeven_note_ar": (
+            f"مقارنة عادلة من سعر تنفيذ الدفعة الأخيرة ({round(post_full_ref, dec)} {currency}): "
+            f"بدون تبريد تحتاج +{rally_before}% للعودة لمتوسط {round(old_avg, dec)}، "
+            f"وبعد التبريد الكامل تحتاج +{rally_after}% فقط للعودة لمتوسط {new_avg_full} "
+            "(لا يوجد تعادل فوري قبل تنفيذ الدفعة الثانية)."
+        ),
         "prob_breakeven_10d_before_pct": prob_be_before,
         "prob_breakeven_10d_after_pct": prob_be_after,
         "hard_invalidation_stop": hard_stop,

@@ -387,6 +387,28 @@ def _collect_structured_outputs(
                     q_copy["name_ar"] = s.get("name_ar") or s.get("name") or s.get("symbol")
                 if q_copy.get("close") is None and s.get("close") is not None:
                     q_copy["close"] = s.get("close")
+                eff_sl = (
+                    s.get("tactical_stop_loss")
+                    if s.get("support_1_is_distant") and s.get("tactical_stop_loss")
+                    else s.get("stop_loss")
+                )
+                for _k, _v in (
+                    ("change_pct", s.get("change_pct")),
+                    ("rsi_14", s.get("rsi_14")),
+                    ("r_vol", s.get("r_vol")),
+                    ("ema_50", s.get("ema_50")),
+                    ("ema_200", s.get("ema_200")),
+                    ("stop_loss", eff_sl),
+                    ("support_1", s.get("support_1")),
+                    ("support_2", s.get("support_2")),
+                    ("resistance_1", s.get("resistance_1")),
+                    ("resistance_2", s.get("resistance_2")),
+                    ("king_ai_score", s.get("king_ai_score")),
+                    ("wyckoff_phase", s.get("wyckoff_phase")),
+                    ("macd", s.get("macd")),
+                ):
+                    if _v is not None and q_copy.get(_k) is None:
+                        q_copy[_k] = _v
                 quant_items.append(q_copy)
         if quant_items:
             visuals_data["quant_analysis"] = quant_items

@@ -385,4 +385,98 @@ describe("StockCard Component", () => {
         expect(screen.getAllByText("-7.745 / -11.952 / +4.207").length).toBeGreaterThan(0);
         expect(screen.queryByText(/\*\*\+4\.207\*\*/)).toBeNull();
     });
+
+    test("FormattedChatMessage parses ABUK table stopLoss + prose RSI/RVol so StockCard and PriceLadderSvg show identical R:R (7.9 : 1) and RSI 42.3", () => {
+        const abukMd = [
+            "## 📊 تحليل سهم أبو قير للأسمدة (ABUK) — EGX",
+            "",
+            "| المستوى | القيمة (ج.م) | الدلالة |",
+            "|---|---|---|",
+            "| السعر الحالي | 74.41 | — |",
+            "| الدعم الأول | 73.60 | -1.09% (قريب جداً) |",
+            "| وقف الخسارة | 72.13 | -3.06% |",
+            "| الدعم الثاني | 66.66 | دعم هيكلي |",
+            "| المقاومة الأولى | 92.33 | +24.08% (بعيدة) |",
+            "| الموقف الشرعي | غير متوافق مع الشريعة | — |",
+            "",
+            "**الزخم:** RSI 14 عند 42.28 (محايد مائل للضعف) | MACD سالب (-3.05) تحت الإشارة | السيولة النسبية **0.19x** (ضعيفة جداً)",
+        ].join("\n");
+
+        render(<FormattedChatMessage role="assistant" content={abukMd} />);
+
+        expect(screen.getByText("#ABUK")).toBeTruthy();
+        expect(screen.getByText("42.3")).toBeTruthy();
+        expect(screen.queryByText("14.0")).toBeNull();
+        expect(screen.getByText(/0\.19x/)).toBeTruthy();
+        expect(screen.getByText("7.9 : 1")).toBeTruthy();
+        expect(screen.getByText("R:R 1:7.9")).toBeTruthy();
+        expect(screen.queryByText("22.1 : 1")).toBeNull();
+        expect(screen.queryByText("R:R 1:2.3")).toBeNull();
+        expect(screen.queryByText(/EGX33 شرعي/)).toBeNull();
+    });
+
+    test("FormattedChatMessage hydrates missing RSI, RVol, and stopLoss on StockCard directly from backend tables.visuals.quant_analysis JSON", () => {
+        const minimalMd = [
+            "## 📊 تحليل سهم أبو قير للأسمدة (ABUK) — EGX",
+            "",
+            "| المستوى | القيمة (ج.م) |",
+            "|---|---|",
+            "| السعر الحالي | 74.41 |",
+            "| الدعم الأول | 73.60 |",
+            "| المقاومة الأولى | 92.33 |",
+        ].join("\n");
+
+        const tables: any[] = [
+            {
+                id: "t-quant-1",
+                title: "Quant",
+                headers: [],
+                rows: [],
+                visuals: {
+                    quant_analysis: [
+                        {
+                            symbol: "ABUK",
+                            name_ar: "أبو قير للأسمدة",
+                            currency: "ج.م",
+                            close: 74.41,
+                            change_pct: 0.55,
+                            rsi_14: 42.28,
+                            r_vol: 0.19,
+                            stop_loss: 72.13,
+                            support_1: 73.60,
+                            resistance_1: 92.33,
+                            technical_score: 28,
+                            fundamental_score: 73,
+                            conviction_score: 40,
+                            setup_regime: "value_in_downtrend",
+                            setup_regime_label_ar: "⚖️ جودة مالية عالية مع سعر أعلى من القيمة العادلة ومسار هابط",
+                            conflict_resolution_ar: "السهم قوي مالياً لكن سعره الحالي أعلى من القيمة العادلة",
+                            bull_case: ["صفر ديون"],
+                            bear_case: ["تحت EMA50"],
+                            monte_carlo: {
+                                paths_count: 5000,
+                                horizon_days: 10,
+                                target_barrier: 92.33,
+                                stop_barrier: 72.13,
+                                prob_hit_target_first_pct: 1.2,
+                                calibrated_target_prob_pct: 1.2,
+                                prob_hit_stop_first_pct: 67.7,
+                                prob_stay_in_range_pct: 31.1,
+                            },
+                        },
+                    ],
+                },
+            },
+        ];
+
+        render(<FormattedChatMessage role="assistant" content={minimalMd} tables={tables} />);
+
+        expect(screen.getByText("#ABUK")).toBeTruthy();
+        expect(screen.getByText("42.3")).toBeTruthy();
+        expect(screen.getByText(/0\.19x/)).toBeTruthy();
+        expect(screen.getByText("72.13 ج.م")).toBeTruthy();
+        expect(screen.getByText("7.9 : 1")).toBeTruthy();
+        expect(screen.getByText("R:R 1:7.9")).toBeTruthy();
+        expect(screen.getByTestId("quant-intelligence-card")).toBeTruthy();
+    });
 });
