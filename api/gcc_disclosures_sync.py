@@ -63,12 +63,15 @@ _MARKET_CONFIG: Dict[str, Dict[str, Any]] = {
         "default_source": "بورصة قطر",
         "queries_ar": [
             '"بورصة قطر" إفصاح OR أرباح OR توزيعات OR مجلس إدارة',
-            'سهم "قطر الوطني" OR "صناعات قطر" OR "ناقلات" أرباح OR توزيعات',
+            '"بورصة قطر" نتائج OR عقد OR جمعية OR استحواذ OR صفقة',
+            'سهم "قطر الوطني" OR "صناعات قطر" OR "ناقلات" أرباح OR توزيعات OR إفصاح',
             'سهم "مصرف قطر الإسلامي" OR "مصرف الريان" OR "أوريدو" OR "مسيعيد" نتائج OR إفصاح',
-            'سهم "بروة" OR "وقود" OR "الملاحة القطرية" OR "بنك الدوحة" أرباح OR توزيعات',
+            'سهم "بروة" OR "قطر للوقود" OR "الملاحة القطرية" OR "بنك الدوحة" أرباح OR توزيعات',
+            'سهم "التجاري" OR "الدولي الإسلامي" OR "دخان" OR "فودافون قطر" OR "الخليج الدولية" نتائج OR إفصاح',
         ],
         "queries_en": [
-            '"Qatar Stock Exchange" OR "QSE" dividend OR earnings OR disclosure',
+            '"Qatar Stock Exchange" OR "QSE" dividend OR earnings OR disclosure OR profit OR AGM',
+            '"QNB" OR "Qatar Islamic Bank" OR "Industries Qatar" OR "Ooredoo" OR "Nakilat" profit OR dividend OR disclosure',
         ],
     },
 }
@@ -111,22 +114,56 @@ _AMBIGUOUS_SINGLE_WORD_ALIASES = frozenset(
 _FOREIGN_MARKET_MARKERS: Dict[str, Tuple[str, ...]] = {
     "qatar": (
         "السعودية",
+        "سعودية",
         "الشركات السعودية",
         "تاسي",
+        "تداول السعودية",
         "مصر",
         "البورصة المصرية",
         "الكويت",
         "جزائرية",
         "شيفرون",
+        "بورصة فلسطين",
     ),
     "uae": (
         "السعودية",
+        "سعودية",
         "الشركات السعودية",
         "تاسي",
         "البورصة المصرية",
         "جزائرية",
     ),
 }
+
+_JUNK_TITLE_PATTERNS = re.compile(
+    r"(stock\s+price|share\s+price|price\s+today|stock\s+quote|share\s+quote|price\s+forecast|stock\s+analysis|"
+    r"سعر\s+سهم|اخبار\s+سهم|توقعات\s+سهم|تحليل\s+سهم|معلومات\s+مباشر)",
+    re.IGNORECASE,
+)
+
+_DISCLOSURE_SIGNAL_KEYWORDS = (
+    "أرباح", "ارباح", "خسائر", "خساره", "ايرادات", "إيرادات", "توزيع", "توزيعات", "كوبون",
+    "افصاح", "إفصاح", "مجلس", "عموميه", "عمومية", "جمعيه", "جمعية", "استحواذ", "اندماج",
+    "عقد", "صفقه", "صفقة", "ترسيه", "ترسية", "مشروع", "صكوك", "سندات", "راس مال", "رأس مال",
+    "نتائج", "الربع", "النصف", "تراجع", "نمو", "ارتفاع", "قفز", "يصادق", "يقر", "توافق", "يوافق",
+    "شراء اسهم", "خزينه", "خزينة", "زياده", "زيادة", "تخفيض", "اعلان", "إعلان", "اتفاقيه", "اتفاقية",
+    "profit", "loss", "earnings", "revenue", "dividend", "distribution", "board", "agm", "egm",
+    "merger", "acquisition", "contract", "award", "deal", "sukuk", "bond", "capital", "results",
+    "q1", "q2", "q3", "q4", "fy", "quarter", "nine-month", "9-month", "half-year", "disclosure",
+    "stake", "buyback", "listing", "approval", "rise", "rises", "surge", "drop", "falls", "decline",
+)
+
+
+def _is_junk_disclosure_title(title: str) -> bool:
+    """Reject quote/stock-profile pages and non-disclosure headlines lacking event keywords."""
+    clean = (title or "").strip()
+    if len(clean) < 12:
+        return True
+    norm = _normalize_ar(clean)
+    if _JUNK_TITLE_PATTERNS.search(norm) or _JUNK_TITLE_PATTERNS.search(clean):
+        return True
+    lower = clean.lower()
+    return not any((kw in norm or kw in lower) for kw in _DISCLOSURE_SIGNAL_KEYWORDS)
 
 
 def _is_foreign_market_headline(title: str, market: str) -> bool:
@@ -235,7 +272,7 @@ def sync_gcc_market_disclosures(
                 continue
             seen_urls.add(link)
 
-            if _is_foreign_market_headline(item["title"], market):
+            if _is_foreign_market_headline(item["title"], market) or _is_junk_disclosure_title(item["title"]):
                 continue
 
             sym, ex, company_name = _match_gcc_symbol(item["title"], matcher, exchanges[0])

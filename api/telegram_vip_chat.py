@@ -1102,6 +1102,20 @@ def _convert_markdown_tables_to_bullets(md_text: str) -> str:
     return "\n".join(out)
 
 
+def _convert_md_links_to_telegram_html(escaped_text: str, origin: str) -> str:
+    """Convert both absolute https:// and relative /path Markdown links into Telegram <a href="..."> HTML links."""
+    out = re.sub(
+        r"\[([^\]]+)\]\((https?://[^\s\)]+)\)",
+        r'<a href="\2">\1</a>',
+        escaped_text,
+    )
+    return re.sub(
+        r"\[([^\]]+)\]\((/[a-zA-Z0-9_\-/#?=&;%.+]*)\)",
+        lambda m: f'<a href="{origin}{m.group(2)}">{m.group(1)}</a>',
+        out,
+    )
+
+
 def format_pipeline_reply_for_telegram(
     reply_text: str,
     tables: List[Dict[str, Any]],
@@ -1114,6 +1128,9 @@ def format_pipeline_reply_for_telegram(
     period: str,
 ) -> str:
     """Convert pipeline markdown response + tables into rich Telegram HTML."""
+    site_origin = (get_web_origin() or "https://egxbots.com").rstrip("/")
+    if "localhost" in site_origin or "127.0.0.1" in site_origin:
+        site_origin = "https://egxbots.com"
     cleaned = (reply_text or "").strip()
     # Telegram users are already inside Telegram: drop Telegram promo lines and duplicate website markdown lines (preserve B2B private portfolio deep-link)
     cleaned = re.sub(r"^[^\n]*(?:t\.me/(?!egxbots_bot\?start=b2b_portfolio)|/profile#telegram|قناة VIP على تليجرام|قناة EGX Bots المجانية)[^\n]*\n?", "", cleaned, flags=re.MULTILINE).rstrip()
@@ -1156,6 +1173,7 @@ def format_pipeline_reply_for_telegram(
         if s.startswith(">"):
             content = re.sub(r"^>\s?", "", line).strip()
             content_esc = html.escape(content)
+            content_esc = _convert_md_links_to_telegram_html(content_esc, site_origin)
             content_esc = re.sub(r"\*\*([^\*\n]+)\*\*", r"<b>\1</b>", content_esc)
             content_esc = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", content_esc)
             quote_buf.append(content_esc)
@@ -1167,7 +1185,7 @@ def format_pipeline_reply_for_telegram(
         m_h = re.match(r"^\s*#{1,4}\s+(.+)$", line)
         if m_h:
             h_text = m_h.group(1).strip()
-            h_esc = html.escape(h_text)
+            h_esc = _convert_md_links_to_telegram_html(html.escape(h_text), site_origin)
             if any(k in h_text for k in ["مستو", "دعم", "مقاوم"]):
                 icon = "🎯"
             elif any(k in h_text for k in ["مؤشر", "بيان", "مالي", "فني"]):
@@ -1196,11 +1214,7 @@ def format_pipeline_reply_for_telegram(
 
         # 5. Regular text lines: escape and format standard markdown tags
         esc_line = html.escape(line)
-        esc_line = re.sub(
-            r"\[([^\]]+)\]\((https?://[^\s\)]+)\)",
-            r'<a href="\2">\1</a>',
-            esc_line,
-        )
+        esc_line = _convert_md_links_to_telegram_html(esc_line, site_origin)
         esc_line = re.sub(r"\*\*([^\*\n]+)\*\*", r"<b>\1</b>", esc_line)
         esc_line = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", esc_line)
 
@@ -1230,9 +1244,6 @@ def format_pipeline_reply_for_telegram(
     else:
         period_label = "إجمالي — مرة واحدة"
 
-    site_origin = (get_web_origin() or "https://egxbots.com").rstrip("/")
-    if "localhost" in site_origin or "127.0.0.1" in site_origin:
-        site_origin = "https://egxbots.com"
     footer = (
         f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 المستثمر: <b>{user_link}</b> | الباقة: <b>{plan_badge}</b>\n"

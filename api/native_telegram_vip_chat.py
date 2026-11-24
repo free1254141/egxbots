@@ -662,7 +662,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 is_fallback_error = True
                 reply_text = "⚠️ تعذّر إكمال التحليل مؤقتاً بسبب ضغط لحظي على الخادم — يرجى إعادة إرسال سؤالك خلال ثوانٍ."
 
-    latency_ms = int((time.time() - start_time) * 1000)
+    latency_ms = max(1, int((time.time() - start_time) * 1000))
     assistant_created_dt = datetime.now(timezone.utc)
     if assistant_created_dt <= user_created_dt:
         assistant_created_dt = user_created_dt + timedelta(milliseconds=1)

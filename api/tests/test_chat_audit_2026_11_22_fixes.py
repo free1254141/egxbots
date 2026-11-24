@@ -167,7 +167,7 @@ def test_scheduled_automations_cache_safety_and_hourly_prefix():
         assert worker._AUTO_METRICS_TLS.last_cache_key == "vip_top_stocks"
         assert m_cache.call_args[0][0] == "vip_top_stocks"
 
-    # Non-cached automation prompt builds hourly-bucket timestamp for DeepSeek Prefix Cache
+    # Non-cached automation prompt uses static system prompt for 24/7 DeepSeek Prefix Cache & places Cairo hour in user content
     captured_payloads = []
 
     class FakeResp:
@@ -182,13 +182,17 @@ def test_scheduled_automations_cache_safety_and_hourly_prefix():
         captured_payloads.append(json)
         return FakeResp()
 
+    worker._clear_automation_snapshot_cache()
     with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "test-key"}), \
          patch.object(worker, "_fetch_market_indicators_brief", return_value=""), \
          patch.object(worker.requests, "post", side_effect=fake_post):
         out = worker._generate_ai_consultation("حلل أسهم محفظتي المسجلة", "Tester", user_id="u1")
         assert out == "تحليل المحفظة"
         sys_msg = captured_payloads[0]["messages"][0]["content"]
-        assert ":00 القاهرة." in sys_msg
+        user_msg = captured_payloads[0]["messages"][1]["content"]
+        assert sys_msg == worker.AUTOMATION_STATIC_SYSTEM_PROMPT
+        assert ":00 القاهرة." not in sys_msg
+        assert ":00 القاهرة." in user_msg
 
 
 # ---------------------------------------------------------------------------

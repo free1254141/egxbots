@@ -707,6 +707,7 @@ def build_quant_intelligence_for_stock(
     ema_200: Optional[float] = None,
     vwap_20: Optional[float] = None,
     r_vol: Optional[float] = None,
+    r_vol_mode: str = "eod",
     support_1: Optional[float] = None,
     resistance_1: Optional[float] = None,
     stop_loss: Optional[float] = None,
@@ -788,7 +789,7 @@ def build_quant_intelligence_for_stock(
         bear_case.append(f"تحذير تصريف مؤسسي (Distribution={dist_v:.0f}/100)")
 
     rvol_v = _sf(r_vol)
-    if rvol_v is not None:
+    if rvol_v is not None and r_vol_mode != "intraday_unavailable":
         if rvol_v >= 1.5 and (macd_h is None or macd_h >= 0) and dist_v < 65.0:
             tech_pts += 7.0
             bull_case.append(f"سيولة نسبية نشطة {rvol_v:.2f}x أعلى من المتوسط")

@@ -1104,3 +1104,104 @@ def test_saudi_runner_dag_runs_disclosures_before_vip_and_joins_gcc(monkeypatch)
     assert out["ok"] is True
     assert events.index("sa_disc") < events.index("vip_report")
     assert events.index("gcc_disc") < events.index("cache")
+
+
+def test_gcc_metals_commodities_utc_day_shift_and_qse_junk_filter():
+    import pandas as pd
+    from api import gcc_metals_sync as gms
+    from api import gcc_disclosures_sync as gds
+
+    idx = pd.to_datetime([
+        "2026-11-19 23:00:00",  # Fri UTC candle -> 2026-11-20
+        "2026-11-22 22:00:00",  # Mon DST UTC candle -> 2026-11-23
+        "2026-11-24 01:00:00",  # Same-day Cairo timestamp -> 2026-11-24
+        "2026-11-25 00:00:00",  # Exact date timestamp -> 2026-11-25
+    ])
+    df = pd.DataFrame({
+        "open": [3540.0, 3630.0, 3620.0, 3640.0],
+        "high": [3550.0, 3650.0, 3645.0, 3660.0],
+        "low": [3530.0, 3610.0, 3605.0, 3630.0],
+        "close": [3537.8, 3634.8, 3633.8, 3655.0],
+        "volume": [0, 0, 0, 0],
+    }, index=idx)
+    bars = gms._df_to_bars(df, "XAUUSD", "COMMODITIES", "tradingview")
+    assert [b["date"] for b in bars] == ["2026-11-20", "2026-11-23", "2026-11-24", "2026-11-25"]
+
+    # Non-commodities exchange at 23:00 is not shifted
+    df_eq = df.iloc[[0]].copy()
+    eq_bars = gms._df_to_bars(df_eq, "EMAAR", "DFM", "tradingview")
+    assert eq_bars[0]["date"] == "2026-11-19"
+
+    # QSE junk quote/profile headlines rejected; real disclosures kept
+    assert gds._is_junk_disclosure_title("Industries Qatar (IQCD) Stock Price Today (QSE), Market News") is True
+    assert gds._is_junk_disclosure_title("قطر الوطنية لصناعة الأسمنت ش م ع ق (QNCD)") is True
+    assert gds._is_junk_disclosure_title("أخبار سهم القطرية العامة للتأمين - معلومات مباشر") is True
+    assert gds._is_junk_disclosure_title("أرباح مجمع شركات المناعي تقفز بـ 53.80 بالمئة في الأشهر التسعة الأولى") is False
+    assert gds._is_junk_disclosure_title("Ooredoo Profit Declines 4.9 Percent at End of Third Quarter") is False
+
+
+def test_saudi_storage_history_merge_prune_guard_and_candles(monkeypatch):
+    import gzip
+    import json
+    from api import saudi_storage_history as ssh
+    from api.routers import offload
+
+    # 1. merge_bars_storage_with_live lets live DB win ties and sorts ascending
+    storage_bars = [
+        {"date": "2015-01-04", "open": 50.0, "high": 51.0, "low": 49.0, "close": 50.5, "volume": 1000},
+        {"date": "2026-11-23", "open": 60.0, "high": 61.0, "low": 59.5, "close": 60.2, "volume": 2000},
+    ]
+    live_bars = [
+        {"date": "2026-11-23", "open": 60.0, "high": 61.5, "low": 59.5, "close": 61.15, "volume": 3000},
+        {"date": "2026-11-24", "open": 61.2, "high": 62.0, "low": 60.8, "close": 61.8, "volume": 2500},
+    ]
+    merged = ssh.merge_bars_storage_with_live(storage_bars, live_bars)
+    assert [b["date"] for b in merged] == ["2015-01-04", "2026-11-23", "2026-11-24"]
+    assert merged[1]["close"] == 61.15
+
+    # 2. prune_old_stock_prices refuses to prune when Storage metadata is missing or stale
+    fake_sb_no_storage = _FakeSaudiSupabase({"stock_prices": [{"symbol": "1120", "exchange": "TADAWUL", "date": "2015-01-01", "close": 50.0}]})
+    res_missing = ssh.prune_old_stock_prices(fake_sb_no_storage, "TADAWUL", keep_days=400)
+    assert res_missing["pruned"] is False
+    assert res_missing["reason"] == "storage_archive_missing_or_stale"
+
+    stale_meta_bytes = json.dumps({"exchange": "TADAWUL", "rows": 700000, "last_date": "2020-01-01"}).encode("utf-8")
+
+    class _StaleBucket:
+        def download(self, _p):
+            return stale_meta_bytes
+
+    fake_sb_stale = _FakeSaudiSupabase()
+    fake_sb_stale.storage = type("S", (), {"from_": lambda _s, _b: _StaleBucket()})()
+    res_stale = ssh.prune_old_stock_prices(fake_sb_stale, "TADAWUL", keep_days=400)
+    assert res_stale["pruned"] is False
+    assert res_stale["reason"] == "storage_archive_missing_or_stale"
+
+    # 3. _load_tasi_candles_payload merges Storage symbol archive + recent DB tail when limit > 220
+    offload.clear_offload_caches()
+    ssh.invalidate_storage_history_cache()
+    sym_gz = gzip.compress(json.dumps([
+        {"symbol": "1120", "exchange": "TADAWUL", "date": "2012-01-02", "open": 20.0, "high": 21.0, "low": 19.5, "close": 20.5, "volume": 500},
+        {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-23", "open": 60.0, "high": 61.0, "low": 59.0, "close": 60.2, "volume": 1000},
+    ]).encode("utf-8"))
+
+    class _CandleBucket:
+        def download(self, path):
+            assert path == "prices/TADAWUL/symbols/1120.json.gz"
+            return sym_gz
+
+    fake_candle_sb = _FakeSaudiSupabase({
+        "stock_prices": [
+            {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-24", "open": 61.0, "high": 62.0, "low": 60.5, "close": 61.8, "volume": 2000},
+            {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-23", "open": 60.0, "high": 61.5, "low": 59.5, "close": 61.15, "volume": 3000},
+        ],
+        "bot_trades": [],
+    })
+    fake_candle_sb.storage = type("S", (), {"from_": lambda _s, _b: _CandleBucket()})()
+    monkeypatch.setattr(offload, "get_market_supabase", lambda _m: fake_candle_sb)
+    payload = offload._load_tasi_candles_payload("1120", "TADAWUL", "primary", 5000, market="tasi")
+    closes = [c["close"] for c in payload["candles"]]
+    assert len(closes) == 3
+    assert closes[0] == 20.5  # From Storage (2012)
+    assert closes[1] == 61.15  # Live DB won tie over Storage (2026-11-23)
+    assert closes[2] == 61.8  # Live tail (2026-11-24)

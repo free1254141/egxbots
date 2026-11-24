@@ -27,6 +27,7 @@ from api.stock_aliases import (
 )
 from api.sharia_stocks import is_sharia_compliant
 from api.egx_canonical_names import CANONICAL_EGX_STOCK_NAMES
+from api.agentic_chat.intraday_volume import get_exchange_session_state, resolve_intraday_r_vol
 
 try:
     import api.saudi_stock_aliases as _saudi_aliases_mod
@@ -1687,6 +1688,11 @@ def _compute_stock_context_metrics(
                 t_reward = resistance_1 - close
                 if t_risk > 0:
                     metrics["tactical_risk_reward"] = round(t_reward / t_risk, 2)
+            if resistance_1 and resistance_1 > tac_sup > tac_stop:
+                ts_risk = tac_sup - tac_stop
+                ts_reward = resistance_1 - tac_sup
+                if ts_risk > 0:
+                    metrics["tactical_risk_reward_from_support"] = round(ts_reward / ts_risk, 2)
 
     dist_parts: List[str] = []
     if support_1 and dist_s1_pct is not None:
@@ -2802,6 +2808,14 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                 stop_loss=stop_loss,
             )
 
+            sym_prices_egx = by_sym.get(sym, []) if "by_sym" in locals() else []
+            rv_info = resolve_intraday_r_vol(
+                _safe_float(latest_tech.get("r_vol")),
+                latest_tech.get("date"),
+                exchange="EGX",
+                ohlcv_rows=sym_prices_egx,
+            )
+
             sym_currency = _reg_currency_for_symbol(sym, "EGX")
             egx_item: Dict[str, Any] = {
                 "symbol": sym,
@@ -2824,7 +2838,16 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                 "vwap_20": vwap_20,
                 "bb_upper": bb_up,
                 "bb_lower": bb_low,
-                "r_vol": _safe_float(latest_tech.get("r_vol")),
+                "r_vol": rv_info["effective_r_vol"],
+                **(
+                    {
+                        "r_vol_raw": rv_info["raw_r_vol"],
+                        "r_vol_mode": rv_info["r_vol_mode"],
+                        "r_vol_note_ar": rv_info["r_vol_note_ar"],
+                    }
+                    if rv_info["is_intraday_adjusted"]
+                    else {}
+                ),
                 "volume": latest_tech.get("volume"),
                 "support_1": support_1,
                 "resistance_1": resistance_1,
@@ -2910,7 +2933,8 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         ema_50=ema_50,
                         ema_200=ema_200,
                         vwap_20=vwap_20,
-                        r_vol=_safe_float(latest_tech.get("r_vol")),
+                        r_vol=rv_info["effective_r_vol"],
+                        r_vol_mode=rv_info["r_vol_mode"],
                         support_1=support_1,
                         resistance_1=resistance_1,
                         stop_loss=stop_loss,
@@ -3187,6 +3211,12 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     ti_date = db_ti.get("date") or calc_ti.get("date") or (
                         str(db_ti.get("updated_at"))[:10] if db_ti.get("updated_at") else None
                     )
+                    rv_info_sa = resolve_intraday_r_vol(
+                        r_vol,
+                        ti_date,
+                        exchange=exch_code,
+                        ohlcv_rows=sa_ohlcv_map.get(sym, []),
+                    )
 
                     verdict = _compute_stock_verdict(
                         close=close_price,
@@ -3235,7 +3265,16 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         "vwap_20": vwap_20,
                         "bb_upper": bb_up,
                         "bb_lower": bb_low,
-                        "r_vol": r_vol,
+                        "r_vol": rv_info_sa["effective_r_vol"],
+                        **(
+                            {
+                                "r_vol_raw": rv_info_sa["raw_r_vol"],
+                                "r_vol_mode": rv_info_sa["r_vol_mode"],
+                                "r_vol_note_ar": rv_info_sa["r_vol_note_ar"],
+                            }
+                            if rv_info_sa["is_intraday_adjusted"]
+                            else {}
+                        ),
                         "volume": vol_val,
                         "cmf_20": _safe_float(db_ti.get("cmf_20"), 3) or calc_ti.get("cmf_20"),
                         "support_1": support_1,
@@ -3314,7 +3353,8 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                                 ema_50=ema_50,
                                 ema_200=ema_200,
                                 vwap_20=vwap_20,
-                                r_vol=r_vol,
+                                r_vol=rv_info_sa["effective_r_vol"],
+                                r_vol_mode=rv_info_sa["r_vol_mode"],
                                 support_1=support_1,
                                 resistance_1=resistance_1,
                                 stop_loss=stop_loss,
@@ -3383,7 +3423,7 @@ def _sync_get_stock_levels_for_market(
         try:
             res_p = (
                 sb.from_("stock_prices")
-                .select("symbol,high,low,close,date")
+                .select("symbol,high,low,close,volume,date")
                 .eq("exchange", exchange_code)
                 .in_("symbol", syms)
                 .order("date", desc=True)
@@ -3534,6 +3574,12 @@ def _sync_get_stock_levels_for_market(
             resistance_1=resistance_1,
             stop_loss=stop_loss,
         )
+        rv_info_lv = resolve_intraday_r_vol(
+            _safe_float(ti_row.get("r_vol")),
+            date,
+            exchange=exchange_code,
+            ohlcv_rows=rows,
+        )
         lvl_item: Dict[str, Any] = {
             "symbol": sym,
             "market": ui_mkt,
@@ -3545,7 +3591,16 @@ def _sync_get_stock_levels_for_market(
             "ema_200": ema_200,
             "vwap_20": vwap_20,
             "rsi_14": _safe_float(ti_row.get("rsi_14")),
-            "r_vol": _safe_float(ti_row.get("r_vol")),
+            "r_vol": rv_info_lv["effective_r_vol"],
+            **(
+                {
+                    "r_vol_raw": rv_info_lv["raw_r_vol"],
+                    "r_vol_mode": rv_info_lv["r_vol_mode"],
+                    "r_vol_note_ar": rv_info_lv["r_vol_note_ar"],
+                }
+                if rv_info_lv["is_intraday_adjusted"]
+                else {}
+            ),
             "king_ai_score": _normalize_king_ai_score(ti_row.get("king_ai_score")),
             "fund_score": f_score,
             "pe_ratio": f_pe,
@@ -4143,6 +4198,110 @@ async def execute_get_recommendations(
 # ---------------------------------------------------------------------------
 # Tool: get_technical_scan
 # ---------------------------------------------------------------------------
+def _momentum_scan_intraday_fallback(
+    sb_client: Any,
+    *,
+    exchange: str,
+    select_cols: str,
+    latest_date: Optional[str],
+    primary_rows: List[Dict[str, Any]],
+    min_primary: int = 5,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Time-paced intraday fallback for `momentum_and_volume` when raw `r_vol >= 1.2` returns too few rows
+    because session volume is still accumulating. Falls back to prior completed session if intraday feed is empty.
+    """
+    if len(primary_rows) >= min_primary or not latest_date:
+        return primary_rows, None
+
+    sess = get_exchange_session_state(exchange=exchange)
+    fallback_note: Optional[str] = None
+    existing_syms = {str(r.get("symbol") or "").upper() for r in primary_rows if r.get("symbol")}
+    merged: List[Dict[str, Any]] = [dict(r) for r in primary_rows]
+
+    # Step 1: Fetch active intraday gainers on latest_date and pace their partial r_vol
+    try:
+        q_gain = (
+            sb_client.from_("stock_technical_indicators")
+            .select(select_cols)
+            .eq("exchange", exchange)
+            .eq("date", latest_date)
+            .gte("change_pct", 0)
+            .order("r_vol", desc=True)
+            .limit(40)
+        )
+        gainers = q_gain.execute().data or []
+    except Exception:
+        gainers = []
+
+    paced_candidates: List[Tuple[Tuple[float, float], Dict[str, Any]]] = []
+    for row in gainers:
+        sym_u = str(row.get("symbol") or "").upper()
+        if not sym_u or sym_u in existing_syms:
+            continue
+        raw_rv = _safe_float(row.get("r_vol"))
+        chg = _safe_float(row.get("change_pct")) or 0.0
+        rv_info = resolve_intraday_r_vol(raw_rv, row.get("date") or latest_date, exchange=exchange)
+        eff_rv = rv_info.get("effective_r_vol")
+        if (eff_rv is not None and eff_rv >= 1.15) or (chg >= 1.5 and (raw_rv or 0.0) >= 0.05):
+            r_copy = dict(row)
+            r_copy["_paced_r_vol"] = eff_rv if eff_rv is not None else raw_rv
+            r_copy["_r_vol_mode"] = rv_info.get("r_vol_mode")
+            r_copy["_r_vol_note_ar"] = rv_info.get("r_vol_note_ar")
+            paced_candidates.append(((float(eff_rv or 0.0), float(chg)), r_copy))
+
+    paced_candidates.sort(key=lambda item: item[0], reverse=True)
+    for _, cand in paced_candidates:
+        sym_u = str(cand.get("symbol") or "").upper()
+        if sym_u not in existing_syms:
+            existing_syms.add(sym_u)
+            merged.append(cand)
+        if len(merged) >= 15:
+            break
+
+    if len(merged) >= 3:
+        if sess.get("is_live_session") and not primary_rows:
+            fallback_note = (
+                f"تمت معايرة السيولة النسبية زمنياً وفق التقدم اللحظي للجلسة ({latest_date}) لعرض أقوى أسهم الزخم النشطة."
+            )
+        return merged, fallback_note
+
+    # Step 2: If intraday volume feed is still near-zero across the board, fall back to previous completed session
+    try:
+        q_prev_dt = (
+            sb_client.from_("stock_technical_indicators")
+            .select("date")
+            .eq("exchange", exchange)
+            .lt("date", latest_date)
+            .order("date", desc=True)
+            .limit(1)
+        )
+        prev_dt_rows = q_prev_dt.execute().data or []
+        prev_date = str(prev_dt_rows[0].get("date") or "")[:10] if prev_dt_rows else None
+        if prev_date:
+            q_prev = (
+                sb_client.from_("stock_technical_indicators")
+                .select(select_cols)
+                .eq("exchange", exchange)
+                .eq("date", prev_date)
+                .gte("r_vol", 1.2)
+                .gte("change_pct", 0)
+                .order("r_vol", desc=True)
+                .limit(30)
+            )
+            prev_rows = q_prev.execute().data or []
+            if prev_rows:
+                note = (
+                    f"بيانات السيولة اللحظية لجلسة اليوم ({latest_date}) لا تزال في بدايتها؛ "
+                    f"النتائج التالية مستخرجة من أقوى أسهم الزخم والسيولة في آخر جلسة مكتملة ({prev_date})."
+                )
+                return prev_rows, note
+    except Exception:
+        pass
+
+    return merged, fallback_note
+
+
 def _sync_get_technical_scan(
     preset: str,
     sharia_only: bool = False,
@@ -4160,6 +4319,9 @@ def _sync_get_technical_scan(
 
         rows: List[Dict[str, Any]] = []
         used_computed = False
+        scan_fallback_note: Optional[str] = None
+        ti_cols_str = ""
+        latest_sa_date: Optional[str] = None
         try:
             ti_cols_str, order_col = _saudi_ti_select_and_order(sb_sa)
             ti_cols = set(ti_cols_str.split(","))
@@ -4203,6 +4365,15 @@ def _sync_get_technical_scan(
 
             res = q.execute()
             rows = res.data or []
+            if preset == "momentum_and_volume" and "r_vol" in ti_cols and len(rows) < 3:
+                rows, scan_fallback_note = _momentum_scan_intraday_fallback(
+                    sb_sa,
+                    exchange=eff_mkt,
+                    select_cols=ti_cols_str,
+                    latest_date=latest_sa_date,
+                    primary_rows=rows,
+                    min_primary=3,
+                )
         except Exception:
             rows = []
 
@@ -4264,7 +4435,9 @@ def _sync_get_technical_scan(
             r1 = r.get("resistance_1") or (bb_up if bb_up else (_safe_price(close * 1.05) if close else None))
             vol_val = r.get("volume")
             vol_sma = r.get("vol_sma20") or r.get("volume_sma_20")
-            r_vol = _safe_float(r.get("r_vol"))
+            r_vol = _safe_float(r.get("_paced_r_vol"))
+            if r_vol is None:
+                r_vol = _safe_float(r.get("r_vol"))
             if r_vol is None and vol_val and vol_sma and float(vol_sma) > 0:
                 r_vol = _safe_float(float(vol_val) / float(vol_sma))
 
@@ -4290,6 +4463,15 @@ def _sync_get_technical_scan(
                 "change_pct": change_pct,
                 "rsi_14": rsi,
                 "r_vol": r_vol,
+                **(
+                    {
+                        "r_vol_raw": _safe_float(r.get("r_vol")),
+                        "r_vol_mode": r.get("_r_vol_mode"),
+                        "r_vol_note_ar": r.get("_r_vol_note_ar"),
+                    }
+                    if r.get("_paced_r_vol") is not None and r.get("_r_vol_note_ar")
+                    else {}
+                ),
                 "volume": vol_val,
                 "macd": _safe_float(r.get("macd"), 4),
                 "king_ai_score": _safe_float(r.get("king_ai_score")),
@@ -4315,18 +4497,22 @@ def _sync_get_technical_scan(
         }
         if used_computed:
             out["data_source"] = "computed_from_ohlcv"
+        if scan_fallback_note:
+            out["scan_fallback_note_ar"] = scan_fallback_note
         if sharia_only:
             out["sharia_note"] = f"تصنيف الشريعة لأسهم {cfg.name_ar} قيد الإضافة، وتُعرض نتائج المسح الفني العامة حالياً."
         return out
 
-    # ── EGX (preserved existing query) ───────────────────────────────────────
+    # ── EGX (with intraday time-paced & prev-session momentum fallback) ────────
     sb = _get_sb()
+    egx_scan_select = (
+        "symbol,date,close,change_pct,volume,r_vol,rsi_14,macd,macd_signal,macd_histogram,"
+        "bb_upper,bb_lower,ema_50,ema_200,king_ai_score,egx_ai_score"
+    )
+    egx_scan_fallback_note: Optional[str] = None
     try:
         latest_date = _get_latest_table_date(sb, "stock_technical_indicators", "date", "EGX")
-        query = sb.from_("stock_technical_indicators").select(
-            "symbol,date,close,change_pct,volume,r_vol,rsi_14,macd,macd_signal,macd_histogram,"
-            "bb_upper,bb_lower,ema_50,ema_200,king_ai_score,egx_ai_score"
-        ).eq("exchange", "EGX")
+        query = sb.from_("stock_technical_indicators").select(egx_scan_select).eq("exchange", "EGX")
         if latest_date:
             query = query.eq("date", latest_date)
 
@@ -4345,6 +4531,15 @@ def _sync_get_technical_scan(
 
         res = query.execute()
         rows = res.data or []
+        if preset == "momentum_and_volume" and len(rows) < 5:
+            rows, egx_scan_fallback_note = _momentum_scan_intraday_fallback(
+                sb,
+                exchange="EGX",
+                select_cols=egx_scan_select,
+                latest_date=latest_date,
+                primary_rows=rows,
+                min_primary=5,
+            )
     except Exception as e:
         return {"status": "error", "message": f"تعذر تنفيذ المسح الفني: {str(e)}"}
 
@@ -4377,6 +4572,11 @@ def _sync_get_technical_scan(
         stock_name_ar = _alias_name_for_symbol(sym, market="EGX")
         clean_name = (stock_name_ar or sym).split(",")[0].strip()
 
+        scan_rv_info = (
+            {"effective_r_vol": _safe_float(r.get("_paced_r_vol")), "raw_r_vol": _safe_float(r.get("r_vol")), "r_vol_mode": r.get("_r_vol_mode"), "r_vol_note_ar": r.get("_r_vol_note_ar"), "is_intraday_adjusted": True}
+            if r.get("_paced_r_vol") is not None
+            else resolve_intraday_r_vol(_safe_float(r.get("r_vol")), r.get("date"), exchange="EGX")
+        )
         results.append({
             "symbol": sym,
             "market": "EGX",
@@ -4387,7 +4587,16 @@ def _sync_get_technical_scan(
             "close": close,
             "change_pct": change_pct,
             "rsi_14": rsi,
-            "r_vol": _safe_float(r.get("r_vol")),
+            "r_vol": scan_rv_info["effective_r_vol"],
+            **(
+                {
+                    "r_vol_raw": scan_rv_info["raw_r_vol"],
+                    "r_vol_mode": scan_rv_info["r_vol_mode"],
+                    "r_vol_note_ar": scan_rv_info["r_vol_note_ar"],
+                }
+                if scan_rv_info.get("is_intraday_adjusted")
+                else {}
+            ),
             "macd": _safe_float(r.get("macd"), 4),
             "king_ai_score": _normalize_king_ai_score(r.get("king_ai_score")),
             "egx_ai_score": _safe_float(r.get("egx_ai_score")),
@@ -4403,7 +4612,7 @@ def _sync_get_technical_scan(
         if len(results) >= 10:
             break
 
-    return {
+    egx_scan_out: Dict[str, Any] = {
         "status": "success",
         "market": ui_mkt,
         "exchange": "EGX",
@@ -4411,6 +4620,9 @@ def _sync_get_technical_scan(
         "preset": preset,
         "stocks": results,
     }
+    if egx_scan_fallback_note:
+        egx_scan_out["scan_fallback_note_ar"] = egx_scan_fallback_note
+    return egx_scan_out
 
 
 async def execute_get_technical_scan(
@@ -6018,6 +6230,74 @@ def _resolve_stock_display_name(clean_sym: str, sym_mkt: str) -> str:
     return stock_name
 
 
+_MARKET_TURNOVER_THRESHOLDS: Dict[str, Tuple[float, float, float]] = {
+    "EGX": (50_000.0, 1_500_000.0, 5_000_000.0),      # EGP
+    "TADAWUL": (5_000.0, 150_000.0, 500_000.0),       # SAR
+    "QSE": (5_000.0, 150_000.0, 500_000.0),           # QAR
+    "DFM": (5_000.0, 150_000.0, 500_000.0),           # AED
+    "ADX": (5_000.0, 150_000.0, 500_000.0),           # AED
+    "KSE": (400.0, 12_000.0, 40_000.0),               # KWD
+}
+
+
+def _assess_stock_liquidity(
+    hist_rows: List[Dict[str, Any]],
+    ind_row: Dict[str, Any],
+    price: Optional[float],
+    exchange: str,
+) -> Dict[str, Any]:
+    """Unified liquidity & intraday pacing classifier shared by manage_portfolio and optimize_portfolio."""
+    exch_code = _normalize_market_code(exchange)
+    vols = [float(r["volume"]) for r in (hist_rows or [])[:10] if r.get("volume") is not None]
+    has_vol_hist = len(vols) >= 3
+    avg_vol_5 = (sum(vols[:5]) / len(vols[:5])) if vols else None
+    avg_vol_10 = (sum(vols) / len(vols)) if vols else None
+    zero_vol_days_10 = sum(1 for v in vols if v <= 0)
+    avg_turnover_10 = (avg_vol_10 * price) if (avg_vol_10 is not None and price is not None) else None
+
+    rv_info = resolve_intraday_r_vol(
+        _safe_float(ind_row.get("r_vol")),
+        ind_row.get("date"),
+        exchange=exch_code,
+        ohlcv_rows=hist_rows,
+    )
+    eff_r_vol = rv_info["effective_r_vol"]
+    thr = _MARKET_TURNOVER_THRESHOLDS.get(exch_code)
+    illiquid_thr, thin_thr, bluechip_thr = thr if thr is not None else (None, None, None)
+
+    is_illiquid = bool(
+        has_vol_hist
+        and (
+            (avg_vol_5 is not None and avg_vol_5 <= 0)
+            or zero_vol_days_10 >= 4
+            or (illiquid_thr is not None and avg_turnover_10 is not None and avg_turnover_10 < illiquid_thr)
+        )
+    )
+    high_turnover_bluechip_intraday = bool(
+        rv_info["is_intraday_adjusted"]
+        and bluechip_thr is not None
+        and avg_turnover_10 is not None
+        and avg_turnover_10 >= bluechip_thr
+    )
+    is_thin_liquidity = bool(
+        is_illiquid
+        or (
+            eff_r_vol is not None
+            and eff_r_vol < 0.45
+            and rv_info["r_vol_mode"] not in ("prev_close_fallback", "intraday_unavailable")
+            and not high_turnover_bluechip_intraday
+        )
+        or (thin_thr is not None and avg_turnover_10 is not None and avg_turnover_10 < thin_thr)
+    )
+    return {
+        "r_vol": eff_r_vol,
+        "rv_info": rv_info,
+        "zero_vol_days_10": zero_vol_days_10,
+        "is_illiquid": is_illiquid,
+        "is_thin_liquidity": is_thin_liquidity,
+    }
+
+
 def _build_portfolio_view_payload(
     sb: Any,
     holdings: List[Dict[str, Any]],
@@ -6243,25 +6523,11 @@ def _build_portfolio_view_payload(
         f_fcf = _safe_float(norm_fd.get("freeCashFlow") if norm_fd.get("freeCashFlow") is not None else norm_fd.get("free_cash_flow"), 2)
         fcf_by_pos_key[s] = f_fcf
 
-        vols = [float(r["volume"]) for r in hist_rows[:10] if r.get("volume") is not None]
-        has_vol_hist = len(vols) >= 3
-        avg_vol_5 = (sum(vols[:5]) / len(vols[:5])) if vols else None
-        avg_vol_10 = (sum(vols) / len(vols)) if vols else None
-        zero_vol_days_10 = sum(1 for v in vols if v <= 0)
-        avg_turnover_10 = (avg_vol_10 * last_price) if (avg_vol_10 is not None and last_price) else None
-        r_vol = _safe_float(t_row.get("r_vol"))
-        is_illiquid = bool(
-            has_vol_hist and (
-                (avg_vol_5 is not None and avg_vol_5 <= 0)
-                or zero_vol_days_10 >= 4
-                or (mkt == "EGX" and avg_turnover_10 is not None and avg_turnover_10 < 50_000.0)
-            )
-        )
-        is_thin_liquidity = bool(
-            is_illiquid
-            or (r_vol is not None and r_vol < 0.45)
-            or (mkt == "EGX" and avg_turnover_10 is not None and avg_turnover_10 < 1_500_000.0)
-        )
+        liq_info = _assess_stock_liquidity(hist_rows, t_row, last_price, mkt)
+        rv_info_pf = liq_info["rv_info"]
+        r_vol = liq_info["r_vol"]
+        is_illiquid = liq_info["is_illiquid"]
+        is_thin_liquidity = liq_info["is_thin_liquidity"]
         is_loss_making = bool(
             (f_eps is not None and f_eps < 0)
             or (f_ni is not None and f_ni < 0)
@@ -6291,6 +6557,14 @@ def _build_portfolio_view_payload(
             "support_est": _safe_price(t_row.get("bb_lower")),
             "resistance_est": _safe_price(t_row.get("bb_upper")),
             "r_vol": r_vol,
+            **(
+                {
+                    "r_vol_mode": rv_info_pf["r_vol_mode"],
+                    "r_vol_note_ar": rv_info_pf["r_vol_note_ar"],
+                }
+                if rv_info_pf["is_intraday_adjusted"] and rv_info_pf.get("r_vol_note_ar")
+                else {}
+            ),
             "king_ai_score": _normalize_king_ai_score(t_row.get("king_ai_score")),
             "wyckoff_phase": w_row.get("wyckoff_phase"),
             "acc_score": _safe_float(w_row.get("acc_score")),
@@ -6415,6 +6689,11 @@ def _build_portfolio_view_payload(
                     "profit_value": round(sub_pnl, 2) if sub_pnl is not None else None,
                 }
 
+    profitable_items = [p for p in enriched if p.get("profit_value") is not None and float(p["profit_value"]) > 0]
+    losing_items = [p for p in enriched if p.get("profit_value") is not None and float(p["profit_value"]) < 0]
+    breakeven_items = [p for p in enriched if p.get("profit_value") is not None and float(p["profit_value"]) == 0]
+    profitable_items_sorted = sorted(profitable_items, key=lambda x: float(x.get("profit_pct") or 0.0), reverse=True)
+
     res_payload: Dict[str, Any] = {
         "status": "success",
         "operation": "view",
@@ -6434,6 +6713,13 @@ def _build_portfolio_view_payload(
             "profit_value": round(total_profit, 2) if total_profit is not None else None,
             "profit_pct": round(total_profit_pct, 2) if total_profit_pct is not None else None,
             "equity": round(equity, 2),
+            "profitable_positions_count": len(profitable_items),
+            "profitable_symbols": [
+                f"{p['symbol']} ({float(p.get('profit_pct') or 0):+.2f}%)"
+                for p in profitable_items_sorted
+            ],
+            "losing_positions_count": len(losing_items),
+            "breakeven_positions_count": len(breakeven_items),
         },
     }
     if totals_by_market:
@@ -7315,7 +7601,6 @@ def _sync_optimize_portfolio(
 
     returns_map = compute_returns_by_date(price_rows)
     latest_close_map: Dict[str, float] = {}
-    vols_by_sym: Dict[str, List[float]] = {}
     price_rows_by_sym: Dict[str, List[Dict[str, Any]]] = {}
     for row in price_rows:
         s_u = str(row.get("symbol") or "").strip().upper()
@@ -7326,10 +7611,6 @@ def _sync_optimize_portfolio(
         c_val = _safe_float(row.get("close"))
         if s_u and c_val and c_val > 0 and s_u not in latest_close_map:
             latest_close_map[s_u] = c_val
-        if s_u and row.get("volume") is not None:
-            v_val = _safe_float(row.get("volume"))
-            if v_val is not None and v_val >= 0 and len(vols_by_sym.get(s_u, [])) < 10:
-                vols_by_sym.setdefault(s_u, []).append(v_val)
 
     # Optional Fair Value upside map for ALL 4 markets (cached, zero extra DB queries on warm cache)
     fv_upside_map: Dict[str, float] = {}
@@ -7401,28 +7682,11 @@ def _sync_optimize_portfolio(
         )
         is_negative_equity = bool(f_bvps is not None and f_bvps <= 0)
 
-        recent_vols = vols_by_sym.get(sym) or []
-        has_vol_history = len(recent_vols) >= 3
-        avg_vol_5 = (sum(recent_vols[:5]) / len(recent_vols[:5])) if recent_vols else None
-        avg_vol_10 = (sum(recent_vols) / len(recent_vols)) if recent_vols else None
-        zero_vol_days_10 = sum(1 for v in recent_vols if v <= 0)
-        avg_turnover_10 = (avg_vol_10 * price) if avg_vol_10 is not None else None
-        is_illiquid = bool(
-            has_vol_history
-            and (
-                (avg_vol_5 is not None and avg_vol_5 <= 0)
-                or zero_vol_days_10 >= 4
-                or (exch == "EGX" and avg_turnover_10 is not None and avg_turnover_10 < 50_000.0)
-            )
-        )
-        r_vol = _safe_float(ind.get("r_vol"))
-        is_thin_liquidity = bool(
-            (not is_illiquid)
-            and (
-                (r_vol is not None and r_vol < 0.45)
-                or (exch == "EGX" and avg_turnover_10 is not None and avg_turnover_10 < 1_500_000.0)
-            )
-        )
+        liq_opt = _assess_stock_liquidity(price_rows_by_sym.get(sym) or [], ind, price, exch)
+        zero_vol_days_10 = liq_opt["zero_vol_days_10"]
+        is_illiquid = liq_opt["is_illiquid"]
+        r_vol = liq_opt["r_vol"]
+        is_thin_liquidity = bool((not is_illiquid) and liq_opt["is_thin_liquidity"])
         is_unhealthy_loss = bool(is_negative_equity or (is_loss_making and (f_score is None or f_score < 50.0)))
         over_and_weak = bool(
             f_pe is not None

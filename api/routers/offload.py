@@ -1132,16 +1132,23 @@ def _load_tasi_candles_payload(
 
     exchanges = get_market_exchanges(market)
     currency = _MARKET_CURRENCY_MAP.get(market, "SAR")
+    use_storage = limit > 220
+    known_storage_ex = (
+        exchange.upper()
+        if (market == "uae" and exchange.upper() in ("DFM", "ADX"))
+        else (None if market == "uae" else get_market_exchange(market))
+    )
 
     def _fetch() -> Dict[str, Any]:
         sb = get_market_supabase(market)
         if sb is None:
             raise RuntimeError(f"{market.upper()} Supabase unavailable")
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        db_limit = min(limit, 400) if use_storage else limit
+        with ThreadPoolExecutor(max_workers=3) as pool:
             def _fetch_prices():
                 price_q = (
                     sb.table("stock_prices")
-                    .select("date,open,high,low,close,volume")
+                    .select("exchange,date,open,high,low,close,volume")
                     .eq("symbol", symbol)
                 )
                 price_q = (
@@ -1151,14 +1158,21 @@ def _load_tasi_candles_payload(
                 )
                 return (
                     getattr(
-                        price_q.order("date", desc=True).limit(limit).execute(),
+                        price_q.order("date", desc=True).limit(db_limit).execute(),
                         "data",
                         None,
                     )
                     or []
                 )
 
+            def _fetch_storage():
+                if not use_storage or not known_storage_ex:
+                    return []
+                from api.saudi_storage_history import load_storage_symbol_bars
+                return load_storage_symbol_bars(sb, known_storage_ex, symbol)
+
             f_prices = pool.submit(_fetch_prices)
+            f_storage = pool.submit(_fetch_storage)
             f_markers = pool.submit(
                 lambda: _safe_exec(
                     lambda: getattr(
@@ -1177,7 +1191,22 @@ def _load_tasi_candles_payload(
                 )
             )
             raw_prices = list(reversed(f_prices.result()))
+            storage_bars = f_storage.result()
             raw_markers = f_markers.result()
+
+        if use_storage and not known_storage_ex and market == "uae":
+            from api.saudi_storage_history import load_storage_symbol_bars
+
+            hint_ex = str((raw_prices[-1] if raw_prices else {}).get("exchange") or "").upper()
+            candidates = [hint_ex] if hint_ex in ("DFM", "ADX") else ["DFM", "ADX"]
+            for cand_ex in candidates:
+                storage_bars = load_storage_symbol_bars(sb, cand_ex, symbol)
+                if storage_bars:
+                    break
+
+        if storage_bars:
+            from api.saudi_storage_history import merge_bars_storage_with_live
+            raw_prices = merge_bars_storage_with_live(storage_bars, raw_prices)[-limit:]
 
         candles = []
         for c in raw_prices:

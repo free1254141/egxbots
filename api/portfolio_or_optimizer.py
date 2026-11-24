@@ -824,18 +824,44 @@ def optimize_portfolio_or(
     vol_delta = round(after_metrics["annualVolatilityPct"] - before_metrics["annualVolatilityPct"], 2)
     est_fees = round(total_turnover_val * fee_rate, 2)
 
+    sell_rows = [r for r in allocations if r.get("action") == "SELL"]
+    buy_rows = [r for r in allocations if r.get("action") == "BUY"]
+    hold_rows = [r for r in allocations if r.get("action") == "HOLD"]
+    total_sell_val = round(sum(float(r.get("tradeValue") or 0.0) for r in sell_rows), 2)
+    total_buy_val = round(sum(float(r.get("tradeValue") or 0.0) for r in buy_rows), 2)
+    net_cash_delta = round(total_sell_val - total_buy_val, 2)
+    leftover_r = round(leftover_cash, 2)
+
     return {
         "objective": obj,
         "objectiveLabelAr": OBJECTIVE_LABELS_AR.get(obj, obj),
         "exchange": str(exchange or "EGX").upper(),
         "totalCapital": round(capital, 2),
         "investedAmount": round(float(np.sum(actual_vals)), 2),
-        "leftoverCash": round(leftover_cash, 2),
+        "leftoverCash": leftover_r,
         "leftoverCashPct": round((leftover_cash / capital) * 100.0, 1),
         "estimatedFees": est_fees,
         "feeRatePct": round(fee_rate * 100.0, 3),
         "historyOverlapDays": common_dates,
         "hasExistingHoldings": has_existing,
+        "tradeSummary": {
+            "sellCount": len(sell_rows),
+            "buyCount": len(buy_rows),
+            "holdCount": len(hold_rows),
+            "sellSymbols": [r["symbol"] for r in sell_rows],
+            "buySymbols": [r["symbol"] for r in buy_rows],
+            "holdSymbols": [r["symbol"] for r in hold_rows],
+            "totalSellValue": total_sell_val,
+            "totalBuyValue": total_buy_val,
+            "netCashDelta": net_cash_delta,
+            "estimatedFees": est_fees,
+            "leftoverCash": leftover_r,
+            "exactSummaryAr": (
+                f"إجمالي المبيعات المحسوب حتمياً ({len(sell_rows)} أسهم): {total_sell_val:,.2f} | "
+                f"إجمالي المشتريات المحسوب حتمياً ({len(buy_rows)} أسهم): {total_buy_val:,.2f} | "
+                f"العمولة التقديرية: {est_fees:,.2f} | الكاش المتبقي: {leftover_r:,.2f}"
+            ),
+        },
         "constraints": {
             "maxStockWeightPct": round(eff_max_w * 100.0, 1),
             "maxSectorWeightPct": round(eff_max_sec * 100.0, 1),

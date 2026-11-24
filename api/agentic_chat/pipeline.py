@@ -637,6 +637,20 @@ def _tool_result_has_missing_stock(res: Any) -> bool:
     return bool(res.get("suggested_matches"))
 
 
+def _tool_result_is_degraded_scan(tool_name: str, payload: Any) -> bool:
+    """Return True if a screener/accumulation scan returned error or empty results so shared cache stays clean."""
+    if tool_name not in ("get_technical_scan", "get_accumulation_stocks"):
+        return False
+    if not isinstance(payload, dict) or payload.get("status") != "success":
+        return True
+    stocks_list = payload.get("stocks")
+    if stocks_list is None and tool_name == "get_accumulation_stocks":
+        stocks_list = payload.get("accumulation_stocks")
+    if isinstance(stocks_list, list) and len(stocks_list) == 0:
+        return True
+    return False
+
+
 def _prioritize_active_market_hints(
     hints: List[Dict[str, Any]],
     active_market: Optional[str],
@@ -904,6 +918,7 @@ def _is_saudi_related_query(
 _CANONICAL_BUTTON_INPUTS = frozenset({
     "📈 أفضل أسهم السوق اليوم",
     "أفضل أسهم السوق اليوم",
+    "أقوى الأسهم النهارده وملخص السوق",
     "أقوى أسهم التجميع والسيولة الذكية اليوم",
     "هات كل التوصيات المفتوحة حالياً",
     "التوصيات المفتوحة حالياً",
@@ -1309,6 +1324,7 @@ async def _run_agentic_chat_stream_impl(
     visuals_data: Dict[str, Any] = {}
     tools_executed_count = 0
     has_missing_stock_data = False
+    has_degraded_scan_data = False
     turn_tool_payloads: List[Dict[str, Any]] = []
     guard_warnings: List[str] = []
     guard_block_cache = False
@@ -1374,14 +1390,19 @@ async def _run_agentic_chat_stream_impl(
     max_rounds = 3
     round_count = 0
     emitted_generating_status = False
+    used_fast_track = False
+    is_standalone_allowed = (not has_conversation_history) or _is_unambiguous_standalone_input(
+        message, market=effective_market
+    )
 
     # Single-Stock Fast-Track: works identically across ALL registered exchanges (EGX, TASI, QSE, DFM, ADX, ...).
-    # Covers both general analysis (`vip_stock_SYM`) and dedicated financial/fundamental analysis (`vip_stock_SYM_financials`).
+    # Covers both general analysis (`vip_stock_SYM`) and dedicated financial/fundamental analysis (`vip_stock_SYM_financials`),
+    # including unambiguous bare ticker lookups inside ongoing multi-turn sessions.
     fast_stock_match = (
         re.fullmatch(r"vip_stock_([A-Z0-9]{2,12})(_financials)?", candidate_cache_key)
         if (
             candidate_cache_key
-            and not has_conversation_history
+            and is_standalone_allowed
             and not has_user_rules
             and not is_cross_market
             and not vision_data
@@ -1390,6 +1411,8 @@ async def _run_agentic_chat_stream_impl(
         else None
     )
     if fast_stock_match:
+        used_fast_track = True
+        model_confirmed_standalone = True
         fast_sym = fast_stock_match.group(1)
         is_financials_fast = bool(fast_stock_match.group(2))
         fast_mkt_ui = ui_market_label(effective_market)
@@ -1428,6 +1451,8 @@ async def _run_agentic_chat_stream_impl(
                 turn_tool_payloads.append(r)
                 if t_name == "get_stock" and _tool_result_has_missing_stock(r):
                     has_missing_stock_data = True
+                if _tool_result_is_degraded_scan(t_name, r):
+                    has_degraded_scan_data = True
                 _collect_structured_outputs(r, tables_data, recommendations_data, visuals_data)
                 fast_ctx_payload[t_name] = _strip_ui_only_fields_for_llm(r)
         yield f"data: {json.dumps({'type': 'status', 'status': 'quant_engine', 'step_id': 'quant_verify', 'message': _build_quant_stage_label(fast_tool_names, visuals_data)}, ensure_ascii=False)}\n\n"
@@ -1455,6 +1480,75 @@ async def _run_agentic_chat_stream_impl(
         tools_executed_count += len(fast_tool_specs)
         usage_acc["tools_used"].extend([t_name for t_name, _ in fast_tool_specs])
         max_rounds = 0  # Proceed straight to DeepSeek single-call synthesis without tools schema
+
+    # Canonical Market / Accumulation Preset Fast-Track (eliminates Round-1 LLM tool-selection overhead)
+    elif (
+        candidate_cache_key in ("vip_accumulation", "vip_market_summary")
+        and is_standalone_allowed
+        and not has_user_rules
+        and not is_cross_market
+        and not vision_data
+        and (not images or len(images) == 0)
+    ):
+        used_fast_track = True
+        model_confirmed_standalone = True
+        preset_mkt_ui = ui_market_label(effective_market)
+        if candidate_cache_key == "vip_accumulation":
+            preset_tool_specs = [
+                ("get_accumulation_stocks", {"market": preset_mkt_ui}),
+                ("get_technical_scan", {"preset": "momentum_and_volume", "market": preset_mkt_ui}),
+            ]
+        else:
+            preset_tool_specs = [
+                ("get_market", {"market": preset_mkt_ui}),
+                ("get_technical_scan", {"preset": "top_gainers", "market": preset_mkt_ui}),
+            ]
+        preset_tool_names = [t_name for t_name, _ in preset_tool_specs]
+        yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'step_id': 'fetch_data', 'message': _build_tools_stage_label(preset_tool_names)}, ensure_ascii=False)}\n\n"
+        t_tools_start = time.time()
+        preset_results = await asyncio.gather(
+            *[
+                dispatch_tool(t_name, t_args, user_id=user_id, user_prompt=message, default_market=effective_market)
+                for t_name, t_args in preset_tool_specs
+            ],
+            return_exceptions=True,
+        )
+        t_tools = time.time() - t_tools_start
+        logger.info(f"[agentic_chat] Canonical Preset Fast-Track ({candidate_cache_key}): Tools({len(preset_tool_specs)})={t_tools:.2f}s (skipped Round 1 LLM)")
+        preset_ctx_payload: Dict[str, Any] = {}
+        for (t_name, _), r in zip(preset_tool_specs, preset_results):
+            if isinstance(r, Exception):
+                preset_ctx_payload[t_name] = {"status": "error", "message": str(r)}
+                has_degraded_scan_data = True
+            else:
+                turn_tool_payloads.append(r)
+                if _tool_result_is_degraded_scan(t_name, r):
+                    has_degraded_scan_data = True
+                if t_name == "get_accumulation_stocks":
+                    acc_rows = r.get("accumulation_stocks") or r.get("stocks") or []
+                    if isinstance(acc_rows, list) and acc_rows:
+                        acc_fallback_rows.extend(acc_rows)
+                _collect_structured_outputs(r, tables_data, recommendations_data, visuals_data)
+                preset_ctx_payload[t_name] = _strip_ui_only_fields_for_llm(r)
+        yield f"data: {json.dumps({'type': 'status', 'status': 'quant_engine', 'step_id': 'quant_verify', 'message': _build_quant_stage_label(preset_tool_names, visuals_data)}, ensure_ascii=False)}\n\n"
+
+        preset_ctx_msg = {
+            "role": "system",
+            "content": (
+                f"بيانات السوق الموثقة المستخرجة فعلياً من قاعدة البيانات "
+                f"(نتائج {', '.join(preset_tool_names)}):\n"
+                f"{json.dumps(preset_ctx_payload, ensure_ascii=False, separators=(',', ':'))}\n"
+                "تم تنفيذ جميع الأدوات المطلوبة بنجاح. اكتب الآن التقرير التحليلي الكامل مباشرة للمستخدم اعتماداً على هذه الأرقام الموثقة فقط، وبدون كتابة أي وسوم استدعاء أدوات أو DSML."
+            ),
+        }
+        preset_messages = [m for m in formatted_messages if m.get("role") == "system"]
+        preset_messages.append(preset_ctx_msg)
+        if formatted_messages and formatted_messages[-1].get("role") == "user":
+            preset_messages.append(formatted_messages[-1])
+        formatted_messages = preset_messages
+        tools_executed_count += len(preset_tool_specs)
+        usage_acc["tools_used"].extend(preset_tool_names)
+        max_rounds = 0
 
     active_tools_schema = (
         AGENTIC_TOOLS_SCHEMA
@@ -1801,6 +1895,8 @@ async def _run_agentic_chat_stream_impl(
                         turn_tool_payloads.append(r)
                     if fn_name == "get_stock" and _tool_result_has_missing_stock(r):
                         has_missing_stock_data = True
+                    if _tool_result_is_degraded_scan(fn_name, r):
+                        has_degraded_scan_data = True
 
                 _append_tool_results(
                     tool_calls,
@@ -1851,7 +1947,7 @@ async def _run_agentic_chat_stream_impl(
                     "temperature": 0.3,
                     "max_tokens": 3000,
                 }
-                if not fast_stock_match:
+                if not used_fast_track:
                     synthesis_payload["tools"] = active_tools_schema
                     synthesis_payload["tool_choice"] = "none"  # Forbid tools so DeepSeek produces only synthesis text
 
@@ -2172,12 +2268,13 @@ async def _run_agentic_chat_stream_impl(
         (not has_conversation_history and not has_followup_flag)
         or (has_conversation_history and model_confirmed_standalone and tools_executed_count > 0)
     )
-    if has_missing_stock_data or guard_block_cache:
+    if has_missing_stock_data or has_degraded_scan_data or guard_block_cache:
         candidate_cache_key = None
 
     if (
         not is_cross_market
         and not has_missing_stock_data
+        and not has_degraded_scan_data
         and not guard_block_cache
         and can_save_for_history
         and not has_user_rules

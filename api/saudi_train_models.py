@@ -359,7 +359,40 @@ def load_saudi_history_cached(
         bars_by_symbol = {s: df.copy() for s, df in cached["bars_by_symbol"].items()}
         print(f"  [CACHE TAIL] Refreshing incremental Saudi bars after {tail_cutoff}...")
     else:
-        print(f"  [CACHE MISS] Downloading full Saudi price history since {history_start_date} for {len(target_symbols)} symbols...")
+        storage_df = pd.DataFrame()
+        try:
+            from api.saudi_storage_history import load_storage_exchange_df
+            storage_df = load_storage_exchange_df(sb, EXCHANGE)
+        except Exception as storage_err:
+            print(f"  [STORAGE WARN] Could not load {EXCHANGE} archive: {storage_err}")
+
+        if not storage_df.empty:
+            storage_df = storage_df[storage_df["date"] >= history_start_date]
+            target_set = set(target_symbols)
+            if target_set:
+                storage_df = storage_df[storage_df["symbol"].isin(target_set)]
+            if not storage_df.empty:
+                storage_df["dt_idx"] = pd.to_datetime(storage_df["date"], errors="coerce")
+                storage_df = storage_df.dropna(subset=["dt_idx"])
+                for sym, g in storage_df.groupby("symbol", sort=False):
+                    sub_df = pd.DataFrame({
+                        "Open": pd.to_numeric(g["open"], errors="coerce").values,
+                        "High": pd.to_numeric(g["high"], errors="coerce").values,
+                        "Low": pd.to_numeric(g["low"], errors="coerce").values,
+                        "Close": pd.to_numeric(g["close"], errors="coerce").values,
+                        "Volume": pd.to_numeric(g["volume"], errors="coerce").values,
+                    }, index=pd.DatetimeIndex(g["dt_idx"], name="date")).sort_index()
+                    sub_df = sub_df[~sub_df.index.duplicated(keep="last")]
+                    if not sub_df.empty:
+                        bars_by_symbol[str(sym)] = sub_df
+                if len(bars_by_symbol) >= 200:
+                    max_st = max(df.index.max().strftime("%Y-%m-%d") for df in bars_by_symbol.values())
+                    tail_cutoff = (pd.Timestamp(max_st) - pd.Timedelta(days=14)).strftime("%Y-%m-%d")
+                    tail_mode = True
+                    date_op = "gte"
+                    print(f"  [STORAGE HIT] Loaded {len(storage_df):,} {EXCHANGE} bars ({len(bars_by_symbol)} symbols) through {max_st}; fetching Postgres tail >= {tail_cutoff}...")
+        if not tail_mode:
+            print(f"  [CACHE MISS] Downloading full Saudi price history since {history_start_date} for {len(target_symbols)} symbols...")
 
     with ThreadPoolExecutor(max_workers=10) as pool:
         futs = [

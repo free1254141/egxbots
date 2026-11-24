@@ -1,12 +1,13 @@
 # الوضع الحالي للشات بوت — مرجع كل الإيجنتس
 
-آخر تحديث: **13 أكتوبر 2026، بتوقيت القاهرة**. تنفيذ هذه الجولة: **Codex / Sol 6.1**.
-تحديث لاحق: معالجة مراجعة جلسة الأدمن بعد إصدار `12abc88f`؛ كوميت الإصلاح `7f66a2afd66d7d487f54fc5b2aef0cad65882991`. التفاصيل في قسم إصلاح المتابعة والمراجعة أدناه. معرف `c658a148` في السجل يوثق الإصدار الأول لهذه الجولة وليس آخر إصدار.
-نقطة المقارنة قبل الجولة: `498779984f691b2c876d19ef5a73aaf27eda82db`. كوميت تغيير الشات: `c658a1481b7f126c6776ad73cff487f224a64ccc`. حالة النشر وتاريخه في قسم سجل النشر أدناه.
+آخر تحديث: **24 نوفمبر 2026، بتوقيت القاهرة**. تنفيذ هذه الجولة: **ARTORO Quant & Multi-Market Hardening** (`HEAD` محلي مبني على `29a43112`).
+ملاحظة تاريخية: معالجة مراجعة جلسة الأدمن السابقة بعد إصدار `12abc88f` تمت في كوميت `7f66a2afd66d7d487f54fc5b2aef0cad65882991` (الموثق مع نقطة `c658a148` و`49877998` في الأقسام التاريخية أدناه).
 
 هذه الوثيقة تصف المسار الفعلي، وحدوده واختباراته؛ نجاح اختبار لا يثبت انعدام أخطاء الإنتاج.
 قبل تعديل الشات، اقرأها مع `AGENTS.md`. حدّث سجل التغييرات والقياسات والرجوع بعد كل تعديل معماري.
 
+> **تحديث 24 نوفمبر 2026:** تفعيل منظومة **الذكاء الكمي ومحاكاة مونت كارلو (`5,000` مسار) ومُحسّن المحافظ OR (`Smart DCA` + استبعاد مسبق للأسهم غير السائلة)** + **محرك معايرة السيولة اللحظية زمنياً المرتبط بسجل الأسواق (`intraday_volume.py` + `market_registry.py`)** + **توسيع المسار السريع (Standalone Multi-Turn & Canonical Preset Fast-Track)** + **تعميم الاستشارات المجدولة الموحدة على جميع الأسواق (`EGX`، `TADAWUL/TASI`، `QSE`، `DFM`، `ADX`، `KSE`، `COMMODITIES`)** مع عزل الخصوصية بالكامل عبر SHA-256 Snapshot Cache وتطابق روابط تليجرام HTML.
+>
 > **تحديث 15 نوفمبر 2026:** تفعيل الكاش الذكي داخل المحادثات المتعددة (Web و Telegram `chat_history`) بشكل Model-Driven بدون أي Regex عبر معامل `is_contextual_followup` في مخطط الأدوات (`tools_schema.py` و`pipeline.py` و`analysis_cache.py`)؛ بحيث تمر الأسئلة المستقلة (`is_contextual_followup=false`) إلى كاش الجولة الأولى (مع عزل presets في `get_technical_scan` وتطبيع الرموز العربية)، بينما تحتفظ أسئلة المتابعة الضيقة (`is_contextual_followup=true`) بكامل سياق الحوار وتتجاوز الكاش بالكامل. كما أُضيف دعم القواعد المخصصة الدائمة لكل مستخدم (`profiles.custom_ai_rules` و`manage_user_preferences`) مع عزل تام عن الكاش العام.
 > 
 > **تحديث 12 نوفمبر 2026:** بناء نظام الكاش الذكي ثنائي الطبقات (Two-Tier Model-Driven Cache) بمحرك بايثون (`api/agentic_chat/analysis_cache.py`) مع حفظ دائم في جدول `market_cache` في Supabase، واستنباط النية بدون Regex عبر استدعاءات الأدوات، ودعم معالج شامل لوسوم DeepSeek DSML لمنع أي تسريب للأكواد. التفاصيل في القسم التالي أدناه.
@@ -14,6 +15,35 @@
 > **تحديث 10 نوفمبر 2026:** بناء معمارية خادم بايثون الوكيل المنفصل (Python Agentic Chatbot Engine) للقضاء على استهلاك Vercel Active CPU، مع التوجيه الشفاف عبر `CHATBOT_BACKEND` في `next.config.js`. التوثيق التفصيلي المستقل في [chatbot-python-agentic-architecture-2026-11-10.md](chatbot-python-agentic-architecture-2026-11-10.md) وملخص التغييرات في القسم الأول أدناه.
 > 
 > **تحديث 6 نوفمبر 2026:** أُضيف كاش نتائج أدوات القراءة العامة لتقليل استهلاك Vercel Active CPU — التفاصيل في القسم التالي أدناه.
+
+## التحديث المعماري الشامل (محرك الذكاء الكمي + السيولة اللحظية + تعدد الأسواق والأتمتة) — 24 نوفمبر 2026
+
+- **1. محرك الذكاء الكمي المدمج (`api/agentic_chat/quant_engine.py`):**
+  - حساب حتمي بأقل من 15ms (`0` توكنز LLM إضافية) داخل `tools_execution.py` يولّد **محاكاة مونت كارلو (GBM بـ 5,000 مسار)** عبر مصفوفة المتجهات في `numpy`، ومعايرة بايزية لثقة الإشارة (`Bayesian Confidence`)، ومناظرة **Bull vs Bear** حتمية، وتصنيف اتساق موحد (`Unified Consistency Verdict`).
+  - منع إطلاق تحذيرات "سيولة منخفضة" الكاذبة أثناء الجلسات الحية عندما يكون `r_vol_mode="intraday_unavailable"`.
+  - دعم كامل لربط كارت الذكاء الكمي في الواجهة (`visuals_data["quant_analysis"]`) موحّد المصدر مع جداول البيانات ووقف الخسارة التكتيكي (`tactical_stop_loss` و`tactical_risk_reward_from_support`).
+
+- **2. مُحسّن المحافظ ببحوث العمليات (`api/portfolio_or_optimizer.py`) وخطة التبريد (`Smart DCA`):**
+  - فلتر استبعاد مسبق (`excluded_tickers` / `max_weight_override=0.0`) يضمن عدم تخصيص أي وزن شرائي أو تعزيز للأسهم المحظورة أو عديمة السيولة قبل دخول مصفوفة التحسين.
+  - ملخص عمليات حتمي موحد (`tradeSummary`: `totalSellValue`, `totalBuyValue`, `sellCount`, `buyCount`, `holdCount`, `netCashDelta`) متطابق رقمياً مع جميع صفوف `SELL`/`BUY`/`HOLD`.
+  - خوارزمية **Smart DCA** لحساب كمية التبريد وسعر التعادل شامل العمولات (بدقة 3 أرقام عشرية للأسهم دون `5.0` في `build_smart_dca_plan`، مع `_safe_price` في الأدوات بدقة 4 أرقام دون `2.0` و3 أرقام دون `10.0`) مع حقنها تلقائياً في `visuals_data["dca_plan"]`.
+  - توحيد تصنيف السيولة عبر دالة مشتركة `_assess_stock_liquidity()` بين `manage_portfolio` و`optimize_portfolio` مع عتبات سيولة يومية مناسبة لكل عملة سوق (`_MARKET_TURNOVER_THRESHOLDS`: مصر EGP `50k`/`1.5M`/`5M`، السعودية SAR وقطر QAR والإمارات AED `5k`/`150k`/`500k`، الكويت KWD `400`/`12k`/`40k`).
+
+- **3. محرك معايرة السيولة اللحظية المرتبط بسجل الأسواق (`api/agentic_chat/intraday_volume.py` + `market_registry.py`):**
+  - `get_exchange_session_state(exchange)` تقرأ أوقات التداول والمنطقة الزمنية وأيام الأسبوع مباشرة من سجل الأسواق الموحد (`api/agentic_chat/market_registry.py`): مصر (`Africa/Cairo` 10:00–14:30 الأحد–الخميس مع تقويم العطلات الرسمي `is_egx_session`)، السعودية (`Asia/Riyadh` 10:00–15:00)، قطر (`Asia/Qatar` 09:30–13:15)، دبي وأبوظبي (`Asia/Dubai` 10:00–15:00 الإثنين–الجمعة)، الكويت (`Asia/Kuwait` 09:00–12:40).
+  - أثناء الجلسات الحية، تطبق الدالة `resolve_intraday_r_vol()` منحنى U-Shaped التراكمي مع تقليص بايزي للمشاريع المبكرة (`intraday_paced`)، وتعود تلقائياً لسيولة آخر جلسة مكتملة (`prev_close_fallback`) للأسهم السائلة قبل اكتمال تغذية الحجم اليومي مع الحفاظ الصارم على `0.00x` للأسهم الميتة فعلياً، وتجاوز أسواق المعادن المستمرة 24 ساعة (`COMMODITIES` `session_len_min >= 1400`) بوضع `eod` مباشر دون تشويه منحنى الأسهم.
+  - تعزيز مسح الزخم والسيولة اللحظي (`_momentum_scan_intraday_fallback`) في `tools_execution.py` لتفادي نتائج المسح الفارغة منتصف الجلسة.
+
+- **4. تحسين المسار السريع وكاش تعدد الأسواق وحوكمة التكلفة (`pipeline.py`, `analysis_cache.py`, `prompts.py`):**
+  - تفعيل **Standalone Multi-Turn Fast-Track** (حتى داخل المحادثات المتعددة عندما يكون السؤال مستقلاً لسهم واحد بدون اعتماد سياقي) و**Canonical Preset Fast-Track** لمسحي `vip_accumulation` و`vip_market_summary`؛ وإسقاط مصفوفة `tools` في جولة الصياغة عند تخطي الجولة الأولى لتقليل التوكنز والحفاظ على استقرار بادئة **DeepSeek Prefix Cache**.
+  - مانع تسميم الكاش العام (`_tool_result_is_degraded_scan`) يمنع حفظ نتائج مسح فني/تجميعي فارغة أو فاشلة داخل `market_cache` أو ذاكرة Tier 1.
+  - دعم موحد عبر `market_registry.py` للأسواق المتعددة (`EGX`, `TADAWUL/TASI`, `QSE`, `DFM`, `ADX`, `KSE`, `COMMODITIES`) في مسار الأدوات، الذاكرة ثنائية الطبقات (`vip_*` للبورصة المصرية وبادئة `mkt_{exch}__{cache_key}` للأسواق الأخرى في `resolve_scoped_cache_key`)، وحارس المخرجات (`output_guard.py`) مع تحويل الروابط النسبية تلقائياً إلى روابط مطلقة `https://egxbots.com/...` في ردود تليجرام (`api/telegram_vip_chat.py`) وتسجيل `latency_ms`.
+
+- **5. تعميم الاستشارات المجدولة على كل الأسواق وعزل الخصوصية (`api/scheduled_automations_worker.py`):**
+  - كشف تلقائي للسوق المستهدف (`_detect_automation_market`) باستخدام أنماط `market_registry` وأكواد السوق السعودي رباعية الأرقام (`1000–9999` مع فلاتر السنوات والمبالغ) وأسماء الشركات الخليجية العربية (`saudi_stock_aliases.py`).
+  - توجيه استعلامات بيانات السوق والمؤشرات والإفصاحات والتوصيات عبر `_market_supabase_request` إلى `SAUDI_SUPABASE` للأسواق الخليجية والمعادن (مع مسار Fallback آمن للأعمدة الأساسية `_saudi_ti_select_and_order`-style في الجداول التي تختلف بنيتها عن البورصة المصرية، وحصر `egx_disclosures` على `EGX`/`TADAWUL` فقط)، مع بقاء بيانات الحساب والاشتراك والكوتة والمحفظة وسجل المحادثة (`profiles`, `subscriptions`, `positions`, `scheduled_chat_automations`, `ai_chat_*`) على Supabase الرئيسي حصراً.
+  - برومبت نظام ثابت بالكامل (`AUTOMATION_STATIC_SYSTEM_PROMPT` خالٍ من التواريخ والساعات لتثبيت `Prefix Cache` على مدار 24 ساعة)، مع **SHA-256 Content-Addressed Snapshot Cache**: معزول في الذاكرة RAM فقط لكل `user_id` في أسئلة المحفظة الشخصية (شاملة التطبيع الإملائي `ى`/`ي` والتشكيل ومنع تسريب أسماء المستخدمين)، ومشترك في `market_cache` للاستشارات العامة الخالية من بيانات المحفظة؛ كما يراعي `_worker_loop` أيام التداول الخاصة بكل سوق (الأحد–الخميس لـ EGX/TASI/QSE/KSE والإثنين–الجمعة لـ DFM/ADX/COMMODITIES).
+  - **سجل قياسات التدقيق:** يُحدَّث دورياً في [`docs/CHAT_COST_TOKEN_LATENCY_TRACKER.md`](CHAT_COST_TOKEN_LATENCY_TRACKER.md).
 
 ## معمارية بايثون الوكيلة المنفصلة (Python Agentic Chatbot) — 10 نوفمبر 2026
 

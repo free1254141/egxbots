@@ -39,8 +39,8 @@ InstrumentDef = Tuple[str, str, str, str, Optional[str], str, str, str, str, str
 
 GCC_AND_METALS_UNIVERSE: List[InstrumentDef] = [
     # ================= COMMODITIES (Gold & Silver) =================
-    ("XAUUSD", "COMMODITIES", "Global", "USD", "GC=F", "GOLD", "TVC", "Gold Spot / Futures (XAU/USD)", "الذهب (أونصة عالمية)", "Precious Metals"),
-    ("XAGUSD", "COMMODITIES", "Global", "USD", "SI=F", "SILVER", "TVC", "Silver Spot / Futures (XAG/USD)", "الفضة (أونصة عالمية)", "Precious Metals"),
+    ("XAUUSD", "COMMODITIES", "Global", "USD", None, "GOLD", "TVC", "Gold Spot (XAU/USD)", "الذهب (أونصة عالمية)", "Precious Metals"),
+    ("XAGUSD", "COMMODITIES", "Global", "USD", None, "SILVER", "TVC", "Silver Spot (XAG/USD)", "الفضة (أونصة عالمية)", "Precious Metals"),
 
     # ================= DFM (Dubai Financial Market) =================
     ("EMAAR", "DFM", "UAE", "AED", "EMAAR.AE", "EMAAR", "DFM", "Emaar Properties", "إعمار العقارية", "Real Estate"),
@@ -88,12 +88,11 @@ GCC_AND_METALS_UNIVERSE: List[InstrumentDef] = [
     ("ADNOCDIST", "ADX", "UAE", "AED", None, "ADNOCDIST", "ADX", "ADNOC Distribution", "أدنوك للتوزيع", "Energy"),
     ("ADNOCDRILL", "ADX", "UAE", "AED", None, "ADNOCDRILL", "ADX", "ADNOC Drilling", "أدنوك للحفر", "Energy"),
     ("ADNOCLS", "ADX", "UAE", "AED", None, "ADNOCLS", "ADX", "ADNOC Logistics & Services", "أدنوك للإمداد والخدمات", "Transportation"),
-    ("FERTIGLBE", "ADX", "UAE", "AED", None, "FERTIGLBE", "ADX", "Fertiglobe", "فيرتيغلوب", "Materials"),
+    ("FERTIGLBE", "ADX", "UAE", "AED", None, "FERTIGLB", "ADX", "Fertiglobe", "فيرتيغلوب", "Materials"),
     ("BOROUGE", "ADX", "UAE", "AED", None, "BOROUGE", "ADX", "Borouge", "بروج", "Materials"),
     ("ALPHADHABI", "ADX", "UAE", "AED", None, "ALPHADHABI", "ADX", "Alpha Dhabi Holding", "ألفا ظبي القابضة", "Conglomerates"),
     ("MULTIPLY", "ADX", "UAE", "AED", None, "MULTIPLY", "ADX", "Multiply Group", "مجموعة ملتيبلاي", "Conglomerates"),
     ("DANA", "ADX", "UAE", "AED", None, "DANA", "ADX", "Dana Gas", "دانة غاز", "Energy"),
-    ("TAQA", "ADX", "UAE", "AED", None, "TAQA", "ADX", "Abu Dhabi National Energy (TAQA)", "طاقة أبوظبي", "Utilities"),
     ("PRESIGHT", "ADX", "UAE", "AED", None, "PRESIGHT", "ADX", "Presight AI Holding", "بريسايت للذكاء الاصطناعي", "Technology"),
     ("SPACE42", "ADX", "UAE", "AED", None, "SPACE42", "ADX", "Space42", "سبيس 42", "Technology"),
     ("NMDC", "ADX", "UAE", "AED", None, "NMDC", "ADX", "NMDC Group", "الجرافات البحرية الوطنية", "Industrials"),
@@ -101,7 +100,7 @@ GCC_AND_METALS_UNIVERSE: List[InstrumentDef] = [
     ("BURJEEL", "ADX", "UAE", "AED", None, "BURJEEL", "ADX", "Burjeel Holdings", "برجيل القابضة", "Healthcare"),
     ("PUREHEALTH", "ADX", "UAE", "AED", None, "PUREHEALTH", "ADX", "PureHealth Holding", "بيور هيلث", "Healthcare"),
     ("MODON", "ADX", "UAE", "AED", None, "MODON", "ADX", "Modon Holding", "مدن القابضة", "Real Estate"),
-    ("PHOENIX", "ADX", "UAE", "AED", None, "PHOENIX", "ADX", "Phoenix Group", "مجموعة فينيكس", "Technology"),
+    ("PHOENIX", "ADX", "UAE", "AED", None, "PHX", "ADX", "Phoenix Group", "مجموعة فينيكس", "Technology"),
     ("AGTHIA", "ADX", "UAE", "AED", None, "AGTHIA", "ADX", "Agthia Group", "مجموعة أغذية", "Consumer"),
     ("ASM", "ADX", "UAE", "AED", None, "ASM", "ADX", "Al Seer Marine", "السير للمعدات البحرية", "Industrials"),
     ("ESG", "ADX", "UAE", "AED", None, "ESG", "ADX", "Emirates Stallions Group", "إي إس جي ستاليونز", "Real Estate"),
@@ -111,13 +110,13 @@ GCC_AND_METALS_UNIVERSE: List[InstrumentDef] = [
     ("RAKBANK", "ADX", "UAE", "AED", None, "RAKBANK", "ADX", "RAKBank", "بنك رأس الخيمة الوطني", "Banks"),
     ("SIB", "ADX", "UAE", "AED", None, "SIB", "ADX", "Sharjah Islamic Bank", "مصرف الشارقة الإسلامي", "Banks"),
     ("BOS", "ADX", "UAE", "AED", None, "BOS", "ADX", "Bank of Sharjah", "بنك الشارقة", "Banks"),
-    ("DRIVE", "ADX", "UAE", "AED", None, "DRIVE", "ADX", "Emirates Driving Company", "الإمارات لتعليم قيادة السيارات", "Consumer"),
+    ("DRIVE", "ADX", "UAE", "AED", None, "EMOBILITY", "ADX", "Emirates Mobility (formerly Driving)", "الإمارات للتنقل (لتعليم القيادة سابقاً)", "Consumer"),
     ("RAKPROP", "ADX", "UAE", "AED", None, "RAKPROP", "ADX", "RAK Properties", "رأس الخيمة العقارية", "Real Estate"),
     ("ESHRAQ", "ADX", "UAE", "AED", None, "ESHRAQ", "ADX", "Eshraq Investments", "إشراق للاستثمار", "Real Estate"),
     ("WAHA", "ADX", "UAE", "AED", None, "WAHA", "ADX", "Waha Capital", "الواحة كابيتال", "Financial Services"),
     ("YAHSAT", "ADX", "UAE", "AED", None, "ALPHADATA", "ADX", "Alpha Data", "ألفا داتا", "Technology"),
     ("ADNH", "ADX", "UAE", "AED", None, "ADNH", "ADX", "Abu Dhabi National Hotels", "أبوظبي الوطنية للفنادق", "Consumer"),
-    ("RAKCER", "ADX", "UAE", "AED", None, "RAKCER", "ADX", "RAK Ceramics", "سيراميك رأس الخيمة", "Materials"),
+    ("RAKCER", "ADX", "UAE", "AED", None, "RAKCEC", "ADX", "RAK Ceramics", "سيراميك رأس الخيمة", "Materials"),
 
     # ================= QSE (Qatar Stock Exchange) =================
     ("QNBK", "QSE", "Qatar", "QAR", "QNBK.QA", "QNBK", "QSE", "Qatar National Bank (QNB)", "بنك قطر الوطني", "Banks"),
@@ -219,7 +218,10 @@ def _df_to_bars(df: pd.DataFrame, symbol: str, exchange: str, source: str) -> Li
         close = _clean_float(row.get(c_close))
         if close is None or close <= 0:
             continue
-        date_val = idx.date().isoformat() if hasattr(idx, "date") else str(idx)[:10]
+        eff_idx = idx
+        if exchange == "COMMODITIES" and hasattr(idx, "hour") and int(idx.hour) >= 21:
+            eff_idx = idx + dt.timedelta(days=1)
+        date_val = eff_idx.date().isoformat() if hasattr(eff_idx, "date") else str(eff_idx)[:10]
         if date_val in seen_dates or date_val < "2010-01-01":
             continue
         seen_dates.add(date_val)
@@ -310,7 +312,7 @@ def _fetch_tv_missing(
 
     def _fetch_one(it: InstrumentDef) -> Tuple[Tuple[str, str], List[Dict[str, Any]]]:
         sym, exch, _, _, _, tv_sym, tv_exch, _, _, _ = it
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 df = _get_tv().get_hist(symbol=tv_sym, exchange=tv_exch, interval=Interval.in_daily, n_bars=n_bars)
                 if df is not None and not df.empty:
@@ -427,7 +429,7 @@ def _sync_recent_stock_prices(
                 "close": b["close"],
                 "adjusted_close": b["close"],
                 "volume": int(round(b["volume"])),
-                "source": b.get("source", "yahoo"),
+                "source": b.get("source") or ("tradingview" if exchange in ("ADX", "COMMODITIES") else "yahoo"),
                 "updated_at": now_iso,
             })
     if not rows:
@@ -703,6 +705,11 @@ def run_gcc_metals_sync(
             )
 
         db_price_rows = _sync_recent_stock_prices(sb, exch, stock_id_map, exch_bars, recent_limit=recent_db_limit)
+        try:
+            from api.saudi_storage_history import DB_RETENTION_CALENDAR_DAYS, prune_old_stock_prices
+            prune_old_stock_prices(sb, exch, keep_days=DB_RETENTION_CALENDAR_DAYS)
+        except Exception as prune_exc:
+            print(f"[GCC-SYNC] Prune warning for {exch}: {prune_exc}")
         ind_count = _compute_and_upsert_indicators(sb, exch, exch_bars)
         idx_count = _sync_market_index(sb, exch, exch_bars)
         summary[exch] = {

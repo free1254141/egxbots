@@ -479,6 +479,22 @@ def sync_saudi_daily_prices(
     if upsert_rows:
         invalidate_saudi_history_cache()
 
+    if phase == "close" and upsert_rows and latest_date and hasattr(sb, "storage"):
+        try:
+            from api.saudi_storage_history import (
+                DB_RETENTION_CALENDAR_DAYS,
+                load_storage_metadata,
+                prune_old_stock_prices,
+                refresh_exchange_storage_archive,
+            )
+
+            st_meta = load_storage_metadata(sb, "TADAWUL")
+            if str(st_meta.get("last_date") or "")[:10] < latest_date:
+                refresh_exchange_storage_archive(sb, "TADAWUL", bars_by_sym)
+                prune_old_stock_prices(sb, "TADAWUL", keep_days=DB_RETENTION_CALENDAR_DAYS)
+        except Exception as st_exc:
+            print(f"[SAUDI-PRICE-SYNC] Storage archive/prune warning: {st_exc}")
+
     if latest_date:
         latest_synced_syms = {
             s for s in synced_syms

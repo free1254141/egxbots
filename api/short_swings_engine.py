@@ -417,6 +417,19 @@ def _load_saudi_price_dataframe(start_date: str = SAUDI_START_DATE) -> pd.DataFr
 
     df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     sb = _get_saudi_supabase_client()
+    if df.empty and sb is not None:
+        try:
+            from api.saudi_storage_history import load_storage_exchange_df
+            st_df = load_storage_exchange_df(sb, "TADAWUL")
+            if st_df is not None and not st_df.empty:
+                st_df = st_df[st_df["date"] >= start_date].copy()
+                if not st_df.empty:
+                    df = st_df
+                    max_st_d = str(df["date"].max())[:10]
+                    max_cached_date = (pd.Timestamp(max_st_d) - pd.Timedelta(days=14)).strftime("%Y-%m-%d")
+        except Exception as st_err:
+            print(f"[SHORT_SWINGS] Saudi Storage fallback warning: {st_err}")
+
     if sb:
         try:
             tail_start = max_cached_date or start_date
@@ -442,6 +455,7 @@ def _load_saudi_price_dataframe(start_date: str = SAUDI_START_DATE) -> pd.DataFr
                 if all_tail:
                     df_tail = pd.DataFrame(all_tail)
                     df = pd.concat([df, df_tail], ignore_index=True) if not df.empty else df_tail
+                    df = df.drop_duplicates(subset=["symbol", "date"], keep="last").reset_index(drop=True)
             else:
                 # Parallel per-symbol fetch when local pickle cache is absent
                 stocks_res = (
