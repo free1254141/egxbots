@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 import { 
     TrendingUp, 
     TrendingDown, 
@@ -89,6 +90,7 @@ export interface StockData {
     composite_grade?: string;
     compositeVerdict?: string;
     composite_verdict?: string;
+    scoreFormula?: string;
 
     // Optional 30-session chart payload from backend (client SVG rendered)
     chartData?: StockChartSeries;
@@ -197,10 +199,18 @@ export function StockCard({
             rsiLabel = "تشبع بيعي (فرصة)";
             rsiColor = "text-emerald-500 bg-emerald-500/10 border-emerald-500/30";
             rsiProgressColor = "bg-emerald-500";
-        } else if (rsiVal > 50) {
+        } else if (rsiVal > 55) {
             rsiLabel = "زخم صاعد";
             rsiColor = "text-emerald-500 bg-emerald-500/10 border-emerald-500/30";
             rsiProgressColor = "bg-emerald-500";
+        } else if (rsiVal >= 45) {
+            rsiLabel = "محايد";
+            rsiColor = "text-slate-600 dark:text-slate-300 bg-slate-500/10 border-slate-500/30";
+            rsiProgressColor = "bg-slate-400";
+        } else {
+            rsiLabel = "زخم ضعيف";
+            rsiColor = "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30";
+            rsiProgressColor = "bg-amber-500";
         }
     }
 
@@ -350,7 +360,7 @@ export function StockCard({
 
         try {
             const numPrice = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice : null;
-            const res = await fetch("/api/portfolio", {
+            const res = await hfAuthFetch("/api/portfolio", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -359,7 +369,7 @@ export function StockCard({
                     quantity: 100,
                     price: numPrice
                 })
-            });
+            }, { requireToken: true });
 
             const resData = await res.json().catch(() => ({}));
 
@@ -452,7 +462,7 @@ export function StockCard({
                                     : compositeScoreVal >= 50
                                         ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40"
                                         : "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40"
-                        }`} title={compositeVerdict || `السكور الإجمالي: ${compositeScoreVal}/100`}>
+                        }`} title={stockData.scoreFormula || compositeVerdict || `السكور الإجمالي: ${compositeScoreVal}/100`}>
                             <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-500 shrink-0" />
                             <span>سكور: {compositeScoreVal}/100</span>
                             {compositeGrade && <span className="opacity-80">({compositeGrade})</span>}
@@ -567,7 +577,7 @@ export function StockCard({
                 support2={parseFirstNum(support2)}
                 resistance1={parseFirstNum(resistance1)}
                 target1={parseFirstNum(target1)}
-                target2={parseFirstNum(target2)}
+                target2={parseFirstNum(target2) ?? parseFirstNum(resistance2)}
                 currency={currency}
             />
 

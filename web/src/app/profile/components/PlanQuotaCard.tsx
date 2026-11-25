@@ -6,6 +6,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { broadcastEntitlements } from "@/lib/entitlements";
 import { fetchUserQuotaCached } from "@/lib/user-quota-client";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
 import { triggerTrialSuccessModal } from "@/lib/trial-onboarding";
 import {
@@ -108,7 +109,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
       const shouldForce = fromBroadcast || forceRefresh || refreshTrigger > 0;
       const json = userId
         ? await fetchUserQuotaCached(userId, { force: shouldForce })
-        : await fetch("/api/user/quota", { cache: "no-store" })
+        : await hfAuthFetch("/api/user/quota", { cache: "no-store" }, { requireToken: true })
             .then((res) => (res.ok ? res.json() : null))
             .catch(() => null);
       if (json?.ok) {

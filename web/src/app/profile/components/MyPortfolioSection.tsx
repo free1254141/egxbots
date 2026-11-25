@@ -16,6 +16,7 @@ import PortfolioTransactions from "./PortfolioTransactions";
 import PortfolioRebalancerModal from "./PortfolioRebalancerModal";
 import PortfolioDividendsCard from "@/components/dividends/PortfolioDividendsCard";
 import { usePortfolioReport } from "./usePortfolioReport";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 import styles from "./MyPortfolioSection.module.css";
 
 
@@ -110,11 +111,11 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
     const api = useCallback(async (body: Record<string, unknown>) => {
         setBusy(true);
         try {
-            const res = await fetch("/api/portfolio", {
+            const res = await hfAuthFetch("/api/portfolio", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
-            });
+            }, { requireToken: true });
             const data = await res.json();
             if (data.ok) {
                 toast.success(data.message);

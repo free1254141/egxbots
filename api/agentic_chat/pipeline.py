@@ -392,6 +392,13 @@ def _collect_structured_outputs(
                     if s.get("support_1_is_distant") and s.get("tactical_stop_loss")
                     else s.get("stop_loss")
                 )
+                eff_sup1 = (
+                    s.get("tactical_support")
+                    if s.get("support_1_is_distant") and s.get("tactical_support")
+                    else s.get("support_1")
+                )
+                if s.get("support_1_is_distant") and s.get("support_1") is not None and q_copy.get("structural_support_1") is None:
+                    q_copy["structural_support_1"] = s.get("support_1")
                 for _k, _v in (
                     ("change_pct", s.get("change_pct")),
                     ("rsi_14", s.get("rsi_14")),
@@ -399,13 +406,18 @@ def _collect_structured_outputs(
                     ("ema_50", s.get("ema_50")),
                     ("ema_200", s.get("ema_200")),
                     ("stop_loss", eff_sl),
-                    ("support_1", s.get("support_1")),
+                    ("support_1", eff_sup1),
                     ("support_2", s.get("support_2")),
                     ("resistance_1", s.get("resistance_1")),
                     ("resistance_2", s.get("resistance_2")),
                     ("king_ai_score", s.get("king_ai_score")),
                     ("wyckoff_phase", s.get("wyckoff_phase")),
                     ("macd", s.get("macd")),
+                    ("tactical_support", s.get("tactical_support")),
+                    ("support_1_is_distant", s.get("support_1_is_distant")),
+                    ("risk_reward_from_close", s.get("risk_reward_from_close")),
+                    ("tactical_risk_reward", s.get("tactical_risk_reward")),
+                    ("technical_rating_ar", s.get("technical_rating_ar")),
                 ):
                     if _v is not None and q_copy.get(_k) is None:
                         q_copy[_k] = _v
@@ -484,14 +496,17 @@ def _compact_llm_value(val: Any, *, trim_diag: bool = False) -> Any:
                 continue
             if v is None and k not in _KEEP_NULL_LLM_KEYS:
                 continue
+            out_k = "distribution_strength" if k == "dist_score" else k
+            if out_k in out and k != out_k:
+                continue
             if trim_diag and k == "fundamental_diagnosis" and isinstance(v, dict):
                 diag_clean = _compact_llm_value(v, trim_diag=False)
                 for list_k in ("strengths", "weaknesses", "risks", "details"):
                     if isinstance(diag_clean.get(list_k), list) and len(diag_clean[list_k]) > 2:
                         diag_clean[list_k] = diag_clean[list_k][:2]
-                out[k] = diag_clean
+                out[out_k] = diag_clean
             else:
-                out[k] = _compact_llm_value(v, trim_diag=trim_diag)
+                out[out_k] = _compact_llm_value(v, trim_diag=trim_diag)
         return out
     if isinstance(val, list):
         return [_compact_llm_value(item, trim_diag=trim_diag) for item in val]
@@ -1483,7 +1498,10 @@ async def _run_agentic_chat_stream_impl(
 
     # Canonical Market / Accumulation Preset Fast-Track (eliminates Round-1 LLM tool-selection overhead)
     elif (
-        candidate_cache_key in ("vip_accumulation", "vip_market_summary")
+        (
+            candidate_cache_key in ("vip_accumulation", "vip_market_summary")
+            or (candidate_cache_key == "vip_market_pulse_and_recs" and allow_recommendations)
+        )
         and is_standalone_allowed
         and not has_user_rules
         and not is_cross_market
@@ -1497,6 +1515,12 @@ async def _run_agentic_chat_stream_impl(
             preset_tool_specs = [
                 ("get_accumulation_stocks", {"market": preset_mkt_ui}),
                 ("get_technical_scan", {"preset": "momentum_and_volume", "market": preset_mkt_ui}),
+            ]
+        elif candidate_cache_key == "vip_market_pulse_and_recs":
+            preset_tool_specs = [
+                ("get_market", {"market": preset_mkt_ui}),
+                ("get_technical_scan", {"preset": "momentum_and_volume", "market": preset_mkt_ui}),
+                ("get_recommendations", {"status": "open", "market": preset_mkt_ui}),
             ]
         else:
             preset_tool_specs = [

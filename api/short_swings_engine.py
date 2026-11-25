@@ -421,9 +421,9 @@ def _load_saudi_price_dataframe(start_date: str = SAUDI_START_DATE) -> pd.DataFr
         try:
             from api.saudi_storage_history import load_storage_exchange_df
             st_df = load_storage_exchange_df(sb, "TADAWUL")
-            if st_df is not None and not st_df.empty:
+            if st_df is not None and not st_df.empty and st_df["symbol"].nunique() >= 200:
                 st_df = st_df[st_df["date"] >= start_date].copy()
-                if not st_df.empty:
+                if not st_df.empty and st_df["symbol"].nunique() >= 200:
                     df = st_df
                     max_st_d = str(df["date"].max())[:10]
                     max_cached_date = (pd.Timestamp(max_st_d) - pd.Timedelta(days=14)).strftime("%Y-%m-%d")

@@ -140,7 +140,7 @@ def _compute_kpis_from_trades(
 
 
 def _load_saudi_stocks_meta(sb) -> Tuple[List[str], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    res = sb.table("stocks").select("symbol,name,name_ar,sector").execute()
+    res = sb.table("stocks").select("symbol,name,name_ar,sector").eq("exchange", "TADAWUL").execute()
     meta: Dict[str, Dict[str, Any]] = {}
     stocks_by_sym: Dict[str, Dict[str, Any]] = {}
     symbols: List[str] = []
@@ -246,6 +246,7 @@ def _load_saudi_history_for_systems(
                     "stock_prices",
                     "symbol,date,open,high,low,close,volume",
                     gt_date=max_price_date,
+                    eq_filters={"exchange": "TADAWUL"},
                 )
                 if tail_prices:
                     by_sym: Dict[str, List[Dict[str, Any]]] = defaultdict(list)

@@ -121,7 +121,7 @@ export default function NewsStats({
                 const queryStr = params.toString();
                 if (queryStr) url += `?${queryStr}`;
 
-                const res = await fetch(url, { signal: controller.signal });
+                const res = await hfPublicFetch(url, { signal: controller.signal }, { cacheTtlMs: 120_000 });
                 if (res.ok) {
                     const data = await res.json();
                     if (!controller.signal.aborted) setStats(data);

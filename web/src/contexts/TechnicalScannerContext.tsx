@@ -11,6 +11,7 @@ import React, {
   type ReactNode,
 } from "react";
 import { scanTech, type TechFilter, type TechResult } from "@/lib/api";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 
 type Updater<T> = Partial<T> | ((prev: T) => T);
 
@@ -494,7 +495,7 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
       } catch {}
 
       if (shouldSendScanEvent) {
-        void fetch("/api/analytics/events", {
+        void hfAuthFetch("/api/analytics/events", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -509,7 +510,7 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
               filter_count: activeFilters.length,
             },
           }),
-        }).catch(() => { /* non-critical */ });
+        }, { requireToken: true }).catch(() => { /* non-critical */ });
       }
 
     } catch (err: unknown) {

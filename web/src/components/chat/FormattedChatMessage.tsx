@@ -6,6 +6,7 @@ import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, B
 import { toast } from "sonner";
 import StockCard, { StockData } from "./StockCard";
 import StockLogo from "@/components/StockLogo";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 import {
     ChatVisualsPayload,
     ComparisonMirrorCard,
@@ -354,6 +355,7 @@ export function tryParseAnalysisTable(
     let compositeScore: number | undefined;
     let compositeGrade: string | undefined;
     let compositeVerdict: string | undefined;
+    let scoreFormula: string | undefined;
     let tableShariah: boolean | undefined;
 
     for (const row of rows) {
@@ -622,6 +624,7 @@ export function tryParseAnalysisTable(
         compositeScore = calculated.totalScore;
         compositeGrade = calculated.grade;
         compositeVerdict = calculated.verdictLabel;
+        scoreFormula = calculated.summaryArabic;
     }
 
     // Sanity check: ensure price levels make financial sense
@@ -689,7 +692,8 @@ export function tryParseAnalysisTable(
         compositeGrade,
         composite_grade: compositeGrade,
         compositeVerdict,
-        composite_verdict: compositeVerdict
+        composite_verdict: compositeVerdict,
+        scoreFormula
     };
 }
 
@@ -1400,11 +1404,11 @@ export function FormattedChatMessage({
         setSavingToPortfolio(true);
         setPortfolioFeedback(null);
         try {
-            const res = await fetch("/api/portfolio", {
+            const res = await hfAuthFetch("/api/portfolio", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ action: "extract_and_save", text: content, userQuery: userQuery || undefined, suggestedButtons: suggestedButtons || undefined }),
-            });
+            }, { requireToken: true });
             const data = await res.json();
             if (res.status === 401 || data.requiresAuth) {
                 setPortfolioFeedback({
@@ -1518,13 +1522,32 @@ export function FormattedChatMessage({
         }
         if (s.ema50 === undefined && q.ema_50 != null) s.ema50 = q.ema_50;
         if (s.ema200 === undefined && q.ema_200 != null) s.ema200 = q.ema_200;
-        if (s.stopLoss === undefined && s.stop_loss === undefined && q.stop_loss != null) {
+        if (q.stop_loss != null) {
             s.stopLoss = q.stop_loss;
+            if (s.stop_loss !== undefined) s.stop_loss = q.stop_loss;
         }
-        if (s.support1 === undefined && q.support_1 != null) s.support1 = q.support_1;
+        if (q.support_1 != null) s.support1 = q.support_1;
         if (s.support2 === undefined && q.support_2 != null) s.support2 = q.support_2;
-        if (s.resistance1 === undefined && q.resistance_1 != null) s.resistance1 = q.resistance_1;
-        if (s.resistance2 === undefined && q.resistance_2 != null) s.resistance2 = q.resistance_2;
+        if (q.resistance_1 != null) s.resistance1 = q.resistance_1;
+        if (q.resistance_2 != null) s.resistance2 = q.resistance_2;
+        if (q.setup_regime_label_ar || q.technical_rating_ar) {
+            s.recommendation = q.setup_regime_label_ar || q.technical_rating_ar || s.recommendation;
+        }
+        if (typeof q.conviction_score === "number") {
+            const cScore = Math.round(q.conviction_score);
+            const cGrade = cScore >= 80 ? "A+" : cScore >= 68 ? "A" : cScore >= 52 ? "B" : cScore >= 38 ? "C" : "D";
+            s.compositeScore = cScore;
+            s.composite_score = cScore;
+            s.compositeGrade = cGrade;
+            s.composite_grade = cGrade;
+            if (q.setup_regime_label_ar) {
+                s.compositeVerdict = q.setup_regime_label_ar;
+                s.composite_verdict = q.setup_regime_label_ar;
+            }
+            if (q.score_formula_ar) {
+                s.scoreFormula = q.score_formula_ar;
+            }
+        }
         if (s.king_ai_score === undefined && s.kingScore === undefined && q.king_ai_score != null) {
             s.king_ai_score = q.king_ai_score;
             s.kingScore = q.king_ai_score;
@@ -2212,23 +2235,55 @@ export function FormattedChatMessage({
 
             {showScheduleModal && (() => {
                 // Enrich ambiguous follow-up prompts (e.g. "طب انا اشتريت على ١ جنيه") with the
-                // stock ticker discussed in the assistant reply so daily runs always know the stock.
+                // stock ticker or portfolio context discussed in the assistant reply, skipping indicator acronyms & years.
                 const rawQuery = (userQuery || "").trim();
-                const contentSymMatch =
-                    content.match(/\(([A-Z]{2,10}|\d{4})\)/) ||
-                    content.match(/EGX:([A-Z]{2,10})/);
-                const replySym = contentSymMatch ? contentSymMatch[1].toUpperCase() : "";
+                const NON_TICKER_ACRONYMS = new Set([
+                    "VWAP", "EMA", "SMA", "RSI", "MACD", "ATR", "ADX", "OBV", "CMF", "DCA",
+                    "HHI", "GMV", "ROE", "ROA", "ROIC", "EPS", "EBITDA", "EGP", "SAR", "USD",
+                    "AED", "QAR", "KWD", "TASI", "TADAWUL", "QSE", "DFM", "KSE", "EGX",
+                    "AI", "OR", "SL", "TP", "BULL", "BEAR", "FVG", "BOS", "PDF", "UTC", "VIP", "PRO", "CVAR",
+                ]);
+                const SAUDI_YEAR_LOOKALIKE_TICKERS = new Set(["2001", "2010", "2020", "2030"]);
+                let replySym = "";
+                const headerSymMatch = content.match(/^#{1,4}\s*📊?\s*(?:تحليل\s+سهم|سهم)\s+[^\n]*?\(([A-Z]{2,10}|\d{4})\)/m);
+                if (headerSymMatch && !NON_TICKER_ACRONYMS.has(headerSymMatch[1].toUpperCase())) {
+                    replySym = headerSymMatch[1].toUpperCase();
+                }
+                if (!replySym) {
+                    for (const m of content.matchAll(/\(([A-Z]{2,10}|\d{4})\)/g)) {
+                        const cand = m[1].toUpperCase();
+                        if (NON_TICKER_ACRONYMS.has(cand)) continue;
+                        if (/^\d{4}$/.test(cand) && !SAUDI_YEAR_LOOKALIKE_TICKERS.has(cand)) {
+                            const yr = Number(cand);
+                            if (yr >= 1990 && yr <= 2035) continue;
+                        }
+                        replySym = cand;
+                        break;
+                    }
+                }
+                if (!replySym) {
+                    const exMatch = content.match(/(?:EGX|TASI|DFM|ADX|QSE):([A-Z]{2,10}|\d{4})/);
+                    if (exMatch) replySym = exMatch[1].toUpperCase();
+                }
+                const isPortfolioReply =
+                    /(?:محفظتي|محفظتك|توزيع المحفظة|خطة التدوير|تدوير المحفظة|ال[أا]سهم المراد بيعها|اسهم البيع|إعادة التوازن)/.test(rawQuery) ||
+                    (/(?:ملخص المحفظة|تدوير المحفظة|مراكز المحفظة|وزن السهم في المحفظة)/.test(content) && !content.match(/^###\s*📊\s*تحليل سهم/m));
                 const queryHasSym =
                     !replySym ||
                     rawQuery.toUpperCase().includes(replySym) ||
-                    /(?:السوق|التوصيات|التجميع|المؤشر|السيولة|محفظت|أقوى الأسهم|افضل الأسهم|النهارده)/.test(rawQuery);
+                    /(?:السوق|التوصيات|التجميع|المؤشر|السيولة|محفظت|محفظ|ال[أا]سهم المراد بيعها|أقوى ال[أا]سهم|افضل ال[أا]سهم|النهارده)/.test(rawQuery);
+                const portfolioHasContext = /(?:محفظت|محفظ|السوق)/.test(rawQuery);
                 const enrichedPrompt = rawQuery
-                    ? (replySym && !queryHasSym ? `بخصوص سهم ${replySym}: ${rawQuery}` : rawQuery)
+                    ? (isPortfolioReply && !portfolioHasContext
+                        ? `بخصوص محفظتي: ${rawQuery}`
+                        : (replySym && !queryHasSym && !isPortfolioReply ? `بخصوص سهم ${replySym}: ${rawQuery}` : rawQuery))
                     : (content.length > 200 ? content.slice(0, 200) : content);
                 const enrichedTitle = rawQuery
-                    ? (replySym && !queryHasSym
-                        ? `متابعة ${replySym}: ${rawQuery.slice(0, 22)}`
-                        : `متابعة: ${rawQuery.slice(0, 30)}`)
+                    ? (isPortfolioReply && !portfolioHasContext
+                        ? `متابعة المحفظة: ${rawQuery.slice(0, 20)}`
+                        : (replySym && !queryHasSym && !isPortfolioReply
+                            ? `متابعة ${replySym}: ${rawQuery.slice(0, 22)}`
+                            : `متابعة: ${rawQuery.slice(0, 30)}`))
                     : undefined;
                 return (
                     <ScheduleAutomationModal

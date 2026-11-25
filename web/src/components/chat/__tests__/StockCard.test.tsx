@@ -409,7 +409,7 @@ describe("StockCard Component", () => {
         expect(screen.queryByText("14.0")).toBeNull();
         expect(screen.getByText(/0\.19x/)).toBeTruthy();
         expect(screen.getByText("7.9 : 1")).toBeTruthy();
-        expect(screen.getByText("R:R 1:7.9")).toBeTruthy();
+        expect(screen.getByText("R:R (حالي) 1:7.9")).toBeTruthy();
         expect(screen.queryByText("22.1 : 1")).toBeNull();
         expect(screen.queryByText("R:R 1:2.3")).toBeNull();
         expect(screen.queryByText(/EGX33 شرعي/)).toBeNull();
@@ -448,6 +448,7 @@ describe("StockCard Component", () => {
                             technical_score: 28,
                             fundamental_score: 73,
                             conviction_score: 40,
+                            score_formula_ar: "الصيغة المرجحة: 50% فني + 30% مالي + 20% مونت كارلو",
                             setup_regime: "value_in_downtrend",
                             setup_regime_label_ar: "⚖️ جودة مالية عالية مع سعر أعلى من القيمة العادلة ومسار هابط",
                             conflict_resolution_ar: "السهم قوي مالياً لكن سعره الحالي أعلى من القيمة العادلة",
@@ -476,7 +477,8 @@ describe("StockCard Component", () => {
         expect(screen.getByText(/0\.19x/)).toBeTruthy();
         expect(screen.getByText("72.13 ج.م")).toBeTruthy();
         expect(screen.getByText("7.9 : 1")).toBeTruthy();
-        expect(screen.getByText("R:R 1:7.9")).toBeTruthy();
+        expect(screen.getByText("R:R (حالي) 1:7.9")).toBeTruthy();
+        expect(screen.getByText(/سكور: 40\/100/)).toBeTruthy();
         expect(screen.getByTestId("quant-intelligence-card")).toBeTruthy();
     });
 });

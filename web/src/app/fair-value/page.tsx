@@ -106,13 +106,18 @@ export default async function FairValuePage() {
     ],
   };
 
+  const slimInitialReport =
+    initialReport && Array.isArray(initialReport.stocks)
+      ? { ...initialReport, stocks: initialReport.stocks.slice(0, 40) }
+      : initialReport;
+
   return (
     <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
-      <FairValueClient initialReport={initialReport} />
+      <FairValueClient initialReport={slimInitialReport} />
       <section dir="rtl" aria-label="أدوات التحليل المجانية ذات الصلة" className="mx-auto max-w-6xl px-4 pb-8">
         <nav className="flex flex-wrap items-center gap-3 border border-black/15 dark:border-white/15 bg-white/70 dark:bg-zinc-900/60 p-4 text-xs font-bold">
           <span className="text-zinc-900 dark:text-white font-black">أدوات مجانية مكملة:</span>

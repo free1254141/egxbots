@@ -109,13 +109,20 @@ export default async function StocksPage() {
     ]
   };
 
+  const compactStocks = stocks.map((s) => ({
+    symbol: s.symbol,
+    name: s.name,
+    sector: s.sector,
+    marketCap: s.marketCap ?? null,
+  }));
+
   return (
     <div className="w-full pt-5 sm:pt-7">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
-      <StocksClient initialStocks={stocks} initialTasiStocks={tasiStocks} />
+      <StocksClient initialStocks={compactStocks} initialTasiStocks={[]} />
     </div>
   );
 }

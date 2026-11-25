@@ -638,6 +638,38 @@ def _load_gcc_stock_page_data(clean_sym: str, exchanges: List[str]) -> Dict[str,
     stock_row = meta_rows[0] if meta_rows else None
     latest_price = price_rows[0] if price_rows else None
     latest_tech = tech_rows[0] if tech_rows else None
+
+    if latest_price is None or len(hist_rows) < 10:
+        try:
+            from api.saudi_storage_history import load_storage_symbol_bars, merge_bars_storage_with_live
+
+            cand_exchanges = (
+                [str(stock_row.get("exchange")).upper()]
+                if (stock_row and stock_row.get("exchange"))
+                else list(exchanges)
+            )
+            for cand_ex in cand_exchanges:
+                st_bars = load_storage_symbol_bars(sb, cand_ex, clean_sym)
+                if st_bars:
+                    merged_bars = merge_bars_storage_with_live(st_bars, list(reversed(hist_rows)))
+                    if merged_bars:
+                        hist_rows = list(reversed(merged_bars[-30:]))
+                        if latest_price is None:
+                            lb = merged_bars[-1]
+                            latest_price = {
+                                "symbol": clean_sym,
+                                "exchange": cand_ex,
+                                "date": lb["date"],
+                                "open": lb["open"],
+                                "high": lb["high"],
+                                "low": lb["low"],
+                                "close": lb["close"],
+                                "volume": lb["volume"],
+                            }
+                    break
+        except Exception:
+            pass
+
     if not stock_row and not latest_price:
         return {
             "snapshot": {"fundamentals": None, "latestPrice": None, "latestTech": None, "latestScan": None, "historicalPrices": [], "recentDisclosures": []},
@@ -780,6 +812,30 @@ def _load_stock_page_data(symbol: str, market: str, explicit_exchange: Optional[
     latest_tech = tech_rows[0] if tech_rows else None
     latest_scan = scan_rows[0] if scan_rows else None
     stock_meta = meta_rows[0] if meta_rows else None
+
+    if is_saudi and (latest_price is None or len(hist_rows) < 10):
+        try:
+            from api.saudi_storage_history import load_storage_symbol_bars, merge_bars_storage_with_live
+
+            st_bars = load_storage_symbol_bars(sb, "TADAWUL", clean_sym)
+            if st_bars:
+                merged_bars = merge_bars_storage_with_live(st_bars, list(reversed(hist_rows)))
+                if merged_bars:
+                    hist_rows = list(reversed(merged_bars[-30:]))
+                    if latest_price is None:
+                        lb = merged_bars[-1]
+                        latest_price = {
+                            "symbol": clean_sym,
+                            "exchange": "TADAWUL",
+                            "date": lb["date"],
+                            "open": lb["open"],
+                            "high": lb["high"],
+                            "low": lb["low"],
+                            "close": lb["close"],
+                            "volume": lb["volume"],
+                        }
+        except Exception:
+            pass
 
     if not is_saudi and not raw_fund and not latest_price:
         gcc_res = _load_gcc_stock_page_data(clean_sym, ["DFM", "ADX", "QSE", "COMMODITIES"])

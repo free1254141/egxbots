@@ -490,8 +490,9 @@ def sync_saudi_daily_prices(
 
             st_meta = load_storage_metadata(sb, "TADAWUL")
             if str(st_meta.get("last_date") or "")[:10] < latest_date:
-                refresh_exchange_storage_archive(sb, "TADAWUL", bars_by_sym)
-                prune_old_stock_prices(sb, "TADAWUL", keep_days=DB_RETENTION_CALENDAR_DAYS)
+                arch_res = refresh_exchange_storage_archive(sb, "TADAWUL", bars_by_sym)
+                if arch_res.get("ok") is True:
+                    prune_old_stock_prices(sb, "TADAWUL", keep_days=DB_RETENTION_CALENDAR_DAYS)
         except Exception as st_exc:
             print(f"[SAUDI-PRICE-SYNC] Storage archive/prune warning: {st_exc}")
 

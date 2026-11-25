@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, Award, BarChart3, Briefcase, Clock, Compass, Eye, EyeOff, Flame, HelpCircle, Scale, ShieldCheck, Target, TrendingUp } from "lucide-react";
 import type { ChatTable } from "@/contexts/ChatContext";
 import StockLogo from "@/components/StockLogo";
@@ -206,7 +206,7 @@ export function PriceLadderSvg({
                             dir="ltr"
                             className="px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-mono text-[10px]"
                         >
-                            R:R 1:{rrCalc}
+                            R:R ({scenario === "breakout" ? "اختراق" : "حالي"}) 1:{rrCalc}
                         </span>
                     )}
                 </div>
@@ -413,14 +413,16 @@ export function MiniPriceChartSvg({
                         {activePt.d} — {fmtCoord(activePt.c)} {currency}
                     </span>
                     <span
-                        dir="ltr"
-                        className={`font-mono px-1.5 py-0.5 rounded text-[10px] ${
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                             periodPct >= 0
                                 ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
                                 : "bg-rose-500/15 text-rose-700 dark:text-rose-400"
                         }`}
                     >
-                        {periodPct >= 0 ? "+" : ""}{periodPct.toFixed(1)}%
+                        تغير {pts.length} جلسة:{" "}
+                        <span dir="ltr" className="font-mono font-bold">
+                            {periodPct >= 0 ? "+" : ""}{periodPct.toFixed(1)}%
+                        </span>
                     </span>
                 </div>
 
@@ -618,9 +620,11 @@ export function MomentumLiquidityGauges({
                             ? "تشبع شرائي (حذر جني أرباح)"
                             : rsi! <= 35
                                 ? "تشبع بيعي (منطقة ارتداد)"
-                                : rsi! >= 50
-                                    ? "زخم إيجابي صحي"
-                                    : "تهدئة / ترقب"}
+                                : rsi! > 55
+                                    ? "زخم صاعد"
+                                    : rsi! >= 45
+                                        ? "محايد"
+                                        : "تهدئة / زخم ضعيف"}
                 </span>
             </div>
 
@@ -1868,10 +1872,30 @@ export function QuantIntelligenceCard({ items }: { items: QuantAnalysisItem[] })
                     <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${regimeTone}`}>
                         {item.setup_regime_label_ar || item.setup_regime}
                     </span>
+                    {item.market_regime?.label_ar && (
+                        <span
+                            data-testid="market-regime-pill"
+                            className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                                item.market_regime.state === "panic"
+                                    ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/40"
+                                    : item.market_regime.state === "distribution" || item.market_regime.state === "corrective"
+                                        ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                                        : item.market_regime.state === "momentum"
+                                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                                            : "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30"
+                            }`}
+                            title={item.market_regime.action_guidance_ar || undefined}
+                        >
+                            {item.market_regime.label_ar}
+                        </span>
+                    )}
                 </div>
                 <div className="flex items-center gap-1.5 text-[10px] font-mono">
                     {typeof item.conviction_score === "number" && (
-                        <span className="px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-bold">
+                        <span
+                            className="px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-bold"
+                            title={item.score_formula_ar || undefined}
+                        >
                             ثقة كمية {item.conviction_score}/100
                         </span>
                     )}
@@ -1907,6 +1931,8 @@ export function QuantIntelligenceCard({ items }: { items: QuantAnalysisItem[] })
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
                     <span className="font-bold text-zinc-700 dark:text-zinc-200">
                         احتمالات {mc.horizon_days || 10} جلسات ({(mc.paths_count || 5000).toLocaleString()} مسار | حد ±{mc.daily_limit_pct || 20}%)
+                        {mc.simulation_model ? ` • ${mc.simulation_model}` : ""}
+                        {typeof mc.jump_risk_pct === "number" && mc.jump_risk_pct > 0 ? ` | مخاطر فجوات ${mc.jump_risk_pct}%` : ""}
                     </span>
                     {mc.expected_10d_range && (
                         <span dir="ltr" className="font-mono text-zinc-600 dark:text-zinc-400">
@@ -1944,6 +1970,26 @@ export function QuantIntelligenceCard({ items }: { items: QuantAnalysisItem[] })
                         وقف ({mc.stop_barrier}): {stopP}%
                     </span>
                 </div>
+                {(typeof mc.cvar_10_pct === "number" || typeof mc.fractional_kelly_pct === "number") && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-zinc-200/60 dark:border-white/10 text-[10px]">
+                        {typeof mc.cvar_10_pct === "number" && (
+                            <span
+                                className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-700 dark:text-rose-300 font-semibold"
+                                title="متوسط أسوأ 10% من السيناريوهات (Conditional Value at Risk)"
+                            >
+                                مخاطر الذيل (CVaR 10%): <span dir="ltr" className="font-mono">{mc.cvar_10_pct >= 0 ? "+" : ""}{mc.cvar_10_pct.toFixed(1)}%</span>
+                            </span>
+                        )}
+                        {typeof mc.fractional_kelly_pct === "number" && (
+                            <span
+                                className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-semibold"
+                                title="الحجم الرياضي الأقصى للصفقة وفق معيار ربع كيلي (Quarter-Kelly)"
+                            >
+                                حجم كيلي (¼): <span dir="ltr" className="font-mono">{mc.fractional_kelly_pct.toFixed(1)}%</span> من المحفظة
+                            </span>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Bull vs Bear Deterministic Debate */}
@@ -1990,9 +2036,66 @@ export function QuantIntelligenceCard({ items }: { items: QuantAnalysisItem[] })
 }
 
 /**
- * Interactive Operations Research Smart DCA & Break-Even Optimizer Card.
+ * Interactive Operations Research Smart DCA & Break-Even Optimizer Card
+ * with client-side Generative UI budget slider (0 backend / 0 LLM cost).
  */
 export function SmartDcaPlanCard({ plan }: { plan: SmartDcaPlanItem }) {
+    const tranchesList = useMemo(() => plan?.tranches || [], [plan?.tranches]);
+    const inferredBudget = useMemo(() => {
+        if (typeof plan?.dca_budget === "number" && plan.dca_budget > 0) return plan.dca_budget;
+        const sum = tranchesList.reduce((acc, t) => acc + Number(t.cost || 0) + Number(t.fee || 0), 0);
+        return sum > 0 ? Math.round(sum) : 0;
+    }, [plan?.dca_budget, tranchesList]);
+
+    const [sliderBudget, setSliderBudget] = useState<number>(inferredBudget);
+    useEffect(() => {
+        setSliderBudget(inferredBudget);
+    }, [inferredBudget, plan?.symbol]);
+
+    const isSliderReady = Boolean(
+        plan?.dca_allowed &&
+        inferredBudget > 0 &&
+        typeof plan?.old_shares === "number" &&
+        plan.old_shares > 0 &&
+        typeof plan?.old_avg_price === "number" &&
+        plan.old_avg_price > 0 &&
+        tranchesList.length > 0
+    );
+
+    const minBudget = Math.min(inferredBudget, Math.max(500, Math.round((inferredBudget * 0.25) / 100) * 100));
+    const maxBudget = Math.max(inferredBudget * 3, inferredBudget + 5000);
+    const stepBudget = inferredBudget >= 5000 ? 500 : 100;
+    const isAdjusted = isSliderReady && Math.abs(sliderBudget - inferredBudget) >= 1;
+
+    const { displayedTranches, displayedNewAvg } = useMemo(() => {
+        if (!isAdjusted) {
+            return { displayedTranches: tranchesList, displayedNewAvg: plan?.new_avg_price_full };
+        }
+        const t0 = tranchesList[0];
+        const feeRate = t0 && t0.cost > 0 && typeof t0.fee === "number" && t0.fee >= 0
+            ? t0.fee / t0.cost
+            : 0.002;
+        let cumShares = Number(plan?.old_shares || 0);
+        let cumCost = cumShares * Number(plan?.old_avg_price || 0);
+        const recomputed = tranchesList.map((t) => {
+            const tBudget = sliderBudget * (Number(t.weight_pct || 0) / 100);
+            const lp = Number(t.limit_price) || 0;
+            const shares = lp > 0 ? Math.floor(tBudget / (lp * (1 + feeRate))) : 0;
+            const cost = Number((shares * lp).toFixed(2));
+            const fee = Number((cost * feeRate).toFixed(2));
+            cumShares += shares;
+            cumCost += cost + fee;
+            const dec = lp < 5 ? 3 : 2;
+            const avgAfter = cumShares > 0 ? Number((cumCost / cumShares).toFixed(dec)) : Number(plan?.old_avg_price || 0);
+            return { ...t, shares, cost, fee, avg_after: avgAfter };
+        });
+        const firstPx = Number(t0?.limit_price || 10);
+        const newAvgFull = cumShares > 0
+            ? Number((cumCost / cumShares).toFixed(firstPx < 5 ? 3 : 2))
+            : plan?.new_avg_price_full;
+        return { displayedTranches: recomputed, displayedNewAvg: newAvgFull };
+    }, [isAdjusted, tranchesList, sliderBudget, plan?.old_shares, plan?.old_avg_price, plan?.new_avg_price_full]);
+
     if (!plan || !plan.symbol) return null;
     const curr = plan.currency || "ج.م";
 
@@ -2038,12 +2141,57 @@ export function SmartDcaPlanCard({ plan }: { plan: SmartDcaPlanItem }) {
                     🧮 خطة التبريد الذكي وفك التعلّق — {plan.symbol}
                 </span>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
-                    تخفيض المتوسط: {plan.old_avg_price} → {plan.new_avg_price_full} {curr}
+                    تخفيض المتوسط: {plan.old_avg_price} → {displayedNewAvg} {curr}
                 </span>
             </div>
 
+            {isSliderReady && (
+                <div className="rounded-lg bg-white/80 dark:bg-black/35 border border-emerald-500/25 p-2 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-bold">
+                        <label htmlFor={`dca-slider-${plan.symbol}`} className="text-zinc-700 dark:text-zinc-200">
+                            🎛️ تعديل ميزانية التبريد لحظياً:{" "}
+                            <span dir="ltr" className="font-mono text-emerald-700 dark:text-emerald-300">
+                                {sliderBudget.toLocaleString()} {curr}
+                            </span>
+                        </label>
+                        <div className="flex items-center gap-1">
+                            {[
+                                { label: "×0.5", val: Math.max(minBudget, Math.round((inferredBudget * 0.5) / stepBudget) * stepBudget) },
+                                { label: "المقترح", val: inferredBudget },
+                                { label: "×1.5", val: Math.min(maxBudget, Math.round((inferredBudget * 1.5) / stepBudget) * stepBudget) },
+                                { label: "×2", val: Math.min(maxBudget, Math.round((inferredBudget * 2) / stepBudget) * stepBudget) },
+                            ].map((preset) => (
+                                <button
+                                    key={preset.label}
+                                    type="button"
+                                    onClick={() => setSliderBudget(preset.val)}
+                                    className={`px-1.5 py-0.5 rounded border text-[10px] cursor-pointer transition ${
+                                        Math.abs(sliderBudget - preset.val) < 1
+                                            ? "bg-emerald-600 text-white border-emerald-600"
+                                            : "bg-transparent text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-white/15"
+                                    }`}
+                                >
+                                    {preset.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <input
+                        id={`dca-slider-${plan.symbol}`}
+                        data-testid="dca-budget-slider"
+                        type="range"
+                        min={minBudget}
+                        max={maxBudget}
+                        step={stepBudget}
+                        value={sliderBudget}
+                        onChange={(e) => setSliderBudget(Number(e.target.value))}
+                        className="w-full accent-emerald-600 cursor-pointer h-1.5"
+                    />
+                </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                {(plan.tranches || []).map((t) => (
+                {displayedTranches.map((t) => (
                     <div
                         key={t.tranche}
                         className="rounded-lg bg-white/90 dark:bg-black/40 border border-zinc-200/70 dark:border-white/10 p-2 space-y-0.5"

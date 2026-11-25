@@ -1,5 +1,7 @@
 "use client";
 
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+
 export const HF_DIRECT_ORIGIN = (
   process.env.NEXT_PUBLIC_HF_DIRECT_URL || "https://weeasdwee-ai-bot.hf.space"
 ).replace(/\/$/, "");
@@ -169,4 +171,69 @@ export async function hfPublicFetch(
     return buildJsonResponse(body, res.status, ct);
   }
   return res;
+}
+
+async function getSupabaseAccessToken(): Promise<string | null> {
+  try {
+    const sb = createSupabaseBrowserClient();
+    const { data } = await sb.auth.getSession();
+    return data?.session?.access_token || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch an authenticated (or dual public/user) HF endpoint directly from the browser
+ * using the Supabase JWT Bearer token (`credentials: "omit"`), bypassing Vercel Fast
+ * Origin Transfer while preserving SSE streaming and falling back seamlessly to
+ * same-origin `fetch()` on missing token (when `requireToken`), 401, 5xx, or network error.
+ */
+export async function hfAuthFetch(
+  pathAndQuery: string,
+  init?: RequestInit,
+  options?: { requireToken?: boolean }
+): Promise<Response> {
+  const targetPath = normalizePath(pathAndQuery);
+  if (!shouldUseDirectHf()) {
+    return fetch(targetPath, init);
+  }
+
+  const headers = new Headers(init?.headers);
+  let token = headers.get("authorization");
+  if (token && token.toLowerCase().startsWith("bearer ")) {
+    token = token.slice(7).trim();
+  } else {
+    token = await getSupabaseAccessToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+
+  if (options?.requireToken && !token) {
+    return fetch(targetPath, init);
+  }
+
+  const directUrl = `${HF_DIRECT_ORIGIN}${targetPath}`;
+  try {
+    const res = await fetch(directUrl, {
+      ...init,
+      headers,
+      credentials: "omit",
+    });
+    if (res.status === 401) {
+      return fetch(targetPath, init);
+    }
+    if (res.status >= 500) {
+      directHfDegradedUntil = Date.now() + DEGRADED_COOLDOWN_MS;
+      return fetch(targetPath, init);
+    }
+    return res;
+  } catch (err) {
+    if (isAbortError(err) || init?.signal?.aborted) {
+      throw err;
+    }
+    directHfDegradedUntil = Date.now() + DEGRADED_COOLDOWN_MS;
+    return fetch(targetPath, init);
+  }
 }

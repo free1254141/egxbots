@@ -105,12 +105,36 @@ export default function DisclosuresClient({
   const [isGlossaryOpen, setIsGlossaryOpen] = useState<boolean>(false);
 
   const [disclosures, setDisclosures] = useState<DisclosureItem[]>(initialDisclosures);
+  const [hydratedPool, setHydratedPool] = useState<DisclosureItem[]>(initialPool || []);
+  const [hydratedPriceMap, setHydratedPriceMap] = useState<Record<string, SymbolPriceInfo>>(priceMap || {});
   const [totalCount, setTotalCount] = useState<number>(initialStats.total || initialDisclosures.length);
   const [hasMore, setHasMore] = useState<boolean>(
     (initialStats.total || initialDisclosures.length) > initialDisclosures.length
   );
   const [loading, setLoading] = useState<boolean>(false);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isNonEgx || hydratedPool.length > 30) return;
+    let active = true;
+    const controller = new AbortController();
+    hfPublicFetch("/api/public/disclosures-page-data", { signal: controller.signal }, { cacheTtlMs: 300_000 })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload) => {
+        if (!active || !payload) return;
+        if (Array.isArray(payload.allPool) && payload.allPool.length > 0) {
+          setHydratedPool(payload.allPool);
+        }
+        if (payload.priceMap && typeof payload.priceMap === "object") {
+          setHydratedPriceMap(payload.priceMap);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [isNonEgx, hydratedPool.length]);
 
   const [search, setSearch] = useState<string>("");
   const [debouncedSearch, setDebouncedSearch] = useState<string>("");
@@ -364,8 +388,8 @@ export default function DisclosuresClient({
   // Analytical pool (all available disclosures in the dataset, merged and deduplicated)
   const basePool = useMemo(() => {
     const map = new Map<string, DisclosureItem>();
-    if (!isNonEgx && initialPool) {
-      for (const item of initialPool) {
+    if (!isNonEgx && hydratedPool) {
+      for (const item of hydratedPool) {
         map.set(item.id, item);
       }
     }
@@ -373,7 +397,7 @@ export default function DisclosuresClient({
       map.set(item.id, item);
     }
     return Array.from(map.values());
-  }, [initialPool, disclosures, isNonEgx]);
+  }, [hydratedPool, disclosures, isNonEgx]);
 
   // Filter pool by active timeframe and sector
   const filteredPool = useMemo(() => {
@@ -384,18 +408,24 @@ export default function DisclosuresClient({
     );
   }, [basePool, selectedTimeframe, selectedSector]);
 
-  const activePriceMap = useMemo(() => (isNonEgx ? {} : (priceMap || {})), [isNonEgx, priceMap]);
+  const activePriceMap = useMemo(() => (isNonEgx ? {} : hydratedPriceMap), [isNonEgx, hydratedPriceMap]);
 
   // Dynamically compute active analytics for the selected timeframe and sector (with daily netting & offset)
   const activeAnalytics = useMemo(() => {
+    if (!isNonEgx && selectedTimeframe === "all" && selectedSector === "all" && hydratedPool.length <= 30 && initialAnalytics) {
+      return initialAnalytics;
+    }
     return analyzeDisclosures(filteredPool, activePriceMap);
-  }, [filteredPool, activePriceMap]);
+  }, [filteredPool, activePriceMap, isNonEgx, selectedTimeframe, selectedSector, hydratedPool.length, initialAnalytics]);
 
   // Cumulative historical analytics (ignores short timeframe filter so older uncancelled insider positions are ALWAYS preserved)
   const cumulativeAnalytics = useMemo(() => {
+    if (!isNonEgx && selectedSector === "all" && hydratedPool.length <= 30 && initialAnalytics) {
+      return initialAnalytics;
+    }
     const sectorPool = filterDisclosuresByTimeframeAndSector(basePool, "all", selectedSector);
     return analyzeDisclosures(sectorPool, activePriceMap);
-  }, [basePool, selectedSector, activePriceMap]);
+  }, [basePool, selectedSector, activePriceMap, isNonEgx, hydratedPool.length, initialAnalytics]);
 
   // Timeframe label in Arabic / English
   const timeframeLabel = useMemo(() => {

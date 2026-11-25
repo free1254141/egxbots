@@ -40,21 +40,43 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ candles: [], markers: [] }, { status: 400 });
     }
 
+    const suffixMatch = rawSymbol.match(/\.(DFM|ADX|QSE|COMMODITIES|SR|SA|TADAWUL|AE|DU|AD|QA)$/i);
+    const suffixExchange = suffixMatch ? suffixMatch[1].toUpperCase() : "";
+    const symbolBaseUpper = rawSymbol
+      .replace(/\.(SR|SA|TADAWUL|AE|DU|AD|QA|DFM|ADX|QSE|COMMODITIES)$/i, "")
+      .toUpperCase();
+
     const isSaudiSymbol =
       /^\d{4}(\.(SR|SA|TADAWUL))?$/i.test(rawSymbol) ||
       /^(\^)?TASI(\.SR)?$/i.test(rawSymbol);
     const isEgxSuffix = /\.CA$/i.test(rawSymbol);
-    const isSaudiExchange = ["TADAWUL", "TASI", "SR"].includes(rawExchangeUpper);
-    const isUaeExchange = ["DFM", "ADX", "UAE"].includes(rawExchangeUpper);
-    const isQatarExchange = ["QSE", "QATAR"].includes(rawExchangeUpper);
+    const isSaudiExchange =
+      ["TADAWUL", "TASI", "SR"].includes(rawExchangeUpper) ||
+      ["SR", "SA", "TADAWUL"].includes(suffixExchange);
+    const isUaeExchange =
+      ["DFM", "ADX", "UAE"].includes(rawExchangeUpper) ||
+      ["DFM", "ADX", "AE", "DU", "AD"].includes(suffixExchange);
+    const isQatarExchange =
+      ["QSE", "QATAR"].includes(rawExchangeUpper) ||
+      ["QSE", "QA"].includes(suffixExchange);
+    const isCommodities =
+      rawExchangeUpper === "COMMODITIES" ||
+      suffixExchange === "COMMODITIES" ||
+      symbolBaseUpper === "XAUUSD" ||
+      symbolBaseUpper === "XAGUSD";
     const isSupportedExchange =
-      rawExchangeUpper === "" || rawExchangeUpper === "EGX" || isSaudiExchange || isUaeExchange || isQatarExchange;
+      rawExchangeUpper === "" ||
+      rawExchangeUpper === "EGX" ||
+      isSaudiExchange ||
+      isUaeExchange ||
+      isQatarExchange ||
+      isCommodities;
 
     // Preserve 410 for non-supported explicit exchanges (e.g. AAPL with exchange=US),
     // while allowing legacy callers that pass exchange=US on 4-digit Saudi tickers.
     if (!isSaudiSymbol && !isEgxSuffix && !isSupportedExchange) {
       return NextResponse.json(
-        { candles: [], markers: [], error: "Only EGX and GCC (TASI, DFM, ADX, QSE) market data is available." },
+        { candles: [], markers: [], error: "Only EGX, GCC (TASI, DFM, ADX, QSE), and COMMODITIES market data is available." },
         { status: 410 }
       );
     }
@@ -62,26 +84,55 @@ export async function GET(req: NextRequest) {
     const explicitMarketHint =
       url.searchParams.get("market") ||
       url.searchParams.get("country") ||
-      (isSaudiExchange ? "TADAWUL" : isUaeExchange ? "DFM" : isQatarExchange ? "QSE" : rawExchangeUpper === "EGX" ? "EGX" : null);
+      (isCommodities
+        ? "COMMODITIES"
+        : isSaudiExchange
+          ? "TADAWUL"
+          : isUaeExchange
+            ? (suffixExchange === "DFM" || suffixExchange === "ADX" ? suffixExchange : "DFM")
+            : isQatarExchange
+              ? "QSE"
+              : rawExchangeUpper === "EGX"
+                ? "EGX"
+                : null);
 
-    const market =
-      isSaudiSymbol || isSaudiExchange
-        ? "tasi"
+    const market = isCommodities
+      ? ("commodities" as const)
+      : isSaudiSymbol || isSaudiExchange
+        ? ("tasi" as const)
         : isUaeExchange
-          ? "uae"
+          ? ("uae" as const)
           : isQatarExchange
-            ? "qatar"
+            ? ("qatar" as const)
             : isEgxSuffix || rawExchangeUpper === "EGX"
-              ? "egx"
+              ? ("egx" as const)
               : resolveRequestMarket(req, explicitMarketHint);
-    const exchange = rawExchangeUpper && rawExchangeUpper !== "UAE" ? rawExchangeUpper : getMarketExchange(market);
-    const exchanges = getMarketExchanges(market);
+    const exchanges = market === "commodities" ? ["COMMODITIES"] : getMarketExchanges(market);
+    const exchange =
+      market === "commodities"
+        ? "COMMODITIES"
+        : market === "uae"
+          ? (suffixExchange === "DFM" || suffixExchange === "ADX"
+              ? suffixExchange
+              : rawExchangeUpper === "DFM" || rawExchangeUpper === "ADX"
+                ? rawExchangeUpper
+                : "UAE")
+          : market === "tasi"
+            ? "TADAWUL"
+            : market === "qatar"
+              ? "QSE"
+              : "EGX";
     const currency =
-      market === "uae" ? "AED" : market === "qatar" ? "QAR" : market === "tasi" ? "SAR" : "EGP";
-    const symbol =
-      market !== "egx"
-        ? rawSymbol.replace(/\.(SR|SA|TADAWUL|AE|DU|AD|QA)$/i, "").toUpperCase()
-        : rawSymbol;
+      market === "commodities"
+        ? "USD"
+        : market === "uae"
+          ? "AED"
+          : market === "qatar"
+            ? "QAR"
+            : market === "tasi"
+              ? "SAR"
+              : "EGP";
+    const symbol = market !== "egx" ? symbolBaseUpper : rawSymbol;
 
     const explicitMarketInUrl =
       url.searchParams.has("market") ||
@@ -90,6 +141,7 @@ export async function GET(req: NextRequest) {
       isSaudiExchange ||
       isUaeExchange ||
       isQatarExchange ||
+      isCommodities ||
       isEgxSuffix ||
       rawExchangeUpper === "EGX";
     const responseHeaders =
@@ -100,31 +152,37 @@ export async function GET(req: NextRequest) {
             "Vercel-Cache-Tag": DAILY_CACHE_TAGS.market,
           };
 
-    // For EGX, the Python backend owns the canonical HF-history + Supabase-tail merge.
-    // Skip Python for TASI and query SAUDI_SUPABASE stock_prices directly.
-    if (market === "egx") {
-      try {
-        const backendUrl = new URL(`${getBackendBaseUrl()}/bot/candles`);
-        backendUrl.searchParams.set("symbol", symbol);
-        backendUrl.searchParams.set("exchange", "EGX");
-        backendUrl.searchParams.set("limit", String(limit));
-        backendUrl.searchParams.set("bot_id", bot_id);
-        const backendResponse = await fetch(backendUrl, {
-          next: { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] },
-          signal: AbortSignal.timeout(30000),
-        });
-        if (backendResponse.ok) {
-          const payload = await backendResponse.json();
-          return NextResponse.json(includeMarkers ? payload : { ...payload, markers: [] }, {
-            headers: responseHeaders,
-          });
-        }
-      } catch (error) {
-        console.warn("Unified candle backend unavailable; using live-table fallback:", error);
+    // Python backend owns the canonical hybrid history merge:
+    // - EGX: HF Dataset + Supabase live tail (/bot/candles)
+    // - TASI / DFM / ADX / QSE / COMMODITIES: SAUDI_SUPABASE Storage `market-history` + live tail (/api/ai_bot/candles)
+    try {
+      const backendPath = market === "egx" ? "/bot/candles" : "/api/ai_bot/candles";
+      const backendUrl = new URL(`${getBackendBaseUrl()}${backendPath}`);
+      backendUrl.searchParams.set("symbol", symbol);
+      backendUrl.searchParams.set("exchange", market === "egx" ? "EGX" : exchange);
+      backendUrl.searchParams.set("limit", String(limit));
+      backendUrl.searchParams.set("bot_id", bot_id);
+      if (url.searchParams.get("all") === "true") {
+        backendUrl.searchParams.set("all", "true");
       }
+      if (!includeMarkers) {
+        backendUrl.searchParams.set("include_markers", "false");
+      }
+      const backendResponse = await fetch(backendUrl, {
+        next: { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (backendResponse.ok) {
+        const payload = await backendResponse.json();
+        return NextResponse.json(includeMarkers ? payload : { ...payload, markers: [] }, {
+          headers: responseHeaders,
+        });
+      }
+    } catch (error) {
+      console.warn("Unified candle backend unavailable; using live-table fallback:", error);
     }
 
-    const supabase = getMarketSupabaseClient(market);
+    const supabase = getMarketSupabaseClient(market === "commodities" ? "tasi" : market);
     let rawCandles: any[] = [];
     const timeframe = "1d";
 

@@ -252,6 +252,10 @@ def refresh_exchange_storage_archive(
     if not ex:
         return {"ok": False, "reason": "invalid_exchange"}
 
+    prior_meta = load_storage_metadata(sb, ex)
+    prior_rows = int(prior_meta.get("rows") or 0)
+    prior_first = str(prior_meta.get("first_date") or "")[:10]
+
     by_sym_date: Dict[str, Dict[str, Dict[str, Any]]] = {}
     try:
         raw = _download_with_retry(sb, f"prices/{ex}/stock_prices.json.gz")
@@ -268,8 +272,21 @@ def refresh_exchange_storage_archive(
                         "exchange": ex,
                         **bar,
                     }
-    except Exception:
-        pass
+    except Exception as dl_exc:
+        if prior_rows > 0:
+            return {
+                "ok": False,
+                "exchange": ex,
+                "reason": "existing_archive_download_failed",
+                "error": str(dl_exc),
+            }
+
+    if prior_rows > 0 and not by_sym_date:
+        return {
+            "ok": False,
+            "exchange": ex,
+            "reason": "existing_archive_download_failed",
+        }
 
     changed_syms: List[str] = []
     for raw_sym, bars in (recent_bars_by_sym or {}).items():
@@ -300,12 +317,6 @@ def refresh_exchange_storage_archive(
             "symbols_changed": 0,
         }
 
-    # Upload only updated per-symbol archives sequentially over single HTTP/2 connection
-    for sym in changed_syms:
-        sym_map = by_sym_date.get(sym) or {}
-        ordered = [sym_map[d] for d in sorted(sym_map.keys())]
-        _upload_gzip_json(sb, f"prices/{ex}/symbols/{sym}.json.gz", ordered)
-
     all_rows: List[Dict[str, Any]] = []
     min_date = "9999-12-31"
     max_date = "0000-01-01"
@@ -320,6 +331,26 @@ def refresh_exchange_storage_archive(
 
     if not all_rows:
         return {"ok": False, "exchange": ex, "reason": "empty_archive"}
+
+    if prior_rows > 0 and (
+        len(all_rows) < int(prior_rows * 0.90)
+        or (prior_first and min_date > prior_first)
+    ):
+        return {
+            "ok": False,
+            "exchange": ex,
+            "reason": "archive_regression_blocked",
+            "merged_rows": len(all_rows),
+            "prior_rows": prior_rows,
+            "merged_first_date": min_date,
+            "prior_first_date": prior_first,
+        }
+
+    # Upload only updated per-symbol archives sequentially over single HTTP/2 connection
+    for sym in changed_syms:
+        sym_map = by_sym_date.get(sym) or {}
+        ordered = [sym_map[d] for d in sorted(sym_map.keys())]
+        _upload_gzip_json(sb, f"prices/{ex}/symbols/{sym}.json.gz", ordered)
 
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
     _upload_gzip_json(sb, f"prices/{ex}/stock_prices.json.gz", all_rows)

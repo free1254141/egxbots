@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { getRecommendationChartMarkers, RecommendationChartMarker } from "@/lib/api";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import {
   createChart,
   IChartApi,
@@ -862,7 +863,7 @@ export default function TradingViewChart({
         if (exchange) {
           url += `&exchange=${encodeURIComponent(exchange)}`;
         }
-        const res = await fetch(url, { signal: controller.signal });
+        const res = await hfPublicFetch(url, { signal: controller.signal }, { cacheTtlMs: 60_000 });
         if (!res.ok) {
           throw new Error(
             `Failed to load historical candles (Status ${res.status})`,

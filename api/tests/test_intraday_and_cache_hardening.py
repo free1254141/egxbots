@@ -224,25 +224,28 @@ def test_tactical_support_rr_and_technical_scan_intraday_fallback() -> None:
         def from_(self, _tbl: str):
             return _MockScanQuery(self._scenario)
 
-    live_noon = dt.datetime(2026, 11, 24, 12, 15, tzinfo=ZoneInfo("Africa/Cairo"))
+    live_sess = {
+        "exchange": "EGX", "today_str": "2026-11-24", "is_trading_day": True,
+        "is_live_session": True, "elapsed_min": 135, "session_len_min": 270,
+        "progress_u": 0.5, "expected_cum_vol_frac": 0.50,
+    }
     with patch("api.agentic_chat.tools_execution._get_sb", return_value=_MockScanSB("empty_raw_then_paced")), \
-         patch("api.agentic_chat.intraday_volume.get_exchange_session_state", return_value={
-             "exchange": "EGX", "today_str": "2026-11-24", "is_trading_day": True,
-             "is_live_session": True, "elapsed_min": 135, "session_len_min": 270,
-             "progress_u": 0.5, "expected_cum_vol_frac": 0.50,
-         }):
+         patch("api.agentic_chat.intraday_volume.get_exchange_session_state", return_value=live_sess), \
+         patch("api.agentic_chat.tools_execution.get_exchange_session_state", return_value=live_sess):
         res_paced = _sync_get_technical_scan("momentum_and_volume", market="EGX")
         assert res_paced["status"] == "success"
         assert len(res_paced["stocks"]) == 3
         assert res_paced["stocks"][0]["r_vol"] > 1.15
         assert "معايرة السيولة" in (res_paced.get("scan_fallback_note_ar") or "")
 
+    early_sess = {
+        "exchange": "EGX", "today_str": "2026-11-24", "is_trading_day": True,
+        "is_live_session": True, "elapsed_min": 30, "session_len_min": 270,
+        "progress_u": 0.11, "expected_cum_vol_frac": 0.16,
+    }
     with patch("api.agentic_chat.tools_execution._get_sb", return_value=_MockScanSB("zero_today_prev_session")), \
-         patch("api.agentic_chat.intraday_volume.get_exchange_session_state", return_value={
-             "exchange": "EGX", "today_str": "2026-11-24", "is_trading_day": True,
-             "is_live_session": True, "elapsed_min": 30, "session_len_min": 270,
-             "progress_u": 0.11, "expected_cum_vol_frac": 0.16,
-         }):
+         patch("api.agentic_chat.intraday_volume.get_exchange_session_state", return_value=early_sess), \
+         patch("api.agentic_chat.tools_execution.get_exchange_session_state", return_value=early_sess):
         res_prev = _sync_get_technical_scan("momentum_and_volume", market="EGX")
         assert res_prev["status"] == "success"
         assert len(res_prev["stocks"]) == 1
@@ -783,3 +786,492 @@ def test_scheduled_automations_multi_market_detection_routing_and_fallback() -> 
     finally:
         worker._clear_automation_snapshot_cache()
         worker._cached_market_stocks.clear()
+
+
+def test_saudi_banan_alias_requires_context_and_ignores_arabic_preposition():
+    from api.saudi_stock_aliases import resolve_saudi_symbol, extract_all_saudi_symbols
+
+    assert resolve_saudi_symbol("بنان على الوضع الحالي في المحفظة") is None
+    assert extract_all_saudi_symbols("بنان على ذلك ننتظر تأكيد الاختراق") == []
+    assert resolve_saudi_symbol("بنان العقارية") == "4324"
+    assert resolve_saudi_symbol("شركة بنان") == "4324"
+    assert resolve_saudi_symbol("سهم بنان") == "4324"
+
+
+def test_automation_symbol_stopwords_and_personal_sell_keywords():
+    from api import scheduled_automations_worker as worker
+
+    syms_egx, _ = worker._extract_symbols_from_text(
+        "مراقبة اختراق (VWAP) ومؤشر ROE و EGP و MACD و RSI في 2026 على EGX",
+        "EGX",
+    )
+    for bad in ("VWAP", "ROE", "EGP", "MACD", "RSI", "EGX", "2026"):
+        assert bad not in syms_egx
+
+    syms_sa, _ = worker._extract_symbols_from_text(
+        "متابعة اختراق (VWAP) وسهم 2222 في تاسي TASI 2026",
+        "TADAWUL",
+    )
+    assert syms_sa == ["2222"]
+
+    assert worker._contains_personal_portfolio_intent("الاسهم المراد بيعها حسب خطة تدوير المحفظة") is True
+    assert worker._is_cacheable_automation_prompt("الاسهم المراد بيعها") is False
+
+
+def test_output_guard_negated_excluded_buy_and_disclaimer_dedupe():
+    from api.agentic_chat.output_guard import verify_and_guard_reply
+
+    payloads = [{"excludedFromBuying": [{"symbol": "PRCL"}, {"symbol": "IEEC"}]}]
+    safe_reply = (
+        "خطة التصفية:\n"
+        "- **PRCL و IEEC:** كلاهما سيخرج دون زيادة أو مضاعفة مع الحفاظ على الكاش.\n\n"
+        "> *هذا التحليل لأغراض البحث وليس توصية استثمارية.*\n\n"
+        "---\n\n"
+        "*تنويه: البيانات تعليمية وليست نصيحة استثمارية.*"
+    )
+    res = verify_and_guard_reply(safe_reply, payloads, market="EGX")
+    assert "excluded_stock_buy_conflict:PRCL" not in res["warnings"]
+    assert "excluded_stock_buy_conflict:IEEC" not in res["warnings"]
+    assert res["reply"].count("استثمارية") == 1
+    assert not res["reply"].rstrip().endswith("---")
+
+    bad_reply = "- يمكنك شراء وزيادة وزن PRCL اليوم عند 10.50 ج.م."
+    res_bad = verify_and_guard_reply(bad_reply, payloads, market="EGX")
+    assert "excluded_stock_buy_conflict:PRCL" in res_bad["warnings"]
+
+
+def test_pipeline_sanitizes_dist_score_and_collects_tactical_quant_levels():
+    from api.agentic_chat.pipeline import (
+        _strip_ui_only_fields_for_llm,
+        _collect_structured_outputs,
+    )
+
+    llm_payload = _strip_ui_only_fields_for_llm({
+        "stocks": [{"symbol": "FWRY", "dist_score": 38, "acc_score": 55, "_ui_chart": {"x": 1}}]
+    })
+    stock_clean = llm_payload["stocks"][0]
+    assert "dist_score" not in stock_clean
+    assert "_ui_chart" not in stock_clean
+    assert stock_clean["distribution_strength"] == 38
+
+    tables, recs, visuals = [], [], {}
+    _collect_structured_outputs(
+        {
+            "stocks": [{
+                "symbol": "FWRY",
+                "name_ar": "فوري",
+                "close": 17.52,
+                "support_1": 12.22,
+                "tactical_support": 16.40,
+                "support_1_is_distant": True,
+                "stop_loss": 11.50,
+                "tactical_stop_loss": 15.90,
+                "resistance_1": 18.50,
+                "resistance_2": 19.60,
+                "risk_reward_from_close": "1:0.73",
+                "tactical_risk_reward": "1:1.62",
+                "technical_rating_ar": "محايد",
+                "quant_intelligence": {
+                    "symbol": "FWRY",
+                    "monte_carlo": {"paths_count": 5000},
+                },
+            }]
+        },
+        tables,
+        recs,
+        visuals,
+    )
+    q_item = visuals["quant_analysis"][0]
+    assert q_item["support_1"] == 16.40
+    assert q_item["structural_support_1"] == 12.22
+    assert q_item["stop_loss"] == 15.90
+    assert q_item["resistance_2"] == 19.60
+    assert q_item["tactical_risk_reward"] == "1:1.62"
+    assert q_item["technical_rating_ar"] == "محايد"
+
+
+def test_quant_engine_cvar_kelly_macro_suppression_and_ema_proximity():
+    from unittest.mock import patch
+    import datetime as dt
+    from api.agentic_chat import quant_engine as qe
+
+    with patch.object(qe, "_fetch_market_cache_payload", return_value={"rating": "محايد", "corr_usd_parallel": 0.0, "corr_gold": 0.0}):
+        assert qe.get_cached_macro_sensitivity("FWRY", "EGX") is None
+    with patch.object(qe, "_fetch_market_cache_payload", return_value={"rating": "محايد", "corr_usd_parallel": 0.0, "corr_gold": None}):
+        assert qe.get_cached_macro_sensitivity("FWRY", "EGX") is None
+    with patch.object(qe, "_fetch_market_cache_payload", return_value={"rating": "تحوط متوسط", "corr_usd_parallel": -0.35, "corr_gold": 0.28}):
+        macro_ok = qe.get_cached_macro_sensitivity("FWRY", "EGX")
+        assert macro_ok is not None and "-0.35" in macro_ok["summary_ar"]
+
+    # Build 50 deterministic upward/sideways bars ending around 17.52
+    start = dt.date(2026, 9, 1)
+    bars = []
+    px = 16.80
+    for i in range(50):
+        px = round(px * (1.004 if i % 2 == 0 else 0.997), 3)
+        bars.append({
+            "date": (start + dt.timedelta(days=i)).isoformat(),
+            "open": px,
+            "high": round(px * 1.015, 3),
+            "low": round(px * 0.985, 3),
+            "close": px,
+            "volume": 100000,
+        })
+
+    with patch.object(qe, "get_cached_macro_sensitivity", return_value=None):
+        qi = qe.build_quant_intelligence_for_stock(
+            symbol="FWRY",
+            exchange="EGX",
+            close=17.52,
+            rsi_14=52.0,
+            macd_histogram=0.05,
+            ema_50=17.91,
+            ema_200=18.04,
+            vwap_20=17.40,
+            r_vol=1.1,
+            support_1=16.40,
+            resistance_1=18.80,
+            stop_loss=15.90,
+            fair_value=22.0,
+            fund_score=78.0,
+            ohlcv_rows=bars,
+            last_date="2026-11-24",
+            record_ledger=False,
+        )
+
+    assert "40% فني" in qi["score_formula_ar"]
+    assert "35% مالي" in qi["score_formula_ar"]
+    mc = qi["monte_carlo"]
+    sl = qi["self_learning"]
+    assert isinstance(mc["cvar_10_pct"], float)
+    assert 0.0 <= mc["fractional_kelly_pct"] <= 25.0
+    assert sl["empirical_effective_windows"] >= 1
+    assert sl["empirical_expectancy_pct"] is not None
+    assert any("قريب أسفل EMA200" in b for b in qi["bear_case"])
+    assert any("قريب أسفل EMA50" in b for b in qi["bear_case"])
+    assert not any("مسار هابط رئيسي" in b for b in qi["bear_case"])
+
+    # Edge cases: q_loss == 0.0 must still produce non-zero Quarter-Kelly when expectancy > 0,
+    # and eff_n == 1 uses singular Arabic label ("نافذة مستقلة واحدة").
+    with patch.object(qe, "_rolling_empirical_barrier_hit_rate", return_value=(65.0, 0.0, 10)), \
+         patch.object(qe, "_fetch_market_cache_payload", return_value=None):
+        mc_zero_loss, sl_one = qe.calibrate_probabilities_with_market_outcomes(
+            {
+                "raw_target_prob_pct": 100.0,
+                "prob_hit_stop_first_pct": 0.0,
+                "prob_stay_in_range_pct": 0.0,
+                "target_barrier": 110.0,
+                "stop_barrier": 90.0,
+                "horizon_days": 10,
+            },
+            bars,
+            symbol="TEST",
+            exchange="EGX",
+            close=100.0,
+            record_ledger=False,
+        )
+        assert mc_zero_loss["fractional_kelly_pct"] > 0.0
+        assert sl_one["empirical_effective_windows"] == 1
+        assert "نافذة مستقلة واحدة" in sl_one["learned_lesson_ar"]
+        assert "1 نوافذ" not in sl_one["learned_lesson_ar"]
+
+
+def test_garch_jump_diffusion_and_4state_market_regime():
+    import datetime as dt
+    from unittest.mock import patch
+    from api.agentic_chat import quant_engine as qe
+
+    start = dt.date(2026, 9, 1)
+    jump_bars = []
+    px = 20.0
+    for i in range(45):
+        if i == 25:
+            px = round(px * 0.91, 3)  # explicit -9% tail shock (>2.5 sigma)
+        elif i == 32:
+            px = round(px * 1.08, 3)  # +8% jump shock
+        else:
+            px = round(px * (1.008 if i % 2 == 0 else 0.994), 3)
+        jump_bars.append({
+            "date": (start + dt.timedelta(days=i)).isoformat(),
+            "open": px,
+            "high": round(px * 1.015, 3),
+            "low": round(px * 0.985, 3),
+            "close": px,
+            "volume": 250000,
+        })
+
+    mc1 = qe.run_monte_carlo_barrier_sim(jump_bars, close=px, target_price=round(px * 1.08, 2), stop_price=round(px * 0.94, 2), exchange="EGX", symbol="JUMP")
+    mc2 = qe.run_monte_carlo_barrier_sim(jump_bars, close=px, target_price=round(px * 1.08, 2), stop_price=round(px * 0.94, 2), exchange="EGX", symbol="JUMP")
+    assert mc1["simulation_model"] == "GARCH(1,1) + Merton Jump-Diffusion"
+    assert mc1["jump_risk_pct"] > 0.0
+    assert mc1 == mc2  # Strictly deterministic seed
+
+    # 4-State Regime detection
+    panic_reg = qe.detect_stock_regime(jump_bars, close=round(px * 0.75, 2), ema_50=px, rsi_14=24.0)
+    assert panic_reg["state"] == "panic"
+    assert panic_reg["kelly_multiplier"] == 0.0
+
+    dist_reg = qe.detect_stock_regime(jump_bars, close=px, ema_50=px * 0.98, dist_score=72.0)
+    assert dist_reg["state"] == "distribution"
+    assert dist_reg["kelly_multiplier"] == 0.5
+
+    mom_reg = qe.detect_stock_regime(jump_bars, close=px, ema_50=px * 0.92, ema_200=px * 0.85, rsi_14=58.0, r_vol=1.4)
+    assert mom_reg["state"] == "momentum"
+    assert mom_reg["kelly_multiplier"] == 1.0
+
+    corr_reg = qe.detect_stock_regime(jump_bars[:15], close=90.0, ema_50=100.0, rsi_14=42.0, acc_score=30.0)
+    assert corr_reg["state"] == "corrective"
+    assert corr_reg["kelly_multiplier"] == 0.5
+
+    # Panic regime scales Quarter-Kelly to 0.0 inside full quant output
+    with patch.object(qe, "get_cached_macro_sensitivity", return_value=None):
+        qi_panic = qe.build_quant_intelligence_for_stock(
+            symbol="PNC",
+            exchange="EGX",
+            close=round(px * 0.72, 2),
+            rsi_14=24.0,
+            ema_50=px,
+            support_1=round(px * 0.68, 2),
+            resistance_1=round(px * 0.85, 2),
+            stop_loss=round(px * 0.66, 2),
+            ohlcv_rows=jump_bars,
+            last_date="2026-11-24",
+            record_ledger=False,
+        )
+    assert qi_panic["market_regime"]["state"] == "panic"
+    assert qi_panic["monte_carlo"]["fractional_kelly_pct"] == 0.0
+
+
+def test_hrp_portfolio_optimization_and_almgren_chriss_slicing():
+    import datetime as dt
+    from api.portfolio_or_optimizer import AssetInput, normalize_objective, optimize_portfolio_or
+
+    assert normalize_objective("HRP") == "hrp"
+    assert normalize_objective("hierarchical_risk_parity") == "hrp"
+
+    dates = [(dt.date(2026, 9, 1) + dt.timedelta(days=i)).isoformat() for i in range(35)]
+    assets = [
+        AssetInput(
+            symbol="COMI",
+            name_ar="التجاري الدولي",
+            sector="البنوك",
+            price=80.0,
+            current_shares=0,
+            expected_score=0.5,
+            avg_daily_volume=2_000_000,
+            returns_by_date={d: (0.012 if i % 2 == 0 else -0.008) for i, d in enumerate(dates)},
+        ),
+        AssetInput(
+            symbol="MFPC",
+            name_ar="موبكو",
+            sector="البتروكيماويات",
+            price=40.0,
+            current_shares=0,
+            expected_score=0.6,
+            avg_daily_volume=1_500_000,
+            returns_by_date={d: (0.015 if i % 3 == 0 else -0.006) for i, d in enumerate(dates)},
+        ),
+        AssetInput(
+            symbol="FWRY",
+            name_ar="فوري",
+            sector="المدفوعات",
+            price=10.0,
+            current_shares=0,
+            expected_score=0.4,
+            avg_daily_volume=25_000,  # Low ADV forces multi-session Almgren-Chriss slicing
+            returns_by_date={d: (-0.01 if i % 2 == 0 else 0.014) for i, d in enumerate(dates)},
+        ),
+        AssetInput(
+            symbol="LOSS",
+            name_ar="شركة خاسرة",
+            sector="العقارات",
+            price=5.0,
+            current_shares=2_000,
+            expected_score=-0.85,
+            max_weight_override=0.0,
+            exclusion_reason="شركة خاسرة",
+            avg_daily_volume=1_000_000,
+            returns_by_date={d: -0.015 for d in dates},
+        ),
+    ]
+
+    res = optimize_portfolio_or(
+        assets,
+        total_capital=1_000_000.0,
+        objective="hrp",
+        max_weight_pct=35.0,
+        max_sector_pct=45.0,
+        min_cash_pct=10.0,
+        exchange="EGX",
+    )
+    assert res["objective"] == "hrp"
+    by_sym = {r["symbol"]: r for r in res["allocations"]}
+    assert by_sym["LOSS"]["targetWeightPct"] == 0.0
+    assert by_sym["LOSS"]["action"] == "SELL"
+    assert all(r["actualWeightPct"] <= 35.5 for r in res["allocations"])
+    assert "executionPlan" in by_sym["FWRY"]
+    assert by_sym["FWRY"]["executionPlan"]["sessions"] >= 2
+    assert len(res.get("executionNotes") or []) >= 1
+
+
+def test_output_guard_check_f_numeric_and_semantic_fact_checker():
+    from api.agentic_chat.output_guard import verify_and_guard_reply
+
+    payloads = [{
+        "stocks": [{
+            "symbol": "FWRY",
+            "close": 17.52,
+            "date": "2026-11-24",
+            "currency": "ج.م",
+            "valuation_upside_pct": -22.0,
+            "payout_ratio_pct": 14.0,
+            "quant_intelligence": {
+                "monte_carlo": {
+                    "prob_hit_target_first_pct": 8.0,
+                    "prob_hit_stop_first_pct": 66.0,
+                }
+            },
+        }]
+    }]
+
+    hallucinated_reply = (
+        "**السعر الأخير:** 24.00 ج.م (2026-11-24)\n"
+        "- السهم رخيص جداً وأقل من قيمته العادلة.\n"
+        "- احتمال الصعود أعلى من كسر الوقف خلال 10 جلسات.\n"
+        "- 🎁 كوبون قادم: 1.50 ج.م/سهم"
+    )
+    res_bad = verify_and_guard_reply(hallucinated_reply, payloads, market="EGX")
+    assert any(w.startswith("price_hallucination:FWRY:") for w in res_bad["warnings"])
+    assert "valuation_direction_contradiction:FWRY" in res_bad["warnings"]
+    assert "mc_probability_inversion:FWRY" in res_bad["warnings"]
+    assert "phantom_upcoming_dividend" in res_bad["warnings"]
+    assert "تدقيق السعر الحتمي (FWRY)" in res_bad["reply"]
+    assert "تدقيق التقييم الحتمي (FWRY)" in res_bad["reply"]
+    assert "تدقيق مونت كارلو الحتمي (FWRY)" in res_bad["reply"]
+    assert "🎁 كوبون قادم:" not in res_bad["reply"]
+    assert "لا يوجد كوبون قادم معلن حالياً" in res_bad["reply"]
+    assert res_bad["block_cache"] is True
+
+    clean_reply = (
+        "**السعر الأخير:** 17.52 ج.م (2026-11-24)\n"
+        "- السهم يتداول أعلى من قيمته العادلة بنسبة +22% (ليس رخيصاً حالياً).\n"
+        "- احتمال كسر الوقف أعلى من بلوغ الهدف.\n"
+        "- لا يوجد كوبون قادم معلن حالياً."
+    )
+    res_ok = verify_and_guard_reply(clean_reply, payloads, market="EGX")
+    assert res_ok["warnings"] == []
+    assert res_ok["block_cache"] is False
+
+    # Genuine upcoming dividend in get_dividends payload must NOT flag phantom_upcoming_dividend
+    div_payloads = [{"dividends": [{"symbol": "COMI", "status": "upcoming", "amount": 2.5}]}]
+    res_div = verify_and_guard_reply("🎁 كوبون قادم: 2.50 ج.م/سهم", div_payloads, market="EGX")
+    assert "phantom_upcoming_dividend" not in res_div["warnings"]
+
+    # Comma-formatted price >= 1,000 (e.g., GOLD 2,650.50) must NOT truncate at the comma
+    gold_payloads = [{"stocks": [{"symbol": "GOLD", "close": 2650.50, "date": "2026-11-24", "currency": "$"}]}]
+    res_gold = verify_and_guard_reply("**السعر الأخير:** 2,650.50 $ (جلسة 2026-11-24)", gold_payloads, market="COMMODITIES")
+    assert res_gold["warnings"] == []
+    assert res_gold["block_cache"] is False
+
+
+def test_output_guard_check_f5_f6_fair_value_and_table_levels():
+    from api.agentic_chat.output_guard import verify_and_guard_reply
+
+    payloads = [{
+        "stocks": [{
+            "symbol": "FWRY",
+            "close": 17.52,
+            "date": "2026-11-24",
+            "currency": "ج.م",
+            "fair_value": 13.71,
+            "valuation_upside_pct": -21.7,
+            "stop_loss": 16.06,
+            "tactical_stop_loss": 16.85,
+            "resistance_1": 18.58,
+            "resistance_2": 19.40,
+        }]
+    }]
+
+    # 1. Hallucinated Fair Value, Stop Loss, and Resistance 1 must trigger Check F5 & F6
+    bad_md = (
+        "**السعر الأخير:** 17.52 ج.م (2026-11-24)\n"
+        "- القيمة العادلة المرجحة: 21.50 ج.م\n\n"
+        "| المستوى | القيمة (ج.م) |\n"
+        "|---|---|\n"
+        "| وقف الخسارة | 14.20 |\n"
+        "| المقاومة الأولى | 22.00 |\n"
+    )
+    res_bad = verify_and_guard_reply(bad_md, payloads, market="EGX")
+    assert any(w.startswith("fair_value_hallucination:FWRY:") for w in res_bad["warnings"])
+    assert "level_hallucination:FWRY:stop_loss" in res_bad["warnings"]
+    assert "level_hallucination:FWRY:resistance_1" in res_bad["warnings"]
+    assert "تدقيق القيمة العادلة الحتمي (FWRY)" in res_bad["reply"]
+    assert "تدقيق المستويات الحتمي (FWRY)" in res_bad["reply"]
+    assert res_bad["block_cache"] is True
+
+    # 2. Using valid tactical_stop_loss (16.85) + exact fair_value (13.71) + exact resistance_1 (18.58) passes cleanly
+    clean_md = (
+        "**السعر الأخير:** 17.52 ج.م (2026-11-24)\n"
+        "- القيمة العادلة المرجحة: 13.71 ج.م\n\n"
+        "| المستوى | القيمة (ج.م) |\n"
+        "|---|---|\n"
+        "| وقف الخسارة التكتيكي | 16.85 |\n"
+        "| المقاومة الأولى | 18.58 |\n"
+    )
+    res_ok = verify_and_guard_reply(clean_md, payloads, market="EGX")
+    assert res_ok["warnings"] == []
+    assert res_ok["block_cache"] is False
+
+
+def test_fair_value_audit_fixes_poul_split_roe_note_and_svce_loss_making():
+    from api.agentic_chat.tools_execution import (
+        _normalize_split_adjusted_fundamentals,
+        _extract_rich_fundamentals,
+        _compute_fundamental_fair_value,
+        _build_fair_value_gap,
+    )
+
+    # 1. POUL-like partial split bug: bvps*pb already post-split (~close), while eps*pe is pre-split (4x close)
+    poul_fd = {
+        "eps": 4.80,
+        "peRatio": 6.25,        # 4.80 * 6.25 = 30.0 (4x pre-split close of 7.50)
+        "bookValuePerShare": 2.50,
+        "pbRatio": 3.00,        # 2.50 * 3.00 = 7.50 (already post-split == close!)
+    }
+    norm_poul, did_adj = _normalize_split_adjusted_fundamentals(poul_fd, close_price=7.50)
+    assert did_adj is True
+    assert abs(norm_poul["eps"] - 1.20) < 0.02
+    assert abs(norm_poul["peRatio"] - 6.25) < 0.10
+    assert abs(norm_poul["bookValuePerShare"] - 2.50) < 0.01
+    assert abs(norm_poul["pbRatio"] - 3.00) < 0.01
+
+    # 2. FWRY-like ROE vs P/B÷P/E accounting basis note (>= 4pp divergence)
+    fwry_clean = _extract_rich_fundamentals(
+        {"roe": 41.65, "peRatio": 16.63, "pbRatio": 5.81, "eps": 1.05},
+        close_price=17.52,
+        name="فوري",
+    )
+    assert "roe_basis_note_ar" in fwry_clean
+    assert "41.6%" in fwry_clean["roe_basis_note_ar"] or "41.7%" in fwry_clean["roe_basis_note_ar"]
+    assert "34.9%" in fwry_clean["roe_basis_note_ar"]
+
+    # 3. SVCE-like loss-making company with high BVPS and stale forwardPe must NEVER be called "قريباً من العادل"
+    svce_fd = {
+        "eps": -0.51,
+        "netIncome": -280_300_000,
+        "roe": -8.62,
+        "bookValuePerShare": 15.66,
+        "pbRatio": 0.55,
+        "forwardPe": 9.5,  # stale analyst forwardPe must be ignored when loss-making
+    }
+    fv_svce, model_svce, extra_svce = _compute_fundamental_fair_value(8.58, 8.70, 8.90, svce_fd, market="EGX")
+    assert extra_svce.get("is_loss_making") is True
+    assert extra_svce.get("loss_making_discount_applied") is True
+    assert "شركة خاسرة" in model_svce
+    assert fv_svce <= round(8.58 * 0.90, 2)
+    gap_svce = _build_fair_value_gap(8.58, fv_svce, is_loss_making=True)
+    assert "قريباً من قيمته العادلة" not in gap_svce["valuation_gap_ar"]
+    assert "شركة خاسرة" in gap_svce["valuation_gap_ar"]
+
+
+

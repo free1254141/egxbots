@@ -108,7 +108,7 @@ export default function TrapDetector() {
       setPerf(null);
     } else {
       requests.push(
-        fetch("/api/scan/signal-performance", { signal: controller.signal })
+        hfPublicFetch("/api/scan/signal-performance", { signal: controller.signal }, { cacheTtlMs: 300_000 })
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (data?.ok) setPerf(data);

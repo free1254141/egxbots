@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { getRecommendationChartMarkers, RecommendationChartMarker } from "@/lib/api";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWatchlist } from "@/contexts/WatchlistContext";
@@ -240,9 +241,10 @@ export default function StockDetailClient({
         ? "tasi"
         : "egx";
     const exParam = isGccStock ? `&exchange=${encodeURIComponent(resolvedExchange)}` : "";
-    fetch(
+    hfPublicFetch(
       `/api/public/stock-page-data?symbol=${encodeURIComponent(cleanSymbol)}&market=${targetMarket}${exParam}`,
-      { signal: controller.signal }
+      { signal: controller.signal },
+      { cacheTtlMs: 120_000 }
     )
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {

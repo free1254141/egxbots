@@ -15,6 +15,7 @@ import { createChatRequest } from "@/lib/chat-request.cjs";
 import { orderChatMessages } from "@/lib/ai/chat-order";
 
 import { invalidateUserQuotaCache } from "@/lib/user-quota-client";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 
 
 
@@ -361,11 +362,26 @@ export type ChatTable = {
             support_2?: number | null;
             resistance_1?: number | null;
             resistance_2?: number | null;
+            tactical_support?: number | null;
+            structural_support_1?: number | null;
+            support_1_is_distant?: boolean;
+            risk_reward_from_close?: string | number | null;
+            tactical_risk_reward?: string | number | null;
+            technical_rating_ar?: string | null;
+            score_formula_ar?: string | null;
             king_ai_score?: number | null;
             wyckoff_phase?: string | null;
             macd?: number | null;
             setup_regime?: string;
             setup_regime_label_ar?: string;
+            market_regime?: {
+                state?: string;
+                label_ar?: string;
+                vol_ratio?: number;
+                drawdown_20d_pct?: number;
+                kelly_multiplier?: number;
+                action_guidance_ar?: string;
+            } | null;
             conflict_resolution_ar?: string;
             technical_score?: number;
             fundamental_score?: number;
@@ -376,6 +392,8 @@ export type ChatTable = {
             monte_carlo?: {
                 paths_count?: number;
                 horizon_days?: number;
+                simulation_model?: string;
+                jump_risk_pct?: number;
                 daily_limit_pct?: number;
                 target_barrier?: number;
                 stop_barrier?: number;
@@ -385,6 +403,8 @@ export type ChatTable = {
                 prob_hit_stop_first_pct?: number;
                 prob_stay_in_range_pct?: number;
                 mathematical_expectancy_pct?: number;
+                cvar_10_pct?: number | null;
+                fractional_kelly_pct?: number;
                 expected_10d_range?: { p10: number; p50: number; p90: number };
                 daily_vol_pct?: number;
                 annualized_vol_pct?: number;
@@ -394,6 +414,8 @@ export type ChatTable = {
                 calibrated_target_prob_pct?: number;
                 empirical_hit_rate_pct?: number | null;
                 empirical_sample_size?: number;
+                empirical_effective_windows?: number;
+                empirical_expectancy_pct?: number | null;
                 brier_score?: number | null;
                 learned_lesson_ar?: string;
             };
@@ -837,7 +859,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         }
 
-        void fetch("/api/ai-chat?action=settings", {
+        void hfAuthFetch("/api/ai-chat?action=settings", {
 
             method: "POST",
 
@@ -845,7 +867,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
             body: JSON.stringify({ action: "update_settings", autonomous_recommendations: enabled }),
 
-        }).catch((err) => {
+        }, { requireToken: true }).catch((err) => {
 
             console.warn("Failed to persist autonomous recommendations to Supabase:", err);
 
@@ -1146,9 +1168,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
             try {
 
-                const res = await fetch(`/api/ai-chat?session_id=${encodeURIComponent(sessionId)}`, {
+                const res = await hfAuthFetch(`/api/ai-chat?session_id=${encodeURIComponent(sessionId)}`, {
                     headers: { ...getAuthHeaders() },
-                });
+                }, { requireToken: true });
 
                 if (!res.ok) return;
 
@@ -1356,9 +1378,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
             try {
 
-                const res = await fetch("/api/ai-chat?action=sessions", {
+                const res = await hfAuthFetch("/api/ai-chat?action=sessions", {
                     headers: { ...getAuthHeaders() },
-                });
+                }, { requireToken: true });
 
                 if (!res.ok) throw new Error("CHAT_ACCESS_UNAVAILABLE");
 
@@ -1736,10 +1758,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         try {
 
-            await fetch(`/api/ai-chat?session_id=${sessionId}`, {
+            await hfAuthFetch(`/api/ai-chat?session_id=${sessionId}`, {
                 method: "DELETE",
                 headers: { ...getAuthHeaders() },
-            });
+            }, { requireToken: true });
 
         } catch (e) {
 
@@ -1757,7 +1779,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         try {
 
-            await fetch("/api/ai-chat", {
+            await hfAuthFetch("/api/ai-chat", {
 
                 method: "PUT",
 
@@ -1765,7 +1787,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 body: JSON.stringify({ session_id: sessionId, title: newTitle })
 
-            });
+            }, { requireToken: true });
 
         } catch (e) {
 
@@ -2091,7 +2113,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             const parsedChatBody = JSON.parse(chatReq.body) as Record<string, unknown>;
             parsedChatBody.market = currentMarket;
 
-            const response = await fetch("/api/ai-chat", {
+            const response = await hfAuthFetch("/api/ai-chat", {
 
                 ...chatReq,
 
@@ -2109,7 +2131,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 signal: abortControllerRef.current.signal,
 
-            });
+            }, { requireToken: true });
 
 
 

@@ -110,6 +110,7 @@ FILES_TO_SYNC = [
     "api/saudi_daily_runner.py",
     "api/saudi_price_sync.py",
     "api/saudi_storage_history.py",
+    "api/archive_reader.py",
     "api/saudi_trading_calendar.py",
     "api/saudi_train_models.py",
     "api/saudi_telegram_dispatch.py",
@@ -211,7 +212,10 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "feat(gcc,payments,offload): sync updated Python backend files to HF Space"
+    commit_msg = (
+        "feat(chat,quant,offload,saudi): GARCH/Jump MC, HRP, single-source consistency, "
+        "fair-value fixes & Saudi/HF offload updates"
+    )
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)

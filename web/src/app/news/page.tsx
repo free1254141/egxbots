@@ -23,6 +23,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { getStockHref } from "@/lib/stock-href";
 import StockLogo from "@/components/StockLogo";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import NewsStats from "@/components/NewsStats";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 
@@ -87,7 +88,7 @@ export default function NewsPage() {
                 url += `&sector=${encodeURIComponent(selectedSector)}`;
             }
             
-            const res = await fetch(url, { signal });
+            const res = await hfPublicFetch(url, { signal }, { cacheTtlMs: 120_000 });
             if (!res.ok) throw new Error("News request failed");
             const result = await res.json();
             if (signal.aborted) return;

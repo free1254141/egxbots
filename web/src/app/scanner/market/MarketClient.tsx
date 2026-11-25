@@ -1309,7 +1309,7 @@ export default function MarketClient() {
     const fetchAISignals = async (reqMarket = market) => {
         setAiSignalsLoading(true);
         try {
-            const res = await fetch(`/api/market/ai-signals?market=${reqMarket}`);
+            const res = await hfPublicFetch(`/api/market/ai-signals?market=${reqMarket}`, undefined, { cacheTtlMs: 60_000 });
             if (res.ok) {
                 const data = await res.json();
                 if (activeMarketRef.current === reqMarket) {
@@ -1347,7 +1347,7 @@ export default function MarketClient() {
                 params.set("single_date", date);
                 params.set("date", date);
             }
-            const res = await fetch(`/api/scan/sectors/heatmap?${params.toString()}`);
+            const res = await hfPublicFetch(`/api/scan/sectors/heatmap?${params.toString()}`, undefined, { cacheTtlMs: 120_000 });
             if (!res.ok) {
                 throw new Error(`Failed to load heatmap data (Status ${res.status})`);
             }
@@ -1404,7 +1404,7 @@ export default function MarketClient() {
         setTimelineLoading(true);
         setTimelineError(null);
         try {
-            const res = await fetch(`/api/scan/sectors/timeline?country=${encodeURIComponent(reqCountry)}&market=${reqMarket}&months=6${forceRefresh ? "&force_refresh=true" : ""}`);
+            const res = await hfPublicFetch(`/api/scan/sectors/timeline?country=${encodeURIComponent(reqCountry)}&market=${reqMarket}&months=6${forceRefresh ? "&force_refresh=true" : ""}`, undefined, { cacheTtlMs: 120_000 });
             if (!res.ok) {
                 throw new Error(`Failed to load timeline data (Status ${res.status})`);
             }
@@ -1423,7 +1423,7 @@ export default function MarketClient() {
             const dates = [...availableHeatmapDates].sort().slice(-30);
             if (dates.length < 2) return;
             const params = new URLSearchParams({ country: reqCountry, market: reqMarket, start_date: dates[0], end_date: dates[dates.length - 1] });
-            const res = await fetch(`/api/scan/sectors/heatmap?${params}`);
+            const res = await hfPublicFetch(`/api/scan/sectors/heatmap?${params}`, undefined, { cacheTtlMs: 120_000 });
             if (!res.ok) return;
             const payload = await res.json();
             if (activeMarketRef.current !== reqMarket) return;

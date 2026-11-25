@@ -7,6 +7,7 @@ import Image from "next/image";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import {
   prepareTrialAutostart,
   clearTrialAutostart,
@@ -493,16 +494,16 @@ export default function PricingClient() {
             }
           } catch {}
         }
-        const response = await fetch(
-          user ? "/api/payment/easykash/config" : "/api/payment/public-config",
-          {
-            headers,
-            // Anonymous visitors share one CDN-cached document; signed-in
-            // visitors need their own grandfathered/promo state, so only that
-            // request must bypass the cache.
-            cache: user ? "no-store" : "default",
-          }
-        );
+        const response = user
+          ? await fetch("/api/payment/easykash/config", {
+              headers,
+              cache: "no-store",
+            })
+          : await hfPublicFetch(
+              "/api/payment/public-config",
+              { headers, cache: "default" },
+              { cacheTtlMs: 300_000 }
+            );
         if (!response.ok) throw new Error("Payment configuration unavailable");
         const local = await response.json();
         if (!cancelled) setLocalConfig(local);

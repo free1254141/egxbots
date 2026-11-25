@@ -358,20 +358,33 @@ def _merge_with_existing_storage_bars_checked(
     sb: Client,
     path: str,
     new_bars: List[Dict[str, Any]],
+    *,
+    require_existing: bool = False,
 ) -> Tuple[List[Dict[str, Any]], bool]:
     merged: Dict[str, Dict[str, Any]] = {}
     old_map: Dict[str, Dict[str, Any]] = {}
-    try:
-        raw = sb.storage.from_(STORAGE_BUCKET).download(path)
-        old_bars = json.loads(gzip.decompress(raw))
-        if isinstance(old_bars, list):
-            for b in old_bars:
-                if isinstance(b, dict) and b.get("date"):
-                    d_key = str(b["date"])[:10]
-                    merged[d_key] = b
-                    old_map[d_key] = b
-    except Exception:
-        pass
+    last_exc: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            raw = sb.storage.from_(STORAGE_BUCKET).download(path)
+            old_bars = json.loads(gzip.decompress(raw))
+            if isinstance(old_bars, list):
+                for b in old_bars:
+                    if isinstance(b, dict) and b.get("date"):
+                        d_key = str(b["date"])[:10]
+                        merged[d_key] = b
+                        old_map[d_key] = b
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            if "not found" in str(exc).lower() or "404" in str(exc):
+                break
+            if attempt < 2:
+                time.sleep(0.3 * (attempt + 1))
+
+    if last_exc is not None and require_existing and not ("not found" in str(last_exc).lower() or "404" in str(last_exc)):
+        raise RuntimeError(f"existing_storage_download_failed:{path}: {last_exc}")
 
     changed = not bool(old_map)
     for b in new_bars:
@@ -640,15 +653,23 @@ def run_gcc_metals_sync(
             storage_tl.sb = client
         return client
 
-    def _process_symbol(exch: str, it: InstrumentDef) -> Tuple[str, List[Dict[str, Any]], bool]:
+    def _process_symbol(
+        exch: str, it: InstrumentDef, *, require_existing: bool = False
+    ) -> Tuple[str, List[Dict[str, Any]], bool, bool]:
         sym = it[0]
         bars = bars_map.get((sym, exch), [])
         if not bars:
-            return sym, [], False
+            return sym, [], False, False
         worker_sb = _get_worker_sb()
         sym_path = f"prices/{exch}/symbols/{sym}.json.gz"
         if daily_only:
-            full_sym_bars, changed = _merge_with_existing_storage_bars_checked(worker_sb, sym_path, bars)
+            try:
+                full_sym_bars, changed = _merge_with_existing_storage_bars_checked(
+                    worker_sb, sym_path, bars, require_existing=require_existing
+                )
+            except Exception as dl_exc:
+                print(f"[GCC-SYNC] Skipping Storage overwrite for {sym_path}: {dl_exc}")
+                return sym, [], False, True
             if changed:
                 _upload_storage_json_gz(worker_sb, sym_path, full_sym_bars)
         else:
@@ -667,18 +688,32 @@ def run_gcc_metals_sync(
             ]
             _upload_storage_json_gz(worker_sb, sym_path, full_sym_bars)
             changed = True
-        return sym, full_sym_bars, changed
+        return sym, full_sym_bars, changed, False
 
     for exch in sorted(target_exchanges):
         exch_items = [it for it in items if it[1] == exch]
         exch_bars: Dict[str, List[Dict[str, Any]]] = {}
         all_archive_rows: List[Dict[str, Any]] = []
         symbol_files_uploaded = 0
+        archive_failed = False
+
+        prior_meta: Dict[str, Any] = {}
+        if daily_only:
+            try:
+                from api.saudi_storage_history import load_storage_metadata
+                prior_meta = load_storage_metadata(sb, exch)
+            except Exception:
+                prior_meta = {}
+        prior_rows = int(prior_meta.get("rows") or 0)
+        prior_syms = int(prior_meta.get("symbols") or 0)
+        req_existing = bool(daily_only and prior_rows > 0)
 
         with ThreadPoolExecutor(max_workers=6) as pool:
-            futs = [pool.submit(_process_symbol, exch, it) for it in exch_items]
+            futs = [pool.submit(_process_symbol, exch, it, require_existing=req_existing) for it in exch_items]
             for fut in as_completed(futs):
-                sym, full_sym_bars, changed = fut.result()
+                sym, full_sym_bars, changed, failed_sym = fut.result()
+                if failed_sym:
+                    archive_failed = True
                 if not full_sym_bars:
                     continue
                 if changed:
@@ -686,7 +721,12 @@ def run_gcc_metals_sync(
                 exch_bars[sym] = full_sym_bars
                 all_archive_rows.extend(full_sym_bars)
 
-        if all_archive_rows and (symbol_files_uploaded > 0 or not daily_only):
+        coverage_ok = (not archive_failed) and (
+            not daily_only
+            or prior_rows == 0
+            or (len(exch_bars) >= prior_syms and len(all_archive_rows) >= int(prior_rows * 0.90))
+        )
+        if all_archive_rows and (symbol_files_uploaded > 0 or not daily_only) and coverage_ok:
             _upload_storage_json_gz(sb, f"prices/{exch}/stock_prices.json.gz", all_archive_rows)
             all_dates = [r["date"] for r in all_archive_rows]
             _upload_storage_json(
@@ -703,15 +743,35 @@ def run_gcc_metals_sync(
                     "symbol_files": symbol_files_uploaded,
                 },
             )
+        elif daily_only and all_archive_rows and symbol_files_uploaded > 0 and not coverage_ok:
+            print(
+                f"[GCC-SYNC] Skipped combined {exch} archive overwrite to prevent partial regression "
+                f"(syms={len(exch_bars)}/{prior_syms}, rows={len(all_archive_rows)}/{prior_rows}, failed={archive_failed})."
+            )
 
-        db_price_rows = _sync_recent_stock_prices(sb, exch, stock_id_map, exch_bars, recent_limit=recent_db_limit)
-        try:
-            from api.saudi_storage_history import DB_RETENTION_CALENDAR_DAYS, prune_old_stock_prices
-            prune_old_stock_prices(sb, exch, keep_days=DB_RETENTION_CALENDAR_DAYS)
-        except Exception as prune_exc:
-            print(f"[GCC-SYNC] Prune warning for {exch}: {prune_exc}")
-        ind_count = _compute_and_upsert_indicators(sb, exch, exch_bars)
-        idx_count = _sync_market_index(sb, exch, exch_bars)
+        if symbol_files_uploaded > 0 or not daily_only:
+            try:
+                from api.saudi_storage_history import invalidate_storage_history_cache
+                invalidate_storage_history_cache(exch)
+            except Exception:
+                pass
+
+        # Ensure DB recent upsert & indicators always include fetched bars even if Storage download failed
+        live_bars_by_sym = {
+            sym: exch_bars.get(sym) or bars_map.get((sym, exch), [])
+            for it in exch_items
+            for sym in (it[0],)
+            if (sym in exch_bars or (sym, exch) in bars_map)
+        }
+        db_price_rows = _sync_recent_stock_prices(sb, exch, stock_id_map, live_bars_by_sym, recent_limit=recent_db_limit)
+        if not archive_failed and (coverage_ok or prior_rows > 0):
+            try:
+                from api.saudi_storage_history import DB_RETENTION_CALENDAR_DAYS, prune_old_stock_prices
+                prune_old_stock_prices(sb, exch, keep_days=DB_RETENTION_CALENDAR_DAYS)
+            except Exception as prune_exc:
+                print(f"[GCC-SYNC] Prune warning for {exch}: {prune_exc}")
+        ind_count = _compute_and_upsert_indicators(sb, exch, live_bars_by_sym)
+        idx_count = _sync_market_index(sb, exch, live_bars_by_sym)
         summary[exch] = {
             "symbols_synced": len(exch_bars),
             "storage_symbol_files": symbol_files_uploaded,

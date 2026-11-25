@@ -380,6 +380,41 @@ compress: true,
         ],
       },
       {
+        // Top public pages: 5m browser cache + 7d Edge CDN cache so back/forward & repeat visits stay off Origin
+        source: '/',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=300, s-maxage=604800, stale-while-revalidate=2592000',
+          },
+          {
+            key: 'Vercel-CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000, stale-if-error=2592000',
+          },
+          {
+            key: 'CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000',
+          },
+        ],
+      },
+      {
+        source: '/(chart|chat|scanner/ai|scanner/market|stocks|markets/:path*|dividends/:path*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=300, s-maxage=604800, stale-while-revalidate=2592000',
+          },
+          {
+            key: 'Vercel-CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000, stale-if-error=2592000',
+          },
+          {
+            key: 'CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000',
+          },
+        ],
+      },
+      {
         // Public reports, news, and backtest track-record pages (weekend-proof 7-day CDN cache)
         source: '/(reports|reports/:path*|news|scanner/backtests|track-record)',
         headers: [

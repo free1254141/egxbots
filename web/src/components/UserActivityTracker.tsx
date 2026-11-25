@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 
 function getTrackingSessionId(): string {
   const key = "egxbots_activity_session_v1";
@@ -84,7 +85,7 @@ function Tracker() {
     } catch {}
 
     lastTracked.current = key;
-    void fetch("/api/analytics/events", {
+    void hfAuthFetch("/api/analytics/events", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -94,7 +95,7 @@ function Tracker() {
         metadata: { title: typeof document !== "undefined" ? document.title : "", ...(basePath === "/scanner/backtests" ? { tab } : {}) },
       }),
       keepalive: true,
-    }).then((res) => { if (res.status === 401) blockTracking(); }).catch(() => undefined);
+    }, { requireToken: true }).then((res) => { if (res.status === 401) blockTracking(); }).catch(() => undefined);
   }, [pathname, tab, user]);
 
   return null;

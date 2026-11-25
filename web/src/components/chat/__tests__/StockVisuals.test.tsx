@@ -43,12 +43,12 @@ describe("StockVisuals & Website Chat Visual Enrichment", () => {
         );
         expect(screen.getByTestId("price-ladder-svg")).toBeTruthy();
         // Reward (114.5 - 108.5 = 6.0) / Risk (108.5 - 101 = 7.5) = 0.8
-        expect(screen.getByText("R:R 1:0.8")).toBeTruthy();
+        expect(screen.getByText("R:R (حالي) 1:0.8")).toBeTruthy();
 
         const breakoutBtn = screen.getByText(/اختراق 114.5 ج\.م/);
         fireEvent.click(breakoutBtn);
         // Breakout entry 114.5, stop 110.49 (~4.01), target2 121 (+6.5) -> 1:1.6
-        expect(screen.getByText(/R:R 1:1\.\d/)).toBeTruthy();
+        expect(screen.getByText(/R:R \(اختراق\) 1:1\.\d/)).toBeTruthy();
         expect(screen.getByText("دخول الاختراق")).toBeTruthy();
     });
 
@@ -80,6 +80,7 @@ describe("StockVisuals & Website Chat Visual Enrichment", () => {
         );
 
         expect(screen.getByTestId("mini-price-chart")).toBeTruthy();
+        expect(screen.getByText(/تغير 4 جلسة:/)).toBeTruthy();
         expect(screen.getByText(/2026-11-16 — 108.5 ج\.م/)).toBeTruthy();
 
         const svg = screen.getByLabelText("ميني شارت COMI");
@@ -410,10 +411,17 @@ describe("StockVisuals & Website Chat Visual Enrichment", () => {
                             currency: "ج.م",
                             setup_regime: "value_in_downtrend",
                             setup_regime_label_ar: "⚖️ قيمة مالية في تصحيح فني — مراقبة الانعكاس",
+                            market_regime: {
+                                state: "momentum",
+                                label_ar: "🚀 نظام زخم صاعد — اتجاه داعم",
+                                kelly_multiplier: 1.0,
+                                action_guidance_ar: "السماح بامتداد الأهداف",
+                            },
                             conflict_resolution_ar: "تعارض واضح: رخيص مالياً لكن هابط فنياً",
                             technical_score: 36,
                             fundamental_score: 82,
                             conviction_score: 54,
+                            score_formula_ar: "ثقة كمية 54/100 = 40% فني (36) + 35% مالي (82) + 25% مونت كارلو (38.4%)",
                             bull_case: ["تحت القيمة العادلة بنسبة +48%"],
                             bear_case: ["كسر متوسط EMA50"],
                             monte_carlo: {
@@ -425,6 +433,8 @@ describe("StockVisuals & Website Chat Visual Enrichment", () => {
                                 prob_hit_target_first_pct: 38.4,
                                 prob_hit_stop_first_pct: 31.2,
                                 prob_stay_in_range_pct: 30.4,
+                                cvar_10_pct: -8.4,
+                                fractional_kelly_pct: 6.5,
                                 expected_10d_range: { p10: 33.8, p50: 36.7, p90: 40.9 },
                             },
                             self_learning: {
@@ -467,7 +477,14 @@ describe("StockVisuals & Website Chat Visual Enrichment", () => {
         );
 
         expect(screen.getByTestId("quant-intelligence-card")).toBeTruthy();
-        expect(screen.getByText(/ثقة كمية 54\/100/)).toBeTruthy();
+        expect(screen.getByTestId("market-regime-pill").textContent).toContain("نظام زخم صاعد");
+        const convEl = screen.getByText(/ثقة كمية 54\/100/);
+        expect(convEl).toBeTruthy();
+        expect(convEl.getAttribute("title")).toContain("40% فني");
+        expect(screen.getByText(/CVaR 10%/)).toBeTruthy();
+        expect(screen.getByText(/-8\.4%/)).toBeTruthy();
+        expect(screen.getByText(/حجم كيلي \(¼\)/)).toBeTruthy();
+        expect(screen.getByText(/^6\.5%$/)).toBeTruthy();
         expect(screen.getByText(/هدف \(39\.8\): 38\.4%/)).toBeTruthy();
         expect(screen.getByText(/تحت القيمة العادلة بنسبة \+48%/)).toBeTruthy();
 
@@ -476,5 +493,39 @@ describe("StockVisuals & Website Chat Visual Enrichment", () => {
         expect(screen.getByText(/احتمال التعادل خلال 10 جلسات: 29% ⬅️ 46\.5%/)).toBeTruthy();
         expect(screen.getByText(/حارس التبريد — CRST/)).toBeTruthy();
         expect(screen.getByText(/رصد تصريف مؤسسي قوي \(80\/100\)/)).toBeTruthy();
+
+        render(<MomentumLiquidityGauges rsi={54.2} />);
+        expect(screen.getByText("محايد")).toBeTruthy();
+        expect(screen.queryByText("زخم إيجابي صحي")).toBeNull();
+    });
+
+    test("SmartDcaPlanCard interactive budget slider recalculates tranches and average live in browser", () => {
+        render(
+            <SmartDcaPlanCard
+                plan={{
+                    symbol: "COMI",
+                    currency: "ج.م",
+                    dca_allowed: true,
+                    old_shares: 500,
+                    old_avg_price: 90.0,
+                    dca_budget: 10000,
+                    new_avg_price_full: 86.4,
+                    tranches: [
+                        { tranche: 1, label: "الدفعة الأولى", weight_pct: 45, limit_price: 80.0, shares: 56, cost: 4480, fee: 8.96, avg_after: 89.0 },
+                        { tranche: 2, label: "الدفعة الثانية", weight_pct: 55, limit_price: 75.0, shares: 73, cost: 5475, fee: 10.95, avg_after: 86.4 },
+                    ],
+                }}
+            />
+        );
+
+        const slider = screen.getByTestId("dca-budget-slider") as HTMLInputElement;
+        expect(slider.value).toBe("10000");
+        expect(screen.getByText(/56 سهم/)).toBeTruthy();
+
+        // Double the DCA budget -> tranche 1 shares should double cleanly (~112 shares) with zero API calls
+        fireEvent.change(slider, { target: { value: "20000" } });
+        expect(slider.value).toBe("20000");
+        expect(screen.getByText(/112 سهم/)).toBeTruthy();
+        expect(screen.getByText(/146 سهم/)).toBeTruthy();
     });
 });

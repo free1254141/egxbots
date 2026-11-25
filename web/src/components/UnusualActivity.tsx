@@ -22,6 +22,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isPro } from "@/lib/ai/plan-gate";
 import type { SignalPerformancePayload } from "@/app/api/scan/signal-performance/route";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 
 export default function UnusualActivity() {
   const { language } = useLanguage();
@@ -81,7 +82,7 @@ export default function UnusualActivity() {
       setPerf(null);
     } else {
       requests.push(
-        fetch("/api/scan/signal-performance", { signal: controller.signal })
+        hfPublicFetch("/api/scan/signal-performance", { signal: controller.signal }, { cacheTtlMs: 300_000 })
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (data?.ok) setPerf(data);

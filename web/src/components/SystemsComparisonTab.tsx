@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useMarket } from "@/contexts/MarketContext";
 import { isSaudiSymbol } from "@/lib/saudi-stocks";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 
 interface SystemsComparisonTabProps {
   isAr?: boolean;
@@ -87,7 +88,7 @@ export default function SystemsComparisonTab({
         // If medium recommendations were not passed from parent, fetch them
         if (shouldFetchMed) {
           promises.push(
-            fetch(`/api/ai_bot/recommendations?status=all&limit=200&market=${market}`, { cache: "no-store" }).then(
+            hfAuthFetch(`/api/ai_bot/recommendations?status=all&limit=200&market=${market}`, { cache: "no-store" }, { requireToken: false }).then(
               (r) => (r.ok ? r.json() : null)
             )
           );

@@ -467,8 +467,8 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                     },
                     "objective": {
                         "type": "string",
-                        "enum": ["balanced", "min_risk", "risk_parity", "max_diversification"],
-                        "description": "هدف التحسين الرياضي: balanced (متوازن عائد ومخاطرة - افتراضي)، min_risk (أقل مخاطرة وتذبذب GMV)، risk_parity (توزيع متكافئ للمخاطرة)، max_diversification (أقصى تنويع).",
+                        "enum": ["balanced", "min_risk", "risk_parity", "max_diversification", "hrp"],
+                        "description": "هدف التحسين الرياضي: balanced (متوازن عائد ومخاطرة - افتراضي)، min_risk (أقل مخاطرة وتذبذب GMV)، risk_parity (توزيع متكافئ للمخاطرة)، max_diversification (أقصى تنويع)، hrp (توزيع مخاطر هرمي صامد للتقلبات والانهيارات).",
                     },
                     "max_weight_pct": {
                         "type": "number",

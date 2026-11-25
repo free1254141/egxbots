@@ -22,6 +22,7 @@ import TradingViewChart from "@/components/TradingViewChartDynamic";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useOptionalSupportChat } from "@/contexts/SupportChatContext";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import {
   createWorkspace,
   parseWorkspace,
@@ -1277,9 +1278,10 @@ function loadCandles(symbol: string, exchange: string): Promise<Candle[]> {
   if (previous) return previous;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
-  const promise = fetch(
+  const promise = hfPublicFetch(
     `/api/ai_bot/candles?symbol=${encodeURIComponent(symbol)}&exchange=${encodeURIComponent(exchange)}&limit=5000&all=true&include_markers=false`,
     { signal: controller.signal },
+    { cacheTtlMs: 60_000 },
   )
     .then(async (response) => {
       if (!response.ok) throw new Error("Could not load daily history");

@@ -64,7 +64,7 @@ _MARKET_ALLOWED_EXCHANGES = {
     "uae": frozenset({"dfm", "adx"}),
     "qatar": frozenset({"qse"}),
 }
-_MARKET_CURRENCY_MAP = {"egx": "EGP", "tasi": "SAR", "uae": "AED", "qatar": "QAR"}
+_MARKET_CURRENCY_MAP = {"egx": "EGP", "tasi": "SAR", "uae": "AED", "qatar": "QAR", "commodities": "USD"}
 _ARABIC_LETTER_RE = re.compile(r"[\u0600-\u06FF]")
 _ALLOWED_EVENTS = frozenset({"page_view", "feature_use"})
 
@@ -1131,16 +1131,21 @@ def _load_tasi_candles_payload(
         return cached
 
     exchanges = get_market_exchanges(market)
+    is_commodities = market == "commodities"
     currency = _MARKET_CURRENCY_MAP.get(market, "SAR")
     use_storage = limit > 220
     known_storage_ex = (
-        exchange.upper()
-        if (market == "uae" and exchange.upper() in ("DFM", "ADX"))
-        else (None if market == "uae" else get_market_exchange(market))
+        "COMMODITIES"
+        if is_commodities
+        else (
+            exchange.upper()
+            if (market == "uae" and exchange.upper() in ("DFM", "ADX"))
+            else (None if market == "uae" else get_market_exchange(market))
+        )
     )
 
     def _fetch() -> Dict[str, Any]:
-        sb = get_market_supabase(market)
+        sb = get_market_supabase("tasi" if is_commodities else market)
         if sb is None:
             raise RuntimeError(f"{market.upper()} Supabase unavailable")
         db_limit = min(limit, 400) if use_storage else limit
@@ -1154,7 +1159,7 @@ def _load_tasi_candles_payload(
                 price_q = (
                     price_q.in_("exchange", exchanges)
                     if market == "uae"
-                    else price_q.eq("exchange", get_market_exchange(market))
+                    else price_q.eq("exchange", "COMMODITIES" if is_commodities else get_market_exchange(market))
                 )
                 return (
                     getattr(
@@ -1203,6 +1208,21 @@ def _load_tasi_candles_payload(
                 storage_bars = load_storage_symbol_bars(sb, cand_ex, symbol)
                 if storage_bars:
                     break
+
+        if not use_storage and len(raw_prices) < min(limit, 60):
+            # Halted/thinly traded symbol fallback: backfill from Storage archive
+            # even on short limits so older bars remain accessible.
+            from api.saudi_storage_history import load_storage_symbol_bars
+
+            if known_storage_ex:
+                storage_bars = load_storage_symbol_bars(sb, known_storage_ex, symbol)
+            elif market == "uae":
+                hint_ex = str((raw_prices[-1] if raw_prices else {}).get("exchange") or "").upper()
+                candidates = [hint_ex] if hint_ex in ("DFM", "ADX") else ["DFM", "ADX"]
+                for cand_ex in candidates:
+                    storage_bars = load_storage_symbol_bars(sb, cand_ex, symbol)
+                    if storage_bars:
+                        break
 
         if storage_bars:
             from api.saudi_storage_history import merge_bars_storage_with_live
@@ -1269,30 +1289,43 @@ async def api_ai_bot_candles(
         return JSONResponse({"candles": [], "markers": []}, status_code=400)
 
     raw_exch_upper = exchange.strip().upper()
+    explicit_suffix_match = re.search(r"\.(DFM|ADX|QSE|COMMODITIES|SR|SA|TADAWUL|AE|DU|AD|QA)$", raw_symbol, re.IGNORECASE)
+    suffix_exch = explicit_suffix_match.group(1).upper() if explicit_suffix_match else ""
+    sym_base_upper = re.sub(r"\.(SR|SA|TADAWUL|AE|DU|AD|QA|DFM|ADX|QSE|COMMODITIES)$", "", raw_symbol, flags=re.IGNORECASE).upper()
+
     saudi_sym = bool(_SAUDI_TICKER_RE.match(raw_symbol) or re.match(r"^(\^)?TASI(\.SR)?$", raw_symbol, re.IGNORECASE))
     egx_suffix = bool(_EGX_SUFFIX_RE.match(raw_symbol))
-    saudi_exch = raw_exch_upper in ("TADAWUL", "TASI", "SR")
-    uae_exch = raw_exch_upper in ("DFM", "ADX", "UAE")
-    qatar_exch = raw_exch_upper in ("QSE", "QATAR")
-    if not saudi_sym and not egx_suffix and raw_exch_upper not in ("", "EGX", "TADAWUL", "TASI", "SR", "DFM", "ADX", "UAE", "QSE", "QATAR"):
+    saudi_exch = raw_exch_upper in ("TADAWUL", "TASI", "SR") or suffix_exch in ("SR", "SA", "TADAWUL")
+    uae_exch = raw_exch_upper in ("DFM", "ADX", "UAE") or suffix_exch in ("DFM", "ADX", "AE", "DU", "AD")
+    qatar_exch = raw_exch_upper in ("QSE", "QATAR") or suffix_exch in ("QSE", "QA")
+    comm_exch = (
+        raw_exch_upper == "COMMODITIES"
+        or suffix_exch == "COMMODITIES"
+        or sym_base_upper in ("XAUUSD", "XAGUSD")
+    )
+    if not saudi_sym and not egx_suffix and not comm_exch and not uae_exch and not qatar_exch and raw_exch_upper not in ("", "EGX", "TADAWUL", "TASI", "SR", "DFM", "ADX", "UAE", "QSE", "QATAR", "COMMODITIES"):
         return JSONResponse(
-            {"candles": [], "markers": [], "error": "Only EGX and GCC (TASI, DFM, ADX, QSE) market data is available."},
+            {"candles": [], "markers": [], "error": "Only EGX, GCC (TASI, DFM, ADX, QSE), and COMMODITIES market data is available."},
             status_code=410,
         )
 
     hint = request.query_params.get("market") or request.query_params.get("country") or (
-        "TADAWUL" if saudi_exch else ("DFM" if uae_exch else ("QSE" if qatar_exch else ("EGX" if raw_exch_upper == "EGX" else None)))
+        "COMMODITIES" if comm_exch else ("TADAWUL" if saudi_exch else (suffix_exch if suffix_exch in ("DFM", "ADX") else ("DFM" if uae_exch else ("QSE" if qatar_exch else ("EGX" if raw_exch_upper == "EGX" else None)))))
     )
     market = (
-        "tasi"
-        if (saudi_sym or saudi_exch)
+        "commodities"
+        if comm_exch
         else (
-            "uae"
-            if uae_exch
+            "tasi"
+            if (saudi_sym or saudi_exch)
             else (
-                "qatar"
-                if qatar_exch
-                else ("egx" if (egx_suffix or raw_exch_upper == "EGX") else resolve_request_market(request, hint))
+                "uae"
+                if uae_exch
+                else (
+                    "qatar"
+                    if qatar_exch
+                    else ("egx" if (egx_suffix or raw_exch_upper == "EGX") else resolve_request_market(request, hint))
+                )
             )
         )
     )
@@ -1301,13 +1334,14 @@ async def api_ai_bot_candles(
     else:
         raw_lim = 150 if limit is None else int(limit)
         eff_limit = min(max(raw_lim, 1), 5000 if raw_lim > 1000 else 1000)
-    clean_symbol = re.sub(r"\.(SR|SA|TADAWUL|AE|DU|AD|QA)$", "", raw_symbol, flags=re.IGNORECASE).upper() if market != "egx" else raw_symbol
+    clean_symbol = sym_base_upper if market != "egx" else raw_symbol
     explicit_in_url = (
         _has_explicit_market_param(request)
         or saudi_sym
         or saudi_exch
         or uae_exch
         or qatar_exch
+        or comm_exch
         or egx_suffix
         or raw_exch_upper == "EGX"
     )
@@ -1338,8 +1372,20 @@ async def api_ai_bot_candles(
                 payload = {**payload, "markers": []}
             return JSONResponse(payload, headers=headers)
 
+        if market == "commodities":
+            target_exch = "COMMODITIES"
+        elif market == "uae":
+            if suffix_exch in ("DFM", "ADX"):
+                target_exch = suffix_exch
+            elif raw_exch_upper in ("DFM", "ADX"):
+                target_exch = raw_exch_upper
+            else:
+                target_exch = "UAE"
+        else:
+            allowed_exchanges = tuple(get_market_exchanges(market))
+            target_exch = raw_exch_upper if raw_exch_upper in allowed_exchanges else get_market_exchange(market)
         payload = _load_tasi_candles_payload(
-            clean_symbol, raw_exch_upper or get_market_exchange(market), bot_id, eff_limit, market=market
+            clean_symbol, target_exch, bot_id, eff_limit, market=market
         )
         if not with_markers:
             payload = {**payload, "markers": []}
@@ -1863,6 +1909,23 @@ def _load_metals_series() -> Dict[str, List[Dict[str, Any]]]:
             }
         gold = [by_sym["XAUUSD"][d] for d in sorted(by_sym["XAUUSD"].keys())]
         silver = [by_sym["XAGUSD"][d] for d in sorted(by_sym["XAGUSD"].keys())]
+        if len(gold) < 200 or len(silver) < 200:
+            try:
+                from api.saudi_storage_history import (
+                    load_storage_symbol_bars,
+                    merge_bars_storage_with_live,
+                )
+
+                if len(gold) < 200:
+                    st_gold = load_storage_symbol_bars(sb, "COMMODITIES", "XAUUSD")
+                    if st_gold:
+                        gold = merge_bars_storage_with_live(st_gold, gold)[-260:]
+                if len(silver) < 200:
+                    st_silver = load_storage_symbol_bars(sb, "COMMODITIES", "XAGUSD")
+                    if st_silver:
+                        silver = merge_bars_storage_with_live(st_silver, silver)[-260:]
+            except Exception:
+                pass
         return {"gold": gold, "silver": silver}
 
     payload = _METALS_SERIES_SF.do("global_metals", _fetch_metals)

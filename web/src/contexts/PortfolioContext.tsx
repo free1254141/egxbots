@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useAuth } from "./AuthContext";
 import { usePathname } from "next/navigation";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 
 export type PortfolioRow = {
   id: string;
@@ -144,7 +145,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       }
       if (!backgroundRevalidate) setLoading(true);
       try {
-        const response = await fetch("/api/portfolio", (force || backgroundRevalidate) ? { cache: "no-store" } : undefined);
+        const response = await hfAuthFetch("/api/portfolio", (force || backgroundRevalidate) ? { cache: "no-store" } : undefined, { requireToken: true });
         if (response.ok) {
           const next = await response.json();
           if (generation.current === version) {

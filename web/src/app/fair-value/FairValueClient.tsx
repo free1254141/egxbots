@@ -108,7 +108,8 @@ export default function FairValueClient({
         );
         if (!active) return;
         if (hasMatchingInitial) {
-          if (shouldPreferFreshFairValueReport(data, initialReport)) {
+          const hasMoreStocks = (data.stocks?.length ?? 0) > (initialReport?.stocks?.length ?? 0);
+          if (hasMoreStocks || shouldPreferFreshFairValueReport(data, initialReport)) {
             setReport(data);
             setSectorFilter((prev) =>
               prev !== "all" && !data.sectors?.includes(prev) ? "all" : prev

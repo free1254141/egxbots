@@ -1,5 +1,16 @@
+const mockGetSession = jest.fn();
+
+jest.mock("@/lib/supabase/browser", () => ({
+  createSupabaseBrowserClient: () => ({
+    auth: {
+      getSession: mockGetSession,
+    },
+  }),
+}));
+
 import {
   HF_DIRECT_ORIGIN,
+  hfAuthFetch,
   hfPublicFetch,
   resetHfBrowserClientForTests,
   shouldUseDirectHf,
@@ -14,6 +25,8 @@ describe("hf-browser-client", () => {
   beforeEach(() => {
     resetHfBrowserClientForTests();
     delete process.env.NEXT_PUBLIC_DIRECT_HF;
+    mockGetSession.mockReset();
+    mockGetSession.mockResolvedValue({ data: { session: null } });
   });
 
   afterEach(() => {
@@ -107,6 +120,75 @@ describe("hf-browser-client", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/scan/traps?market=egx", undefined);
     // Subsequent call within cooldown uses same-origin directly
+    expect(shouldUseDirectHf()).toBe(false);
+  });
+
+  it("hfAuthFetch attaches Bearer token and credentials: omit on egxbots.com", async () => {
+    delete process.env.JEST_WORKER_ID;
+    (global as any).window = { location: { hostname: "egxbots.com" } };
+    mockGetSession.mockResolvedValueOnce({ data: { session: { access_token: "jwt-123" } } });
+    const fetchMock = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, direct: true }), { status: 200 })
+    );
+    global.fetch = fetchMock as any;
+
+    const res = await hfAuthFetch("/api/user/quota", { cache: "no-store" }, { requireToken: true });
+    expect(await res.json()).toEqual({ ok: true, direct: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${HF_DIRECT_ORIGIN}/api/user/quota`);
+    expect(init.credentials).toBe("omit");
+    expect((init.headers as Headers).get("Authorization")).toBe("Bearer jwt-123");
+  });
+
+  it("hfAuthFetch falls back to same-origin when requireToken is true and session has no token", async () => {
+    delete process.env.JEST_WORKER_ID;
+    (global as any).window = { location: { hostname: "egxbots.com" } };
+    mockGetSession.mockResolvedValueOnce({ data: { session: null } });
+    const fetchMock = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ via: "same-origin" }), { status: 200 })
+    );
+    global.fetch = fetchMock as any;
+
+    const res = await hfAuthFetch("/api/portfolio", { method: "GET" }, { requireToken: true });
+    expect(await res.json()).toEqual({ via: "same-origin" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/portfolio", { method: "GET" });
+  });
+
+  it("hfAuthFetch falls back to same-origin on HTTP 401 without degrading direct HF", async () => {
+    delete process.env.JEST_WORKER_ID;
+    (global as any).window = { location: { hostname: "egxbots.com" } };
+    mockGetSession.mockResolvedValueOnce({ data: { session: { access_token: "expired-jwt" } } });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ refreshed: true }), { status: 200 }));
+    global.fetch = fetchMock as any;
+
+    const res = await hfAuthFetch("/api/ai-chat?action=sessions", undefined, { requireToken: true });
+    expect(await res.json()).toEqual({ refreshed: true });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `${HF_DIRECT_ORIGIN}/api/ai-chat?action=sessions`,
+      expect.objectContaining({ credentials: "omit" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ai-chat?action=sessions", undefined);
+    // 401 must NOT trigger degraded cooldown for other calls
+    expect(shouldUseDirectHf()).toBe(true);
+  });
+
+  it("hfAuthFetch falls back to same-origin and sets degraded cooldown on HTTP 502 or network error", async () => {
+    delete process.env.JEST_WORKER_ID;
+    (global as any).window = { location: { hostname: "www.egxbots.com" } };
+    mockGetSession.mockResolvedValueOnce({ data: { session: { access_token: "jwt-456" } } });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(new Response("bad gateway", { status: 502 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    global.fetch = fetchMock as any;
+
+    const res = await hfAuthFetch("/api/ai_bot/recommendations?limit=6", undefined, { requireToken: false });
+    expect(await res.json()).toEqual({ ok: true });
     expect(shouldUseDirectHf()).toBe(false);
   });
 });

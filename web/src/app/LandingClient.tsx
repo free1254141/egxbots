@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { useChat } from "@/contexts/ChatContext";
+import { hfPublicFetch } from "@/lib/hf-browser-client";
 import {
     Brain,
     Zap,
@@ -131,7 +132,7 @@ export default function LandingClient() {
                 // ignore storage errors
             }
         }
-        const res = await fetch(url);
+        const res = await hfPublicFetch(url, undefined, { cacheTtlMs: 300_000 });
         const data = await res.json();
         if (typeof window !== "undefined" && res.ok && data) {
             try {

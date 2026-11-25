@@ -3,10 +3,10 @@ import type { SimilarityReport } from "@/lib/historical-similarity";
 import type { PortfolioPerformance } from "@/lib/portfolio-performance";
 import { TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 import { fetchUserQuotaCached } from "@/lib/user-quota-client";
-import { hfPublicFetch } from "@/lib/hf-browser-client";
+import { hfPublicFetch, hfAuthFetch } from "@/lib/hf-browser-client";
 
 export async function fetchPortfolioPerformance(signal?: AbortSignal): Promise<PortfolioPerformance> {
-  const response = await fetch("/api/portfolio/performance", { cache: "no-store", signal });
+  const response = await hfAuthFetch("/api/portfolio/performance", { cache: "no-store", signal }, { requireToken: true });
   if (!response.ok) throw new Error(`Portfolio performance unavailable (${response.status})`);
   return response.json();
 }
@@ -30,10 +30,10 @@ export function recordFeatureUse(feature: string, metadata: Record<string, strin
     sessionStorage.setItem(throttleKey, String(Date.now()));
     session_id = sessionStorage.getItem("egxbots_activity_session_v1");
   } catch { /* optional telemetry */ }
-  void fetch("/api/analytics/events", { method: "POST", headers: { "content-type": "application/json" },
+  void hfAuthFetch("/api/analytics/events", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ event_name: "feature_use", path: "/scanner/backtests?tab=similarity", session_id, metadata: { feature, ...metadata } }),
     keepalive: true, cache: "no-store",
-  }).catch(() => undefined);
+  }, { requireToken: true }).catch(() => undefined);
 }
 
 export interface UnusualActivityRow {
@@ -103,7 +103,7 @@ export interface RecommendationBenchmarkAsset {
 
 export async function fetchRecommendationBenchmarks(from: string, to: string, signal?: AbortSignal): Promise<RecommendationBenchmarkAsset[]> {
   const params = new URLSearchParams({ from, to });
-  const response = await fetch(`/api/recommendations/benchmark?${params.toString()}`, { signal });
+  const response = await hfPublicFetch(`/api/recommendations/benchmark?${params.toString()}`, { signal }, { cacheTtlMs: 300_000 });
   if (!response.ok) throw new Error(`Benchmark request failed: ${response.status}`);
   const payload = await response.json();
   return Array.isArray(payload?.assets) ? payload.assets : [];
@@ -2156,7 +2156,7 @@ export async function getStockFundamentals(ticker: string): Promise<any> {
 
   try {
 
-    const res = await fetch(`/api/market/fundamentals?ticker=${encodeURIComponent(ticker)}`);
+    const res = await hfPublicFetch(`/api/market/fundamentals?ticker=${encodeURIComponent(ticker)}`, undefined, { cacheTtlMs: 300_000 });
 
     if (!res.ok) return null;
 
@@ -2414,9 +2414,9 @@ export async function getRecommendationChartHistory(
     try {
       // Do not bind the shared in-flight request to one component's AbortSignal; callers
       // detach safely via raceWithAbort while simultaneous sibling mounts deduplicate cleanly.
-      const response = await fetch(`/api/recommendations/chart-markers?${params}`, {
+      const response = await hfAuthFetch(`/api/recommendations/chart-markers?${params}`, {
         cache: isPublicViewer ? "default" : "no-store",
-      });
+      }, { requireToken: !isPublicViewer });
       if (!response.ok) throw new Error(`Failed to load recommendation history (${response.status})`);
       const data = await response.json();
       const parsed = {
@@ -2488,7 +2488,11 @@ async function fetchDailyPublicJsonCached<T>(
   }
   const run = (async () => {
     try {
-      const res = await fetch(url, forceRefresh ? { cache: "no-cache" } : undefined);
+      const res = await hfPublicFetch(
+        url,
+        forceRefresh ? { cache: "no-cache" } : undefined,
+        forceRefresh ? undefined : { cacheTtlMs: 120_000 },
+      );
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const data = (await res.json()) as T;
       if (typeof window !== "undefined" && data) {

@@ -22,6 +22,7 @@ class _FakeQuery:
         self.table_name = table_name
         self.tables = tables
         self._filters = []
+        self._in_filters = []
         self._gte_filters = []
         self._range = None
         self._limit = None
@@ -36,6 +37,10 @@ class _FakeQuery:
 
     def eq(self, col, val):
         self._filters.append((col, val))
+        return self
+
+    def in_(self, col, vals):
+        self._in_filters.append((col, set(vals or [])))
         return self
 
     def gte(self, col, val):
@@ -109,6 +114,7 @@ class _FakeQuery:
         matched = [
             r for r in rows
             if all(r.get(c) == v for c, v in self._filters)
+            and all(r.get(c) in vs for c, vs in self._in_filters)
             and all(str(r.get(c) or "") >= str(v) for c, v in self._gte_filters)
         ]
         if self._order_col:
@@ -1205,3 +1211,230 @@ def test_saudi_storage_history_merge_prune_guard_and_candles(monkeypatch):
     assert closes[0] == 20.5  # From Storage (2012)
     assert closes[1] == 61.15  # Live DB won tie over Storage (2026-11-23)
     assert closes[2] == 61.8  # Live tail (2026-11-24)
+
+    # 4. Fail-closed archive guard: transient download failure aborts without overwriting Storage
+    uploads = []
+    meta_only_bytes = json.dumps({"exchange": "TADAWUL", "rows": 736600, "first_date": "2010-02-22", "last_date": "2026-11-24"}).encode("utf-8")
+
+    class _FailArchiveBucket:
+        def download(self, path):
+            if path.endswith("metadata.json"):
+                return meta_only_bytes
+            raise ConnectionError("transient storage timeout")
+
+        def upload(self, path, *_args, **_kwargs):
+            uploads.append(path)
+
+    fail_sb = _FakeSaudiSupabase()
+    fail_sb.storage = type("S", (), {"from_": lambda _s, _b: _FailArchiveBucket()})()
+    fail_arch = ssh.refresh_exchange_storage_archive(
+        fail_sb,
+        "TADAWUL",
+        {"1120": [{"date": "2026-11-25", "open": 61.0, "high": 62.0, "low": 60.5, "close": 61.5, "volume": 1000}]},
+    )
+    assert fail_arch["ok"] is False
+    assert fail_arch["reason"] == "existing_archive_download_failed"
+    assert uploads == []
+
+    # Fail-closed guard in gcc_metals_sync._merge_with_existing_storage_bars_checked
+    from api import gcc_metals_sync as gms
+    with pytest.raises(RuntimeError):
+        gms._merge_with_existing_storage_bars_checked(
+            fail_sb,
+            "prices/DFM/symbols/EMAAR.json.gz",
+            [{"symbol": "EMAAR", "exchange": "DFM", "date": "2026-11-25", "open": 12.0, "high": 12.5, "low": 11.9, "close": 12.4, "volume": 100}],
+            require_existing=True,
+        )
+
+    # 5. COMMODITIES (XAUUSD) candles route works (currency=USD, Storage + live tail, never HTTP 410)
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    offload.clear_offload_caches()
+    ssh.invalidate_storage_history_cache()
+    gold_gz = gzip.compress(json.dumps([
+        {"symbol": "XAUUSD", "exchange": "COMMODITIES", "date": "2015-01-05", "open": 1200.0, "high": 1210.0, "low": 1195.0, "close": 1205.0, "volume": 0},
+    ]).encode("utf-8"))
+
+    class _GoldBucket:
+        def download(self, path):
+            assert path == "prices/COMMODITIES/symbols/XAUUSD.json.gz"
+            return gold_gz
+
+    gold_sb = _FakeSaudiSupabase({
+        "stock_prices": [
+            {"symbol": "XAUUSD", "exchange": "COMMODITIES", "date": "2026-11-24", "open": 3620.0, "high": 3650.0, "low": 3600.0, "close": 3635.38, "volume": 0},
+        ],
+        "bot_trades": [],
+    })
+    gold_sb.storage = type("S", (), {"from_": lambda _s, _b: _GoldBucket()})()
+    app = FastAPI()
+    app.include_router(offload.router)
+    client = TestClient(app)
+    monkeypatch.setattr(offload, "get_market_supabase", lambda m: gold_sb if m == "tasi" else None)
+    resp = client.get("/api/ai_bot/candles?symbol=XAUUSD&exchange=COMMODITIES&limit=5000")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["currency"] == "USD"
+    assert body["exchange"] == "COMMODITIES"
+    assert [c["close"] for c in body["candles"]] == [1205.0, 3635.38]
+
+
+def test_candles_explicit_suffixes_and_short_limit_storage_fallback(monkeypatch):
+    """api_ai_bot_candles strips .DFM/.ADX/.QSE/.COMMODITIES, fixes exchange on 2222+EGX,
+    and falls back to Storage even on short limits when Postgres has sparse bars."""
+    import gzip
+    import json
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routers import offload
+    from api.saudi_storage_history import invalidate_storage_history_cache
+
+    offload.clear_offload_caches()
+    invalidate_storage_history_cache()
+
+    storage_files = {
+        "prices/DFM/symbols/EMAAR.json.gz": [
+            {"date": "2020-01-05", "open": 4.0, "high": 4.1, "low": 3.9, "close": 4.05, "volume": 1000000},
+            {"date": "2025-11-01", "open": 8.0, "high": 8.2, "low": 7.9, "close": 8.1, "volume": 2000000},
+        ],
+        "prices/TADAWUL/symbols/2222.json.gz": [
+            {"date": "2020-02-01", "open": 30.0, "high": 31.0, "low": 29.5, "close": 30.5, "volume": 5000000},
+        ],
+        "prices/COMMODITIES/symbols/XAUUSD.json.gz": [
+            {"date": "2015-05-01", "open": 1180.0, "high": 1190.0, "low": 1175.0, "close": 1185.0, "volume": 0},
+        ],
+    }
+
+    class _Bucket:
+        def download(self, path):
+            if path in storage_files:
+                return gzip.compress(json.dumps(storage_files[path]).encode("utf-8"))
+            raise RuntimeError("not found")
+
+    fake_sb = _FakeSaudiSupabase({
+        "stock_prices": [
+            # Only 1 live row per symbol -> triggers short-limit Storage fallback!
+            {"symbol": "EMAAR", "exchange": "DFM", "date": "2026-11-24", "open": 9.0, "high": 9.2, "low": 8.9, "close": 9.15, "volume": 1500000},
+            {"symbol": "2222", "exchange": "TADAWUL", "date": "2026-11-24", "open": 27.0, "high": 27.5, "low": 26.8, "close": 27.2, "volume": 8000000},
+            {"symbol": "XAUUSD", "exchange": "COMMODITIES", "date": "2026-11-24", "open": 3620.0, "high": 3650.0, "low": 3610.0, "close": 3640.0, "volume": 0},
+        ],
+        "bot_trades": [],
+    })
+    fake_sb.storage = type("S", (), {"from_": lambda _s, _b: _Bucket()})()
+
+    app = FastAPI()
+    app.include_router(offload.router)
+    client = TestClient(app)
+    monkeypatch.setattr(offload, "get_market_supabase", lambda _m: fake_sb)
+
+    # 1) Explicit .DFM suffix with short limit=150 still merges Storage when DB has <60 rows
+    r_dfm = client.get("/api/ai_bot/candles?symbol=EMAAR.DFM&limit=150")
+    assert r_dfm.status_code == 200
+    b_dfm = r_dfm.json()
+    assert b_dfm["exchange"] == "DFM"
+    assert b_dfm["currency"] == "AED"
+    assert [c["close"] for c in b_dfm["candles"]] == [4.05, 8.1, 9.15]
+
+    # 2) Legacy Saudi ticker with exchange=EGX resolves target_exch to TADAWUL
+    r_tasi = client.get("/api/ai_bot/candles?symbol=2222&exchange=EGX&limit=150")
+    assert r_tasi.status_code == 200
+    b_tasi = r_tasi.json()
+    assert b_tasi["exchange"] == "TADAWUL"
+    assert b_tasi["currency"] == "SAR"
+    assert [c["close"] for c in b_tasi["candles"]] == [30.5, 27.2]
+
+    # 3) Explicit .COMMODITIES suffix resolves cleanly without 410
+    r_gold = client.get("/api/ai_bot/candles?symbol=XAUUSD.COMMODITIES&limit=150")
+    assert r_gold.status_code == 200
+    b_gold = r_gold.json()
+    assert b_gold["exchange"] == "COMMODITIES"
+    assert b_gold["currency"] == "USD"
+    assert [c["close"] for c in b_gold["candles"]] == [1185.0, 3640.0]
+
+
+def test_chatbot_fetch_saudi_ohlcv_merges_storage_and_postgres(monkeypatch):
+    """Chatbot `_fetch_saudi_ohlcv_for_symbols` merges Storage + Postgres on sparse DB rows
+    or multi-year limits, returning newest-first descending bars with live tail winning."""
+    import gzip
+    import json
+    from api.agentic_chat.tools_execution import _fetch_saudi_ohlcv_for_symbols
+    from api.saudi_storage_history import invalidate_storage_history_cache
+
+    invalidate_storage_history_cache()
+
+    st_bars = [
+        {"date": "2018-01-10", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2, "volume": 100000},
+        {"date": "2026-11-23", "open": 25.0, "high": 25.5, "low": 24.8, "close": 25.1, "volume": 200000},
+    ]
+
+    class _Bucket:
+        def download(self, path):
+            if path == "prices/QSE/symbols/QNBK.json.gz":
+                return gzip.compress(json.dumps(st_bars).encode("utf-8"))
+            raise RuntimeError("not found")
+
+    fake_sb = _FakeSaudiSupabase({
+        "stock_prices": [
+            # Live row overrides 2026-11-23 close (25.4 vs 25.1) and adds 2026-11-24
+            {"symbol": "QNBK", "exchange": "QSE", "date": "2026-11-23", "open": 25.0, "high": 25.6, "low": 24.9, "close": 25.4, "volume": 220000},
+            {"symbol": "QNBK", "exchange": "QSE", "date": "2026-11-24", "open": 25.5, "high": 26.0, "low": 25.3, "close": 25.9, "volume": 300000},
+        ],
+    })
+    # Support `.from_()` alias used in tools_execution.py
+    fake_sb.from_ = fake_sb.table
+    fake_sb.storage = type("S", (), {"from_": lambda _s, _b: _Bucket()})()
+
+    by_sym = _fetch_saudi_ohlcv_for_symbols(fake_sb, ["QNBK"], limit_per_sym=120, exchange="QSE")
+    assert "QNBK" in by_sym
+    rows = by_sym["QNBK"]
+    # Newest-first descending order!
+    assert [r["date"] for r in rows] == ["2026-11-24", "2026-11-23", "2018-01-10"]
+    assert [r["close"] for r in rows] == [25.9, 25.4, 10.2]
+
+
+def test_bot_get_candles_and_archive_reader_support_saudi_storage(monkeypatch):
+    """Both `api.routers.bot.get_candles` and `api.archive_reader` access SAUDI Storage."""
+    import gzip
+    import json
+    import pandas as pd
+    from api.routers import bot, offload
+    from api.archive_reader import fetch_archived_stock_prices, merge_with_archive
+    from api.saudi_storage_history import invalidate_storage_history_cache
+
+    offload.clear_offload_caches()
+    invalidate_storage_history_cache()
+
+    st_bars = [
+        {"date": "2016-03-01", "open": 12.0, "high": 12.5, "low": 11.8, "close": 12.3, "volume": 50000},
+    ]
+
+    class _Bucket:
+        def download(self, path):
+            if path == "prices/ADX/symbols/IHC.json.gz":
+                return gzip.compress(json.dumps(st_bars).encode("utf-8"))
+            raise RuntimeError("not found")
+
+    fake_sb = _FakeSaudiSupabase({
+        "stock_prices": [
+            {"symbol": "IHC", "exchange": "ADX", "date": "2026-11-24", "open": 400.0, "high": 405.0, "low": 399.0, "close": 402.0, "volume": 900000},
+        ],
+        "bot_trades": [],
+    })
+    fake_sb.storage = type("S", (), {"from_": lambda _s, _b: _Bucket()})()
+    monkeypatch.setattr(offload, "get_market_supabase", lambda _m: fake_sb)
+
+    # 1) bot.get_candles delegates ADX to Storage + live merge
+    res = bot.get_candles(symbol="IHC", bot_id="primary", limit=500, exchange="ADX")
+    assert res["exchange"] == "ADX"
+    assert res["currency"] == "AED"
+    assert [c["close"] for c in res["candles"]] == [12.3, 402.0]
+
+    # 2) archive_reader supports non-EGX exchange="ADX"
+    arch_df = fetch_archived_stock_prices(fake_sb, "IHC", exchange="ADX")
+    assert arch_df is not None and len(arch_df) == 1
+    assert float(arch_df.iloc[0]["close"]) == 12.3
+
+    live_df = pd.DataFrame([{"date": "2026-11-24", "open": 400.0, "high": 405.0, "low": 399.0, "close": 402.0, "volume": 900000}])
+    merged = merge_with_archive(fake_sb, "IHC", live_df, exchange="ADX")
+    assert len(merged) == 2
+    assert list(merged["close"]) == [12.3, 402.0]

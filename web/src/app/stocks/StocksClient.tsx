@@ -57,6 +57,7 @@ export default function StocksClient({
 
   const [query, setQuery] = useState("");
   const [selectedSector, setSelectedSector] = useState("all");
+  const [showAll, setShowAll] = useState(false);
   const [tasiStocks, setTasiStocks] = useState<StockItem[] | null>(
     initialTasiStocks.length > 0 ? initialTasiStocks : null
   );
@@ -296,7 +297,7 @@ export default function StocksClient({
 
       {/* Grid of Stocks */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {filtered.map((stock) => (
+        {(showAll || query.trim() || selectedSector !== "all" ? filtered : filtered.slice(0, 48)).map((stock) => (
           <Link
             prefetch={false}
             key={stock.symbol}
@@ -338,6 +339,18 @@ export default function StocksClient({
           </Link>
         ))}
       </div>
+
+      {!showAll && !query.trim() && selectedSector === "all" && filtered.length > 48 && (
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="px-5 py-2.5 text-xs font-black border-2 border-black dark:border-white bg-[#FFE600] text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)] hover:-translate-y-0.5 transition-transform cursor-pointer"
+          >
+            {isAr ? `عرض كل الأسهم (+${filtered.length - 48})` : `Show all stocks (+${filtered.length - 48})`}
+          </button>
+        </div>
+      )}
 
       {filtered.length === 0 && (
         <div className="py-16 text-center border-4 border-dashed border-zinc-300 dark:border-zinc-800">

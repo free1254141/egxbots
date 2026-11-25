@@ -1446,6 +1446,35 @@ def get_candles(symbol: str, bot_id: str = "primary", limit: int = 150, exchange
             # HF merging returns ascending rows; database fallback returns
             # descending rows. Normalize both to chronological chart order.
             raw_candles.sort(key=lambda candle: str(candle.get("date", "")))
+        elif exchange in ("TADAWUL", "TASI", "SR", "DFM", "ADX", "UAE", "QSE", "QATAR", "COMMODITIES") or db_symbol.upper() in ("XAUUSD", "XAGUSD"):
+            from api.routers.offload import _load_tasi_candles_payload
+
+            eff_market = (
+                "commodities"
+                if (exchange == "COMMODITIES" or db_symbol.upper() in ("XAUUSD", "XAGUSD"))
+                else (
+                    "tasi"
+                    if exchange in ("TADAWUL", "TASI", "SR")
+                    else ("uae" if exchange in ("DFM", "ADX", "UAE") else "qatar")
+                )
+            )
+            eff_exch = (
+                "COMMODITIES"
+                if eff_market == "commodities"
+                else (
+                    "TADAWUL"
+                    if eff_market == "tasi"
+                    else (exchange if exchange in ("DFM", "ADX") else ("UAE" if eff_market == "uae" else "QSE"))
+                )
+            )
+            clean_sym = db_symbol.upper()
+            for sfx in (".SR", ".SA", ".TADAWUL", ".AE", ".DU", ".AD", ".QA", ".DFM", ".ADX", ".QSE", ".COMMODITIES"):
+                if clean_sym.endswith(sfx):
+                    clean_sym = clean_sym[: -len(sfx)]
+                    break
+            return _load_tasi_candles_payload(
+                clean_sym, eff_exch, bot_id, limit, market=eff_market
+            )
         else:
             # Non-EGX intraday persistence was retired. The in-memory bot bar
             # fallback below remains available for active virtual bots.

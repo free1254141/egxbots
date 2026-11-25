@@ -177,8 +177,8 @@ def _simulate_paths(
     bars: List[Dict[str, Any]],
     n_paths: int = 5000,
     horizon_days: int = 10,
-) -> Tuple[np.ndarray, float, float]:
-    """Vectorized 5,000-path Student-t/Empirical fat-tail simulation with market circuit limits."""
+) -> Tuple[np.ndarray, float, float, float]:
+    """Vectorized 5,000-path GARCH(1,1) + Merton Jump-Diffusion + Student-t/Empirical simulation."""
     daily_limit = get_exchange_daily_limit(exchange)
     log_rets, sigma, drift = _estimate_ewma_vol_and_drift(bars, daily_limit)
 
@@ -188,6 +188,10 @@ def _simulate_paths(
 
     t_scale = math.sqrt(3.0 / 5.0)  # Standardize Student-t(df=5) to unit variance
     t_shocks = rng.standard_t(df=5.0, size=(n_paths, horizon_days)) * t_scale
+
+    jump_lambda = 0.0
+    jump_mu = 0.0
+    jump_sigma = 0.0
 
     if len(log_rets) >= 15:
         emp_std = float(np.std(log_rets, ddof=1))
@@ -200,15 +204,51 @@ def _simulate_paths(
         emp_shocks = z_pool[emp_idx]
         use_emp = rng.random(size=(n_paths, horizon_days)) < 0.50
         z = np.where(use_emp, emp_shocks, t_shocks)
+
+        if sigma >= 0.008 and emp_std >= 0.006:
+            tail_mask = np.abs(log_rets - emp_mean) > (2.5 * emp_std)
+            tail_count = int(np.sum(tail_mask))
+            if tail_count >= 1:
+                jump_lambda = float(np.clip(np.mean(tail_mask), 0.01, 0.12))
+                jump_mu = float(np.clip(np.mean(log_rets[tail_mask]), -0.06, 0.04))
+                j_std = float(np.std(log_rets[tail_mask])) if tail_count > 1 else (1.5 * emp_std)
+                jump_sigma = float(np.clip(j_std, 0.015, daily_limit * 0.45))
     else:
         z = t_shocks
 
     z = np.clip(z, -4.5, 4.5)
     max_log = math.log(1.0 + daily_limit)
     min_log = math.log(max(1.0 - daily_limit, 0.05))
-    sim_rets = np.clip(drift + sigma * z, min_log, max_log)
+    min_var = 0.004 ** 2
+    max_var = (daily_limit * 0.75) ** 2
+
+    if len(log_rets) >= 10:
+        var_lr = float(np.clip(np.var(log_rets, ddof=1), min_var, max_var))
+    else:
+        var_lr = float(np.clip(sigma ** 2, min_var, max_var))
+
+    if jump_lambda > 0.0:
+        has_jump = rng.random(size=(n_paths, horizon_days)) < jump_lambda
+        jump_mat = np.where(has_jump, rng.normal(jump_mu, jump_sigma, size=(n_paths, horizon_days)), 0.0)
+    else:
+        jump_mat = None
+
+    alpha, beta = 0.09, 0.87
+    omega = max(1e-10, (1.0 - alpha - beta) * var_lr)
+    var_t = np.full(n_paths, float(np.clip(sigma ** 2, min_var, max_var)), dtype=float)
+    sim_rets = np.empty((n_paths, horizon_days), dtype=float)
+
+    for t in range(horizon_days):
+        sig_t = np.sqrt(np.clip(var_t, min_var, max_var))
+        r_t = drift + sig_t * z[:, t]
+        if jump_mat is not None:
+            r_t = r_t + jump_mat[:, t]
+        r_t = np.clip(r_t, min_log, max_log)
+        sim_rets[:, t] = r_t
+        var_t = omega + alpha * ((r_t - drift) ** 2) + beta * var_t
+
     paths = float(close) * np.exp(np.cumsum(sim_rets, axis=1))
-    return paths, sigma, drift
+    return paths, sigma, drift, jump_lambda
 
 
 def run_monte_carlo_barrier_sim(
@@ -232,7 +272,7 @@ def run_monte_carlo_barrier_sim(
 
     bars = _extract_sorted_bars(ohlcv_rows)
     bar_date = last_date or (bars[-1]["date"] if bars else "")
-    paths, sigma, _ = _simulate_paths(
+    paths, sigma, _, jump_lambda = _simulate_paths(
         symbol=symbol,
         exchange=exchange,
         close=close,
@@ -266,9 +306,16 @@ def run_monte_carlo_barrier_sim(
     p50 = round(float(np.percentile(terminal, 50)), dec)
     p90 = round(float(np.percentile(terminal, 90)), dec)
 
+    terminal_rets = ((terminal - float(close)) / float(close)) * 100.0
+    p10_ret = float(np.percentile(terminal_rets, 10))
+    tail_rets = terminal_rets[terminal_rets <= p10_ret]
+    cvar_10_pct = round(float(np.mean(tail_rets)), 2) if tail_rets.size > 0 else round(p10_ret, 2)
+
     return {
         "paths_count": n_paths,
         "horizon_days": horizon_days,
+        "simulation_model": "GARCH(1,1) + Merton Jump-Diffusion",
+        "jump_risk_pct": round(jump_lambda * 100.0, 1),
         "daily_limit_pct": round(get_exchange_daily_limit(exchange) * 100.0, 1),
         "target_barrier": round(eff_target, dec),
         "stop_barrier": round(eff_stop, dec),
@@ -276,6 +323,7 @@ def run_monte_carlo_barrier_sim(
         "prob_hit_stop_first_pct": raw_s,
         "prob_stay_in_range_pct": raw_r,
         "expected_10d_range": {"p10": p10, "p50": p50, "p90": p90},
+        "cvar_10_pct": cvar_10_pct,
         "daily_vol_pct": round(sigma * 100.0, 2),
         "annualized_vol_pct": round(sigma * math.sqrt(252.0) * 100.0, 1),
     }
@@ -298,7 +346,7 @@ def prob_touch_level(
         return 100.0
     bars = _extract_sorted_bars(ohlcv_rows)
     bar_date = bars[-1]["date"] if bars else ""
-    paths, _, _ = _simulate_paths(
+    paths, _, _, _ = _simulate_paths(
         symbol=symbol,
         exchange=exchange,
         close=close,
@@ -556,12 +604,14 @@ def calibrate_probabilities_with_market_outcomes(
     t_lvl = float(mc_res.get("target_barrier") or close * 1.06)
     s_lvl = float(mc_res.get("stop_barrier") or close * 0.96)
 
+    horizon_d = max(1, int(mc_res.get("horizon_days") or 10))
     emp_win, emp_loss, emp_n = _rolling_empirical_barrier_hit_rate(
         bars,
         target_mult=(t_lvl / close) if close > 0 else 1.06,
         stop_mult=(s_lvl / close) if close > 0 else 0.96,
-        horizon_days=int(mc_res.get("horizon_days") or 10),
+        horizon_days=horizon_d,
     )
+    eff_n = max(1, emp_n // horizon_d) if emp_n > 0 else 0
 
     sig_perf = _fetch_market_cache_payload(SIG_PERF_CACHE_KEY) if str(exchange).upper() == "EGX" else None
     upthrust_win_rate = None
@@ -590,8 +640,9 @@ def calibrate_probabilities_with_market_outcomes(
             w = min(0.40, emp_n / 80.0)
             cal_t = (1.0 - w) * raw_t + w * emp_win
             cal_s = (1.0 - w) * raw_s + w * emp_loss
+            win_lbl = "نافذة مستقلة واحدة" if eff_n == 1 else ("نافذتان مستقلتان" if eff_n == 2 else ("نوافذ مستقلة" if 3 <= eff_n <= 10 else "نافذة مستقلة"))
             lessons.append(
-                f"معايرة بايزية بسجل السهم ({emp_n} نافذة تاريخية بمعدل وصول {emp_win:.1f}%)"
+                f"معايرة بايزية بسجل السهم ({emp_n} نافذة متداخلة ≈ {eff_n} {win_lbl} بمعدل وصول فعلي {emp_win:.1f}%)"
             )
 
     # 2. Mistake-guard exhaustion/distribution adjustment
@@ -625,9 +676,26 @@ def calibrate_probabilities_with_market_outcomes(
     fix_diff = round(100.0 - (cal_t_r + cal_s_r + cal_r_r), 1)
     cal_r_r = round(max(0.0, cal_r_r + fix_diff), 1)
 
-    upside_pct = ((t_lvl - close) / close) * 100.0
-    downside_pct = ((close - s_lvl) / close) * 100.0
+    if close > 0:
+        upside_pct = ((t_lvl - close) / close) * 100.0
+        downside_pct = ((close - s_lvl) / close) * 100.0
+    else:
+        upside_pct = 0.0
+        downside_pct = 0.0
     expectancy_pct = round((cal_t_r / 100.0) * upside_pct - (cal_s_r / 100.0) * downside_pct, 2)
+    empirical_expectancy_pct = (
+        round((emp_win / 100.0) * upside_pct - (emp_loss / 100.0) * downside_pct, 2)
+        if (emp_win is not None and emp_loss is not None)
+        else None
+    )
+    p_win = cal_t_r / 100.0
+    q_loss = cal_s_r / 100.0
+    b_odds = upside_pct / max(downside_pct, 1e-6)
+    if p_win > 0.0 and q_loss >= 0.0 and b_odds > 0.0 and expectancy_pct > 0.0:
+        kelly_raw = p_win - (q_loss / b_odds)
+        fractional_kelly_pct = round(max(0.0, min(25.0, 0.25 * kelly_raw * 100.0)), 1)
+    else:
+        fractional_kelly_pct = 0.0
 
     eval_date = bars[-1]["date"] if bars and bars[-1]["date"] else dt.date.today().isoformat()
     avg_brier = None
@@ -651,6 +719,7 @@ def calibrate_probabilities_with_market_outcomes(
         "prob_hit_stop_first_pct": cal_s_r,
         "prob_stay_in_range_pct": cal_r_r,
         "mathematical_expectancy_pct": expectancy_pct,
+        "fractional_kelly_pct": fractional_kelly_pct,
     }
     if not lessons:
         lessons.append("المعايرة متوافقة مع التوزيع الإحصائي الحديث دون تحذيرات تصريف.")
@@ -660,6 +729,8 @@ def calibrate_probabilities_with_market_outcomes(
         "calibrated_target_prob_pct": cal_t_r,
         "empirical_hit_rate_pct": emp_win,
         "empirical_sample_size": emp_n,
+        "empirical_effective_windows": eff_n,
+        "empirical_expectancy_pct": empirical_expectancy_pct,
         "brier_score": avg_brier,
         "learned_lesson_ar": " | ".join(lessons),
     }
@@ -680,6 +751,8 @@ def get_cached_macro_sensitivity(symbol: str, exchange: str = "EGX") -> Optional
         return None
     c_usd = _sf(payload.get("corr_usd_parallel"))
     c_gold = _sf(payload.get("corr_gold"))
+    if (c_usd or 0.0) == 0.0 and (c_gold or 0.0) == 0.0:
+        return None
     rating = str(payload.get("rating") or "")
     usd_txt = f"{c_usd:+.2f}" if c_usd is not None else "—"
     gold_txt = f"{c_gold:+.2f}" if c_gold is not None else "—"
@@ -688,6 +761,96 @@ def get_cached_macro_sensitivity(symbol: str, exchange: str = "EGX") -> Optional
         "corr_usd_parallel": c_usd,
         "corr_gold": c_gold,
         "summary_ar": f"تحوط الماكرو ({rating}): ارتباط الدولار {usd_txt} | الذهب {gold_txt}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Deterministic 4-State Market Regime Engine (Zero Extra LLM Cost)
+# ---------------------------------------------------------------------------
+
+def detect_stock_regime(
+    bars: Sequence[Dict[str, Any]],
+    *,
+    close: float,
+    ema_50: Optional[float] = None,
+    ema_200: Optional[float] = None,
+    rsi_14: Optional[float] = None,
+    r_vol: Optional[float] = None,
+    dist_score: Optional[float] = None,
+    acc_score: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Classify the stock's current volatility & trend regime and return Kelly scaling multiplier."""
+    closes: List[float] = []
+    highs: List[float] = []
+    for row in bars or []:
+        c = _sf(row.get("close"))
+        h = _sf(row.get("high")) or c
+        if c and c > 0:
+            closes.append(c)
+            highs.append(h if (h and h > 0) else c)
+
+    vol_ratio = 1.0
+    if len(closes) >= 21:
+        arr = np.asarray(closes, dtype=float)
+        rets = np.diff(np.log(arr))
+        s60 = float(np.std(rets[-60:], ddof=1)) if len(rets) >= 20 else 0.02
+        s10 = float(np.std(rets[-10:], ddof=1)) if len(rets) >= 10 else s60
+        if math.isfinite(s60) and s60 > 1e-6 and math.isfinite(s10):
+            vol_ratio = round(float(np.clip(s10 / s60, 0.3, 4.0)), 2)
+
+    max_high_20 = max(highs[-20:]) if highs else float(close)
+    dd_20_pct = round(((float(close) - max_high_20) / max_high_20) * 100.0, 2) if max_high_20 > 0 else 0.0
+
+    rsi_v = _sf(rsi_14) if rsi_14 is not None else 50.0
+    rvol_v = _sf(r_vol) if r_vol is not None else 1.0
+    dist_v = _sf(dist_score) or 0.0
+    acc_v = _sf(acc_score) or 0.0
+    e50 = _sf(ema_50)
+    e200 = _sf(ema_200)
+
+    if (dd_20_pct <= -15.0 and vol_ratio >= 1.35) or (rsi_v <= 30.0 and vol_ratio >= 1.5) or (dd_20_pct <= -20.0):
+        return {
+            "state": "panic",
+            "label_ar": "🔴 نظام ذعر وتذبذب حاد — أولوية حماية الكاش",
+            "vol_ratio": vol_ratio,
+            "drawdown_20d_pct": dd_20_pct,
+            "kelly_multiplier": 0.0,
+            "action_guidance_ar": "تشديد الوقف وحماية الكاش — يُمنع توسيع المراكز قبل هدوء التذبذب",
+        }
+    if (dist_v >= 65.0) or (vol_ratio >= 1.30 and e50 and close < e50) or (rsi_v >= 74.0 and rvol_v < 1.0):
+        return {
+            "state": "distribution",
+            "label_ar": "🟠 نظام تصريف وتذبذب متصاعد — حذر جني أرباح",
+            "vol_ratio": vol_ratio,
+            "drawdown_20d_pct": dd_20_pct,
+            "kelly_multiplier": 0.5,
+            "action_guidance_ar": "خفض حجم المخاطرة للنصف وتأمين الأرباح عند المقاومات",
+        }
+    if (e50 and close > e50) and (not e200 or close >= e200 * 0.99) and (48.0 <= rsi_v <= 72.0) and (rvol_v >= 0.9 or acc_v >= 60.0):
+        return {
+            "state": "momentum",
+            "label_ar": "🚀 نظام زخم صاعد — اتجاه داعم",
+            "vol_ratio": vol_ratio,
+            "drawdown_20d_pct": dd_20_pct,
+            "kelly_multiplier": 1.0,
+            "action_guidance_ar": "السماح بامتداد الأهداف مع تتبّع وقف متحرك أسفل EMA50",
+        }
+    if e50 and close < e50 * 0.97 and acc_v < 58.0:
+        return {
+            "state": "corrective",
+            "label_ar": "🟡 نظام تصحيح هادئ — أسفل المتوسطات بانتظار قاع",
+            "vol_ratio": vol_ratio,
+            "drawdown_20d_pct": dd_20_pct,
+            "kelly_multiplier": 0.5,
+            "action_guidance_ar": "تريّث وانتظار ارتكاز مؤكد أو استعادة EMA50 قبل بناء مركز كامل",
+        }
+    return {
+        "state": "accumulation",
+        "label_ar": "🟢 نظام تجميع/استقرار — تذبذب منضبط",
+        "vol_ratio": vol_ratio,
+        "drawdown_20d_pct": dd_20_pct,
+        "kelly_multiplier": 1.0,
+        "action_guidance_ar": "بناء تدريجي منضبط قرب الدعوم مع احترام وقف الخسارة",
     }
 
 
@@ -746,14 +909,24 @@ def build_quant_intelligence_for_stock(
             tech_pts += 12.0
             bull_case.append(f"فوق متوسط EMA50 ({ema_50}) — اتجاه متوسط داعم")
         else:
-            tech_pts -= 12.0
-            bear_case.append(f"كسر متوسط EMA50 ({ema_50}) — ضغط بيعي قصير/متوسط")
+            gap50_pct = ((close_f - ema_50) / ema_50) * 100.0
+            if gap50_pct <= -3.5:
+                tech_pts -= 12.0
+                bear_case.append(f"كسر متوسط EMA50 ({ema_50}) — ضغط بيعي قصير/متوسط")
+            else:
+                tech_pts -= 6.0
+                bear_case.append(f"قريب أسفل EMA50 ({ema_50} بفارق {gap50_pct:.1f}%) — اختبار ارتكاز قريب")
     if ema_200:
         if above_ema200:
             tech_pts += 10.0
         else:
-            tech_pts -= 12.0
-            bear_case.append(f"تحت EMA200 ({ema_200}) — مسار هابط رئيسي")
+            gap200_pct = ((close_f - ema_200) / ema_200) * 100.0
+            if gap200_pct <= -5.0:
+                tech_pts -= 12.0
+                bear_case.append(f"تحت EMA200 ({ema_200}) — مسار هابط رئيسي")
+            else:
+                tech_pts -= 5.0
+                bear_case.append(f"قريب أسفل EMA200 ({ema_200} بفارق {gap200_pct:.1f}%) — يحتاج تأكيد استعادة المتوسط")
     if vwap_20:
         if above_vwap:
             tech_pts += 6.0
@@ -870,9 +1043,19 @@ def build_quant_intelligence_for_stock(
         regime_label_ar = "🟡 نطاق عرضي متوازن — انتظار الحسم"
         conflict_ar = "توازن نسبي بين الإشارات الصاعدة والهابطة؛ يُراقَب اختراق المقاومة بسيولة أو التماسك عند الدعم."
 
-    # 4. Market-Calibrated Monte Carlo + Self-Learning Calibration
+    # 4. Market-Calibrated Monte Carlo + Self-Learning Calibration + 4-State Regime Scaling
     eff_stop = tactical_stop_loss if (support_1_is_distant and tactical_stop_loss) else stop_loss
     bars = _extract_sorted_bars(ohlcv_rows)
+    market_regime = detect_stock_regime(
+        bars,
+        close=close_f,
+        ema_50=ema_50,
+        ema_200=ema_200,
+        rsi_14=rsi_v,
+        r_vol=rvol_v,
+        dist_score=dist_v,
+        acc_score=acc_v,
+    )
     raw_mc = run_monte_carlo_barrier_sim(
         bars,
         close=close_f,
@@ -894,6 +1077,9 @@ def build_quant_intelligence_for_stock(
         setup_regime=setup_regime,
         record_ledger=record_ledger,
     )
+    kelly_mult = float(market_regime.get("kelly_multiplier", 1.0))
+    if mc_cal.get("fractional_kelly_pct") is not None:
+        mc_cal["fractional_kelly_pct"] = round(float(mc_cal["fractional_kelly_pct"]) * kelly_mult, 1)
 
     # Conviction score blends technical, fundamental, and calibrated barrier probability
     cal_t_prob = float(mc_cal.get("calibrated_target_prob_pct") or 50.0)
@@ -902,6 +1088,10 @@ def build_quant_intelligence_for_stock(
         conviction = min(conviction, 35)
 
     macro = get_cached_macro_sensitivity(symbol, exchange=exchange)
+    score_formula_ar = (
+        f"ثقة كمية {conviction}/100 = 40% فني ({technical_score}) "
+        f"+ 35% مالي ({fundamental_score}) + 25% مونت كارلو المعاير ({cal_t_prob:.1f}%)"
+    )
 
     return {
         "symbol": str(symbol).upper(),
@@ -909,10 +1099,12 @@ def build_quant_intelligence_for_stock(
         "currency": currency,
         "setup_regime": setup_regime,
         "setup_regime_label_ar": regime_label_ar,
+        "market_regime": market_regime,
         "conflict_resolution_ar": conflict_ar,
         "technical_score": technical_score,
         "fundamental_score": fundamental_score,
         "conviction_score": conviction,
+        "score_formula_ar": score_formula_ar,
         "is_sharia_compliant": is_sharia_compliant,
         "bull_case": bull_case[:4],
         "bear_case": bear_case[:4],

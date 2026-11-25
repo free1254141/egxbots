@@ -110,7 +110,11 @@ _BUY_INCREASE_CUES_RE = re.compile(
     r"(?:زيادة|تعزيز|شراء|زود|تزود|أضف|إضافة|التعزيز|الزيادة|ادخل|دخول|شراء\s+إضافي)"
 )
 _EXIT_OR_NEGATION_CUES_RE = re.compile(
-    r"(?:لا\s+تزيد|لا\s+ينصح|لا\s+أنصح|تجنب|ممنوع|مستبعد|مستبعدة|بيع|تصفية|تخارج|إلغاء|خروج|قبل\s+بيع|عوضاً\s+عن|بدلاً\s+من|عدم\s+الشراء|عدم\s+الزيادة|لا\s+تشتري|غير\s+مناسب)"
+    r"(?:لا\s+تزيد|لا\s+ينصح|لا\s+أنصح|تجنب|ممنوع|مستبعد|مستبعدة|بيع|تصفية|تخارج|إلغاء|خروج|"
+    r"قبل\s+بيع|عوضاً\s+عن|بدلاً\s+من|عدم\s+الشراء|عدم\s+الزيادة|لا\s+تشتري|غير\s+مناسب|"
+    r"دون\s+زيادة|بدون\s+زيادة|بلا\s+زيادة|دون\s+تعزيز|بدون\s+تعزيز|بلا\s+تعزيز|"
+    r"دون\s+إضافة|بدون\s+إضافة|لا\s+إضافة|لا\s+مضاعفة|فلا\s+مضاعفة|"
+    r"سيخرج|ستخرج|يخرج|تخرج|يبقى\s+دون|لا\s+تشتر|لا\s+تعزز|لا\s+تزود)"
 )
 
 
@@ -212,6 +216,199 @@ def _collect_ground_truth(
         _visit(payload, 0)
 
     return stale_stocks, fetched_currencies, missing_data
+
+
+_DISCLAIMER_LINE_RE = re.compile(
+    r"ليس(?:ت)?\s+(?:نصيحة|توصية)\s+استثمارية",
+    re.IGNORECASE,
+)
+
+
+def _dedupe_trailing_disclaimers(text: str) -> str:
+    """Collapse consecutive trailing investment disclaimer footers down to a single clean footer."""
+    lines = text.splitlines()
+    div_re = re.compile(r"^\s*[-_*]{3,}\s*$")
+    content_idx = [
+        i for i, ln in enumerate(lines)
+        if ln.strip() and not div_re.match(ln)
+    ]
+    if len(content_idx) < 2:
+        return text
+    last_i = content_idx[-1]
+    prev_i = content_idx[-2]
+    if _DISCLAIMER_LINE_RE.search(lines[last_i]) and _DISCLAIMER_LINE_RE.search(lines[prev_i]):
+        # Keep the richer disclaimer line (prefer the one without bare markdown italics-only short text)
+        keep_last = len(lines[last_i].strip()) >= len(lines[prev_i].strip())
+        drop_i = prev_i if keep_last else last_i
+        del lines[drop_i]
+        cleaned: List[str] = []
+        prev_nonempty_is_div = False
+        for ln in lines:
+            is_div = bool(div_re.match(ln))
+            if is_div and prev_nonempty_is_div:
+                continue
+            cleaned.append(ln)
+            if ln.strip():
+                prev_nonempty_is_div = is_div
+        while cleaned and (not cleaned[-1].strip() or div_re.match(cleaned[-1])):
+            cleaned.pop()
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned)).strip()
+    return text
+
+
+def _extract_single_stock_truth(
+    tool_payloads: List[Dict[str, Any]],
+) -> Tuple[Optional[Tuple[str, Dict[str, Any]]], bool, bool]:
+    """Collect authoritative per-stock truth and dividend context from tool payloads."""
+    stock_records: Dict[str, Dict[str, Any]] = {}
+    checked_dividends = False
+    has_any_upcoming_dividend = False
+
+    def _visit(node: Any, depth: int) -> None:
+        nonlocal checked_dividends, has_any_upcoming_dividend
+        if depth > 4:
+            return
+        if isinstance(node, list):
+            for item in node:
+                _visit(item, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+
+        if "upcoming_dividend" in node and isinstance(node.get("upcoming_dividend"), dict) and node["upcoming_dividend"]:
+            checked_dividends = True
+            has_any_upcoming_dividend = True
+        if "upcoming_dividends" in node:
+            checked_dividends = True
+            if isinstance(node.get("upcoming_dividends"), list) and len(node["upcoming_dividends"]) > 0:
+                has_any_upcoming_dividend = True
+        if "dividends" in node:
+            checked_dividends = True
+            if isinstance(node.get("dividends"), list):
+                for div_row in node["dividends"]:
+                    if isinstance(div_row, dict) and (
+                        div_row.get("is_upcoming")
+                        or div_row.get("upcoming")
+                        or div_row.get("status") in ("upcoming", "pending_pay")
+                    ):
+                        has_any_upcoming_dividend = True
+
+        sym_raw = node.get("symbol")
+        if isinstance(sym_raw, str) and sym_raw.strip():
+            sym = sym_raw.strip().upper()
+            close_v = node.get("close") if node.get("close") is not None else node.get("current_price")
+            has_core = (
+                close_v is not None
+                or node.get("fair_value") is not None
+                or isinstance(node.get("quant_intelligence"), dict)
+            )
+            if has_core:
+                if "payout_ratio_pct" in node or "dividend_yield" in node:
+                    checked_dividends = True
+                rec = stock_records.setdefault(sym, {})
+                if close_v is not None and rec.get("close") is None:
+                    try:
+                        c_f = float(close_v)
+                        if c_f > 0:
+                            rec["close"] = c_f
+                    except (TypeError, ValueError):
+                        pass
+                if node.get("date") and not rec.get("date"):
+                    rec["date"] = str(node["date"])[:10]
+                if node.get("currency") and not rec.get("currency"):
+                    rec["currency"] = str(node["currency"]).strip()
+                up_raw = node.get("valuation_upside_pct") if node.get("valuation_upside_pct") is not None else node.get("upside_pct")
+                if up_raw is not None and rec.get("upside") is None:
+                    try:
+                        rec["upside"] = float(up_raw)
+                    except (TypeError, ValueError):
+                        pass
+                if node.get("fair_value") is not None and rec.get("fair_value") is None:
+                    try:
+                        fv_v = float(node["fair_value"])
+                        if fv_v > 0:
+                            rec["fair_value"] = fv_v
+                    except (TypeError, ValueError):
+                        pass
+                for sl_k in ("stop_loss", "tactical_stop_loss"):
+                    if node.get(sl_k) is not None:
+                        try:
+                            sl_v = float(node[sl_k])
+                            if sl_v > 0:
+                                rec.setdefault("valid_stops", []).append(sl_v)
+                        except (TypeError, ValueError):
+                            pass
+                for r_k in ("resistance_1", "resistance_2"):
+                    if node.get(r_k) is not None:
+                        try:
+                            r_v = float(node[r_k])
+                            if r_v > 0:
+                                rec.setdefault("valid_resistances", []).append(r_v)
+                        except (TypeError, ValueError):
+                            pass
+                qi = node.get("quant_intelligence")
+                if isinstance(qi, dict) and isinstance(qi.get("monte_carlo"), dict):
+                    mc = qi["monte_carlo"]
+                    if mc.get("stop_barrier") is not None:
+                        try:
+                            sb_v = float(mc["stop_barrier"])
+                            if sb_v > 0:
+                                rec.setdefault("valid_stops", []).append(sb_v)
+                        except (TypeError, ValueError):
+                            pass
+                    if mc.get("target_barrier") is not None:
+                        try:
+                            tb_v = float(mc["target_barrier"])
+                            if tb_v > 0:
+                                rec.setdefault("valid_resistances", []).append(tb_v)
+                        except (TypeError, ValueError):
+                            pass
+                    if mc.get("prob_hit_target_first_pct") is not None and rec.get("mc_t") is None:
+                        try:
+                            rec["mc_t"] = float(mc["prob_hit_target_first_pct"])
+                            rec["mc_s"] = float(mc.get("prob_hit_stop_first_pct") or 0.0)
+                        except (TypeError, ValueError):
+                            pass
+
+        for v in node.values():
+            if isinstance(v, (dict, list)):
+                _visit(v, depth + 1)
+
+    for payload in tool_payloads or []:
+        _visit(payload, 0)
+
+    single = next(iter(stock_records.items())) if len(stock_records) == 1 else None
+    return single, checked_dividends, has_any_upcoming_dividend
+
+
+_STATED_CLOSE_RE = re.compile(
+    r"(?:^|\n|\|)\s*(?:\*{0,2}(?:السعر\s+الأخير|السعر\s+الحالي|آخر\s+إغلاق(?:\s+متاح)?)\*{0,2}\s*:?\s*\|?\s*\*{0,2}\s*)(\d[\d,]*(?:\.\d+)?)"
+)
+_STATED_FV_RE = re.compile(
+    r"(?:\*{0,2}(?:القيمة\s+العادلة|السعر\s+العادل)(?:\s+(?:المرجحة|المرجّحة|الأساسية|التقديرية|المحسوبة))?(?:\s*\((?!.*جراهام)[^)\n]{1,28}\))?\*{0,2}\s*:?\s*\|?\s*(?:≈\s*)?\*{0,2}\s*)(\d[\d,]*(?:\.\d+)?)"
+)
+_STATED_STOP_ROW_RE = re.compile(
+    r"(?:^|\n)\s*\|\s*\*{0,2}(?:وقف\s+الخسارة[^\n|]{0,30})\*{0,2}\s*\|\s*\*{0,2}(\d[\d,]*(?:\.\d+)?)"
+)
+_STATED_RES1_ROW_RE = re.compile(
+    r"(?:^|\n)\s*\|\s*\*{0,2}(?:المقاومة\s+الأولى[^\n|]{0,25})\*{0,2}\s*\|\s*\*{0,2}(\d[\d,]*(?:\.\d+)?)"
+)
+_CHEAP_VALUATION_CUE_RE = re.compile(
+    r"(?:سهم\s+رخيص|رخيص\s+جداً|فرصة\s+قيمة\s+بخصم|أقل\s+من\s+قيمته\s+العادلة|تحت\s+القيمة\s+العادلة)"
+)
+_CHEAP_NEGATION_RE = re.compile(
+    r"(?:ليس|ليست|غير|لا\s+يُعد|أعلى\s+من|فوق\s+القيمة|مقارنة\s+ب)"
+)
+_EXPENSIVE_VALUATION_CUE_RE = re.compile(
+    r"(?:سهم\s+متضخم\s+سعرياً|أعلى\s+من\s+قيمته\s+العادلة|فوق\s+القيمة\s+العادلة\s+بشكل\s+كبير)"
+)
+_EXPENSIVE_NEGATION_RE = re.compile(
+    r"(?:ليس|ليست|غير|لا\s+يُعد|أقل\s+من|تحت\s+القيمة)"
+)
+_PHANTOM_DIV_RE = re.compile(r"🎁\s*كوبون\s+قادم\s*:")
+_MC_PROB_INVERSION_RE = re.compile(
+    r"احتمال\s+(?:الصعود|بلوغ\s+الهدف)[^\n]{0,40}(?:أعلى|أكبر)\s+من\s+(?:كسر\s+الوقف|الهبوط)"
+)
 
 
 def verify_and_guard_reply(
@@ -337,6 +534,138 @@ def verify_and_guard_reply(
             )
             if "تنبيه اتساق المحفظة التلقائي" not in guarded:
                 guarded = f"{banner}\n\n{guarded}"
+
+    # Check F: Deterministic Single-Stock Close, Valuation, Dividend & Monte Carlo Fact-Checker
+    single_truth, checked_dividends, has_any_upcoming_dividend = _extract_single_stock_truth(tool_payloads)
+    if single_truth is not None:
+        sym_f, rec_f = single_truth
+        actual_close = rec_f.get("close")
+        if actual_close and actual_close > 0:
+            m_close = _STATED_CLOSE_RE.search(guarded)
+            if m_close:
+                try:
+                    stated_close = float(m_close.group(1).replace(",", ""))
+                    if abs(stated_close - actual_close) / actual_close > 0.025:
+                        warnings.append(f"price_hallucination:{sym_f}:stated={stated_close}_actual={actual_close}")
+                        block_cache = True
+                        prepended_warning = True
+                        curr_f = rec_f.get("currency") or "ج.م"
+                        dt_f = rec_f.get("date") or "أحدث إغلاق"
+                        price_banner = (
+                            f"> ⚠️ **تدقيق السعر الحتمي ({sym_f}):** السعر الموثق في آخر جلسة ({dt_f}) هو "
+                            f"**{actual_close} {curr_f}** — يُعتمد هذا الرقم على أي سعر مخالف في النص."
+                        )
+                        if "تدقيق السعر الحتمي" not in guarded:
+                            guarded = f"{price_banner}\n\n{guarded}"
+                except (TypeError, ValueError):
+                    pass
+
+        upside_f = rec_f.get("upside")
+        if upside_f is not None:
+            dir_conflict = False
+            if upside_f <= -15.0:
+                for raw_ln in guarded.splitlines():
+                    cl_ln = raw_ln.replace("*", "").replace("`", "")
+                    if _CHEAP_VALUATION_CUE_RE.search(cl_ln) and not _CHEAP_NEGATION_RE.search(cl_ln):
+                        dir_conflict = True
+                        break
+            elif upside_f >= 20.0:
+                for raw_ln in guarded.splitlines():
+                    cl_ln = raw_ln.replace("*", "").replace("`", "")
+                    if _EXPENSIVE_VALUATION_CUE_RE.search(cl_ln) and not _EXPENSIVE_NEGATION_RE.search(cl_ln):
+                        dir_conflict = True
+                        break
+            if dir_conflict:
+                warnings.append(f"valuation_direction_contradiction:{sym_f}")
+                block_cache = True
+                prepended_warning = True
+                val_banner = (
+                    f"> ⚠️ **تدقيق التقييم الحتمي ({sym_f}):** السهم يتداول حالياً **أعلى من قيمته العادلة** بنحو "
+                    f"`{abs(upside_f):.1f}%` وفق بيانات الأداة — تجاهل أي وصف معاكس له كسهم رخيص."
+                    if upside_f < 0
+                    else f"> ⚠️ **تدقيق التقييم الحتمي ({sym_f}):** السهم يتداول حالياً **أقل من قيمته العادلة** بنحو "
+                    f"`+{upside_f:.1f}%` وفق بيانات الأداة."
+                )
+                if "تدقيق التقييم الحتمي" not in guarded:
+                    guarded = f"{val_banner}\n\n{guarded}"
+
+        mc_t_f = rec_f.get("mc_t")
+        mc_s_f = rec_f.get("mc_s")
+        if mc_t_f is not None and mc_s_f is not None and mc_t_f <= 15.0 and mc_s_f >= 50.0:
+            if _MC_PROB_INVERSION_RE.search(guarded.replace("*", "")):
+                warnings.append(f"mc_probability_inversion:{sym_f}")
+                block_cache = True
+                prepended_warning = True
+                mc_banner = (
+                    f"> ⚠️ **تدقيق مونت كارلو الحتمي ({sym_f}):** احتمال كسر الوقف (`{mc_s_f:.1f}%`) **أعلى** من "
+                    f"احتمال بلوغ الهدف (`{mc_t_f:.1f}%`) خلال 10 جلسات."
+                )
+                if "تدقيق مونت كارلو الحتمي" not in guarded:
+                    guarded = f"{mc_banner}\n\n{guarded}"
+
+        actual_fv = rec_f.get("fair_value")
+        if actual_fv and actual_fv > 0:
+            m_fv = _STATED_FV_RE.search(guarded)
+            if m_fv:
+                try:
+                    stated_fv = float(m_fv.group(1).replace(",", ""))
+                    if abs(stated_fv - actual_fv) / actual_fv > 0.03:
+                        warnings.append(f"fair_value_hallucination:{sym_f}:stated={stated_fv}_actual={actual_fv}")
+                        block_cache = True
+                        prepended_warning = True
+                        curr_f = rec_f.get("currency") or "ج.م"
+                        fv_banner = (
+                            f"> ⚠️ **تدقيق القيمة العادلة الحتمي ({sym_f}):** القيمة العادلة المحسوبة برمجياً هي "
+                            f"**{actual_fv} {curr_f}** — يُعتمد هذا الرقم على أي رقم مخالف في النص."
+                        )
+                        if "تدقيق القيمة العادلة الحتمي" not in guarded:
+                            guarded = f"{fv_banner}\n\n{guarded}"
+                except (TypeError, ValueError):
+                    pass
+
+        valid_stops = rec_f.get("valid_stops") or []
+        valid_res = rec_f.get("valid_resistances") or []
+        lvl_fixes: List[str] = []
+        if valid_stops:
+            m_sl = _STATED_STOP_ROW_RE.search(guarded)
+            if m_sl:
+                try:
+                    stated_sl = float(m_sl.group(1).replace(",", ""))
+                    if all(abs(stated_sl - vs) / max(vs, 1e-6) > 0.025 for vs in valid_stops):
+                        warnings.append(f"level_hallucination:{sym_f}:stop_loss")
+                        block_cache = True
+                        lvl_fixes.append(f"وقف الخسارة الموثق = **{valid_stops[-1]}**")
+                except (TypeError, ValueError):
+                    pass
+        if valid_res:
+            m_r1 = _STATED_RES1_ROW_RE.search(guarded)
+            if m_r1:
+                try:
+                    stated_r1 = float(m_r1.group(1).replace(",", ""))
+                    if all(abs(stated_r1 - vr) / max(vr, 1e-6) > 0.025 for vr in valid_res):
+                        warnings.append(f"level_hallucination:{sym_f}:resistance_1")
+                        block_cache = True
+                        lvl_fixes.append(f"المقاومة الأولى الموثقة = **{valid_res[0]}**")
+                except (TypeError, ValueError):
+                    pass
+        if lvl_fixes:
+            prepended_warning = True
+            curr_f = rec_f.get("currency") or "ج.م"
+            lvl_banner = f"> ⚠️ **تدقيق المستويات الحتمي ({sym_f}):** {' | '.join(lvl_fixes)} ({curr_f})."
+            if "تدقيق المستويات الحتمي" not in guarded:
+                guarded = f"{lvl_banner}\n\n{guarded}"
+
+    if checked_dividends and not has_any_upcoming_dividend and _PHANTOM_DIV_RE.search(guarded):
+        warnings.append("phantom_upcoming_dividend")
+        block_cache = True
+        guarded = re.sub(
+            r"^[^\n]*🎁\s*كوبون\s+قادم\s*:[^\n]*$",
+            "- **التوزيعات القادمة:** لا يوجد كوبون قادم معلن حالياً في قاعدة البيانات (الأرقام المذكورة تخص التوزيعات التاريخية فقط).",
+            guarded,
+            flags=re.MULTILINE,
+        )
+
+    guarded = _dedupe_trailing_disclaimers(guarded)
 
     return {
         "reply": guarded,

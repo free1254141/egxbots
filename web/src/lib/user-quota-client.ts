@@ -1,6 +1,7 @@
 "use client";
 
 import { TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 
 const QUOTA_CACHE_PREFIX = "egxbots_user_quota_v2:";
 const QUOTA_TTL_MS = 60 * 1000; // 60 seconds: deduplicates mount bursts while staying fresh after Telegram usage
@@ -138,7 +139,7 @@ export async function fetchUserQuotaCached(
     try {
       // Bypass browser HTTP cache so force refreshes & post-upgrade mutations never read stale Free responses;
       // client-side deduplication and 30m TTL are handled here in memory + sessionStorage/localStorage.
-      const res = await fetch("/api/user/quota", { cache: "no-store" });
+      const res = await hfAuthFetch("/api/user/quota", { cache: "no-store" }, { requireToken: true });
       if (!res.ok) return null;
       const data = await res.json();
       if (isValidQuotaPayload(data)) {

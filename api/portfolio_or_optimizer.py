@@ -56,6 +56,7 @@ OBJECTIVE_LABELS_AR: Dict[str, str] = {
     "min_risk": "أقل مخاطرة وتذبذب (Global Minimum Variance)",
     "risk_parity": "توزيع متكافئ للمخاطرة (Risk Parity)",
     "max_diversification": "أقصى تنويع ممكن (Max Diversification)",
+    "hrp": "توزيع مخاطر هرمي صامد للتقلبات (Hierarchical Risk Parity)",
 }
 
 
@@ -71,6 +72,7 @@ class AssetInput:
     returns_by_date: Dict[str, float] = field(default_factory=dict)
     max_weight_override: Optional[float] = None  # Per-asset hard cap (0.0 excludes from buying)
     exclusion_reason: Optional[str] = None
+    avg_daily_volume: Optional[float] = None
 
 
 def normalize_objective(raw: Optional[str]) -> str:
@@ -81,6 +83,8 @@ def normalize_objective(raw: Optional[str]) -> str:
         return "risk_parity"
     if clean in {"max_diversification", "max_div", "diversified", "diversification"}:
         return "max_diversification"
+    if clean in {"hrp", "hierarchical", "hierarchical_risk_parity", "crash_resistant"}:
+        return "hrp"
     return "balanced"
 
 
@@ -378,6 +382,90 @@ def project_onto_portfolio_constraints(
     return x
 
 
+def _compute_hrp_weights(cov: np.ndarray, eligible_mask: np.ndarray) -> np.ndarray:
+    """Pure-NumPy Hierarchical Risk Parity (single-linkage clustering + recursive bisection)."""
+    n = int(cov.shape[0])
+    elig = [i for i in range(n) if bool(eligible_mask[i])]
+    out = np.zeros(n, dtype=float)
+    if not elig:
+        return out
+    if len(elig) == 1:
+        out[elig[0]] = 1.0
+        return out
+
+    sub_cov = np.asarray(cov[np.ix_(elig, elig)], dtype=float)
+    m = len(elig)
+    diag = np.maximum(np.diag(sub_cov), 1e-10)
+    vols = np.sqrt(diag)
+    corr = np.clip(sub_cov / np.outer(vols, vols), -1.0, 1.0)
+    np.fill_diagonal(corr, 1.0)
+    dist = np.sqrt(np.clip(0.5 * (1.0 - corr), 0.0, 1.0))
+
+    nodes: List[Tuple[Any, List[int]]] = [(i, [i]) for i in range(m)]
+    while len(nodes) > 1:
+        best_d = float("inf")
+        best_pair = (0, 1)
+        k_len = len(nodes)
+        for a in range(k_len):
+            leaves_a = nodes[a][1]
+            for b in range(a + 1, k_len):
+                leaves_b = nodes[b][1]
+                d_ab = float(np.min(dist[np.ix_(leaves_a, leaves_b)]))
+                if d_ab < best_d:
+                    best_d = d_ab
+                    best_pair = (a, b)
+        i_a, i_b = best_pair
+        node_a, leaves_a = nodes[i_a]
+        node_b, leaves_b = nodes[i_b]
+        nodes.pop(i_b)
+        nodes.pop(i_a)
+        nodes.append(((node_a, node_b), leaves_a + leaves_b))
+
+    def _seriate(node: Any) -> List[int]:
+        if isinstance(node, int):
+            return [node]
+        return _seriate(node[0]) + _seriate(node[1])
+
+    sort_ix = _seriate(nodes[0][0])
+
+    def _cluster_var(cluster_indices: List[int]) -> float:
+        c_cov = sub_cov[np.ix_(cluster_indices, cluster_indices)]
+        c_diag = np.maximum(np.diag(c_cov), 1e-10)
+        ivp = 1.0 / c_diag
+        ivp /= float(np.sum(ivp))
+        return float(max(1e-12, ivp @ c_cov @ ivp))
+
+    w_sub = np.ones(m, dtype=float)
+    clusters_q: List[List[int]] = [sort_ix]
+    while clusters_q:
+        next_q: List[List[int]] = []
+        for cl in clusters_q:
+            if len(cl) <= 1:
+                continue
+            mid = len(cl) // 2
+            left_c = cl[:mid]
+            right_c = cl[mid:]
+            v_left = _cluster_var(left_c)
+            v_right = _cluster_var(right_c)
+            alpha = 1.0 - (v_left / max(v_left + v_right, 1e-12))
+            w_sub[left_c] *= alpha
+            w_sub[right_c] *= (1.0 - alpha)
+            if len(left_c) > 1:
+                next_q.append(left_c)
+            if len(right_c) > 1:
+                next_q.append(right_c)
+        clusters_q = next_q
+
+    total_sub = float(np.sum(w_sub))
+    if total_sub > 1e-12:
+        w_sub /= total_sub
+    else:
+        w_sub = np.full(m, 1.0 / m, dtype=float)
+    for local_i, orig_i in enumerate(elig):
+        out[orig_i] = float(w_sub[local_i])
+    return out
+
+
 def solve_optimal_weights(
     assets: Sequence[AssetInput],
     cov: np.ndarray,
@@ -422,6 +510,28 @@ def solve_optimal_weights(
         return np.array([invested_total], dtype=float), eff_max_w, eff_max_sec, notes
 
     obj = normalize_objective(objective)
+    if obj == "hrp":
+        hrp_raw = _compute_hrp_weights(cov, ub > 1e-6)
+        hrp_sum = float(np.sum(hrp_raw))
+        if hrp_sum <= 1e-9:
+            hrp_raw = np.where(ub > 1e-6, 1.0, 0.0)
+            hrp_sum = max(float(np.sum(hrp_raw)), 1.0)
+        hrp_w = project_onto_portfolio_constraints(
+            hrp_raw * (invested_total / hrp_sum),
+            sectors,
+            invested_total,
+            eff_max_w,
+            eff_max_sec,
+            iters=40,
+            upper_bounds=ub,
+        )
+        hrp_w = np.where((hrp_w < 1e-4) | (ub <= 1e-9), 0.0, hrp_w)
+        if float(np.sum(hrp_w)) > 1e-9:
+            hrp_w = project_onto_portfolio_constraints(
+                hrp_w, sectors, invested_total, eff_max_w, eff_max_sec, iters=30, upper_bounds=ub
+            )
+        hrp_w = np.where(ub <= 1e-9, 0.0, hrp_w)
+        return hrp_w, eff_max_w, eff_max_sec, notes
     vols = np.sqrt(np.maximum(np.diag(cov), 1e-8))
     # Initial feasible point: inverse-volatility weights on eligible assets projected onto constraints
     inv_vol = np.where(ub > 1e-6, 1.0 / np.maximum(vols, 1e-4), 0.0)
@@ -699,6 +809,7 @@ def optimize_portfolio_or(
                 returns_by_date=a.returns_by_date,
                 max_weight_override=a.max_weight_override,
                 exclusion_reason=a.exclusion_reason,
+                avg_daily_volume=a.avg_daily_volume,
             )
         )
     if not valid_assets:
@@ -751,6 +862,7 @@ def optimize_portfolio_or(
     total_turnover_val = 0.0
     allocations: List[Dict[str, Any]] = []
     sector_breakdown: Dict[str, float] = {}
+    execution_notes: List[str] = []
 
     for i, a in enumerate(valid_assets):
         cur_sh = int(round(max(0.0, float(a.current_shares))))
@@ -798,6 +910,30 @@ def optimize_portfolio_or(
         }
         if a.exclusion_reason:
             row_dict["exclusionReason"] = a.exclusion_reason
+        if action in ("BUY", "SELL") and abs(delta_sh) > 0 and a.avg_daily_volume and math.isfinite(float(a.avg_daily_volume)) and float(a.avg_daily_volume) > 0:
+            adv = float(a.avg_daily_volume)
+            participation_cap = max(1, int(0.10 * adv))
+            raw_sessions = max(1, int(math.ceil(abs(delta_sh) / participation_cap)))
+            if raw_sessions > 1:
+                eff_sessions = min(raw_sessions, 15)
+                shares_per_session = int(math.ceil(abs(delta_sh) / eff_sessions))
+                daily_vol_frac = math.sqrt(max(float(cov[i, i]), 0.0) / 252.0)
+                q_over_adv = abs(delta_sh) / max(adv, 1.0)
+                est_impact_bps = round(min(500.0, 0.5 * daily_vol_frac * math.sqrt(q_over_adv) * 10000.0), 1)
+                act_ar = "شراء" if action == "BUY" else "بيع"
+                note_ar = (
+                    f"سيولة محدودة ({int(adv):,} سهم/جلسة) — قسّم {act_ar} {a.symbol} على "
+                    f"{eff_sessions} جلسات (~{shares_per_session:,} سهم/جلسة) لتجنّب الانزلاق السعري"
+                )
+                row_dict["executionPlan"] = {
+                    "sessions": eff_sessions,
+                    "rawSessions": raw_sessions,
+                    "sharesPerSession": shares_per_session,
+                    "participationPct": round(min(100.0, (abs(delta_sh) / adv) * 100.0), 1),
+                    "estImpactBps": est_impact_bps,
+                    "noteAr": note_ar,
+                }
+                execution_notes.append(note_ar)
         allocations.append(row_dict)
 
     allocations.sort(key=lambda r: r["actualWeightPct"], reverse=True)
@@ -883,6 +1019,7 @@ def optimize_portfolio_or(
             if a.exclusion_reason
         ],
         "allocations": allocations,
+        **({"executionNotes": execution_notes} if execution_notes else {}),
     }
 
 

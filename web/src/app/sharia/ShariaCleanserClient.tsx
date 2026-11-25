@@ -177,7 +177,8 @@ export default function ShariaCleanserClient({
         );
         if (!active) return;
         if (hasMatchingInitial) {
-          if (shouldPreferFreshFairValueReport(data, initialReport)) {
+          const hasMoreStocks = (data.stocks?.length ?? 0) > (initialReport?.stocks?.length ?? 0);
+          if (hasMoreStocks || shouldPreferFreshFairValueReport(data, initialReport)) {
             setReport(data);
           }
         } else if (data?.stocks?.length) {

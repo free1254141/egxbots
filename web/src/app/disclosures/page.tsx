@@ -261,7 +261,7 @@ export default async function DisclosuresPage() {
       />
       <DisclosuresClient
         initialDisclosures={items}
-        initialPool={allPool}
+        initialPool={items}
         initialStats={stats}
         initialAnalytics={analytics}
         priceMap={priceMap}

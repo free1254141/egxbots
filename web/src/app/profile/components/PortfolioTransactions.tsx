@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import type { PortfolioSnapshot } from "@/contexts/PortfolioContext";
 import type { PortfolioSaleEvent } from "@/lib/portfolio-performance";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 const money = (v: unknown) =>
   v === null || v === undefined || !Number.isFinite(Number(v))
     ? "—"
@@ -60,7 +61,7 @@ export default function PortfolioTransactions({
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/portfolio/transactions", {
+      const response = await hfAuthFetch("/api/portfolio/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -73,7 +74,7 @@ export default function PortfolioTransactions({
           occurredAt: new Date(date).toISOString(),
           requestId,
         }),
-      });
+      }, { requireToken: true });
       const data = await response.json();
       if (!response.ok || data.ok !== true)
         throw new Error(data.message || "لم يتم تأكيد التسجيل.");

@@ -704,6 +704,15 @@ def _normalize_ar(text: str) -> str:
     return s
 
 
+_NON_TICKER_STOP_WORDS = frozenset({
+    "THE", "AND", "FOR", "BUY", "SELL", "HOLD", "TRIM", "EXIT", "VIP", "BOT", "EGX",
+    "EGX30", "EGX70", "EGX33", "PRO", "RSI", "EMA", "SMA", "MACD", "ATR", "SMC",
+    "VWAP", "CMF", "ADX", "OBV", "DCA", "HHI", "GMV", "ROE", "ROA", "ROIC", "EPS",
+    "EBITDA", "EGP", "SAR", "USD", "AED", "QAR", "KWD", "TASI", "TADAWUL", "QSE",
+    "DFM", "KSE", "AI", "OR", "SL", "TP", "BULL", "BEAR", "FVG", "BOS", "PDF", "UTC",
+})
+
+
 def _extract_symbols_from_text(text: str, exchange: str = "EGX") -> tuple[List[str], Dict[str, str]]:
     """Extracts both English/numeric tickers and Arabic stock names from user prompt for any supported exchange."""
     try:
@@ -721,11 +730,10 @@ def _extract_symbols_from_text(text: str, exchange: str = "EGX") -> tuple[List[s
                 name_map[sym] = str(row.get("name_ar") or row.get("name") or sym)
 
         words = re.findall(r"[A-Za-z]{2,8}", text)
-        stop_words = {"THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "EGX", "PRO", "RSI", "EMA", "MACD", "ATR", "SMC"}
         found: List[str] = []
         for w in words:
             u = w.upper()
-            if u not in stop_words and (not name_map or u in name_map):
+            if u not in _NON_TICKER_STOP_WORDS and (not name_map or u in name_map):
                 if u not in found:
                     found.append(u)
 
@@ -808,13 +816,12 @@ def _extract_symbols_from_text(text: str, exchange: str = "EGX") -> tuple[List[s
                 if code not in found:
                     found.append(code)
     else:
-        stop_words_gcc = {"THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "PRO", "RSI", "EMA", "MACD", "ATR", "SMC", "TASI", "QSE", "DFM", "ADX", "KSE"}
         for tok in re.findall(r"[A-Za-z0-9=]{2,14}(?:\.(?:QA|QE|QSE|DU|DFM|AE|AD|ADX|KW|KSE))?", text, re.IGNORECASE):
             core = _strip_market_symbol_suffix(tok)
             if "." in tok or "=" in tok:
                 if core and core not in found:
                     found.append(core)
-            elif core not in stop_words_gcc and name_map and core in name_map:
+            elif core not in _NON_TICKER_STOP_WORDS and name_map and core in name_map:
                 if core not in found:
                     found.append(core)
 
@@ -1215,7 +1222,9 @@ _CUSTOM_RANKING_RE = re.compile(
 
 
 _PERSONAL_AUTOMATION_KEYWORDS = (
-    "محفظ", "اسهمي", "مركزي", "مراكزي", "شرائي", "كاش", "رصيدي", "portfolio", "holdings", "my stocks",
+    "محفظ", "اسهمي", "مركزي", "مراكزي", "شرائي", "كاش", "رصيدي",
+    "الاسهم المراد بيعها", "اسهم البيع", "تدوير المحفظ", "اعاده تدوير", "اعاده التوازن",
+    "portfolio", "holdings", "my stocks",
 )
 
 
@@ -1327,7 +1336,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
         cairo_mins = now_cairo.hour * 60 + now_cairo.minute
         in_trading_hours = egx_open and (10 * 60 <= cairo_mins <= 14 * 60 + 30)
         words = re.findall(r"[A-Za-z]{2,8}", prompt)
-        symbols = [w.upper() for w in words if w.upper() not in {"THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "EGX"}]
+        symbols = [w.upper() for w in words if w.upper() not in _NON_TICKER_STOP_WORDS]
         day_ar = arabic_days[now_cairo.weekday()]
         session_status_str = (
             f"جلسة البورصة المصرية مفتوحة حالياً للتداول (10:00 ص – 2:30 م بتوقيت القاهرة) — التوقيت الآن: {day_ar} {now_cairo.strftime('%Y-%m-%d %H:00')} القاهرة."

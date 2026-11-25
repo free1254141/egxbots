@@ -9,6 +9,7 @@ import { createSupabaseBrowserClient, createMarketSupabaseBrowserClient } from "
 import { useRefreshOnVisibility } from "@/hooks/useRealtimeRefresh";
 import { useAuth } from "./AuthContext";
 import { usePathname } from "next/navigation";
+import { hfAuthFetch } from "@/lib/hf-browser-client";
 
 export type ActiveMarket = "egx" | "tasi";
 
@@ -968,13 +969,13 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             // public response (?scope=public) so 100k visitors cause 0 Lambda hits.
             if (isLandingPage) {
                 const fetchLimit = requestedLimit ? Math.min(requestedLimit * 2, 20) : 6;
-                const response = await fetch(`/api/ai_bot/recommendations?limit=${fetchLimit}&scope=public&market=${currentMarket}`, force ? { cache: "no-store" } : undefined);
+                const response = await hfAuthFetch(`/api/ai_bot/recommendations?limit=${fetchLimit}&scope=public&market=${currentMarket}`, force ? { cache: "no-store" } : undefined, { requireToken: false });
                 if (!response.ok) throw new Error("Failed to load public recommendations");
                 scanData = await response.json();
                 sectorMap = Object.fromEntries((scanData || []).map((row: any) => [row.symbol, row.sector || "General"]));
             } else {
                 const scopeParam = isPublicScope ? "public" : "user";
-                const response = await fetch(`/api/ai_bot/recommendations?limit=200&scope=${scopeParam}&market=${currentMarket}`, force ? { cache: "no-store" } : undefined);
+                const response = await hfAuthFetch(`/api/ai_bot/recommendations?limit=200&scope=${scopeParam}&market=${currentMarket}`, force ? { cache: "no-store" } : undefined, { requireToken: false });
                 if (!response.ok) throw new Error("Failed to load recommendations");
                 scanData = await response.json();
             }
