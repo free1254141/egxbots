@@ -10,6 +10,7 @@ import PwaInstallPrompt from "@/components/PwaInstallPrompt";
 import TrialWelcomePrompt from "@/components/TrialWelcomePrompt";
 import TrialSuccessModal from "@/components/TrialSuccessModal";
 import MarketWelcomeDialog from "@/components/MarketWelcomeDialog";
+import TelegramOnboardingDialog from "@/components/TelegramOnboardingDialog";
 import { Analytics } from "@vercel/analytics/react";
 import type { Metadata, Viewport } from "next";
 
@@ -239,6 +240,7 @@ export default function RootLayout({
           <TrialWelcomePrompt />
           <TrialSuccessModal />
           <MarketWelcomeDialog />
+          <TelegramOnboardingDialog />
           <Analytics />
         </Providers>
       </body>

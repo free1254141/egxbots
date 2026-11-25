@@ -709,7 +709,7 @@ def _scheduler_worker():
     retry_interval = _positive_interval_seconds("TELEGRAM_RETRY_INTERVAL_SECONDS", 900)
     vip_revocation_interval = _positive_interval_seconds("VIP_REVOCATION_INTERVAL_SECONDS", 21600, 300)
     subscription_reminders_interval = _positive_interval_seconds("SUBSCRIPTION_REMINDERS_INTERVAL_SECONDS", 43200, 3600)
-    marketing_lifecycle_interval = _positive_interval_seconds("MARKETING_LIFECYCLE_INTERVAL_SECONDS", 3600, 600)
+    marketing_lifecycle_interval = _positive_interval_seconds("MARKETING_LIFECYCLE_INTERVAL_SECONDS", 1800, 600)
 
     while not _stop_event.is_set():
         try:

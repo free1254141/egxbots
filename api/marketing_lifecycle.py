@@ -821,6 +821,126 @@ def process_trial_day2() -> int:
 
     return sent_count
 
+def process_signup_telegram_nudge() -> int:
+    """Send an automated reminder email ~30 minutes after signup to new users
+    who have not yet linked Telegram or activated their free 3-day Pro trial."""
+    if not supabase:
+        return 0
+
+    sent_count = 0
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(hours=24)).isoformat()
+    window_end = (now - timedelta(minutes=30)).isoformat()
+
+    try:
+        res = (
+            supabase.table("profiles")
+            .select("id, display_name, username, created_at")
+            .is_("telegram_chat_id", "null")
+            .gte("created_at", window_start)
+            .lte("created_at", window_end)
+            .order("created_at", desc=False)
+            .limit(25)
+            .execute()
+        )
+        candidates = res.data or []
+        if not candidates:
+            return 0
+
+        daily_sent = get_daily_sent_count()
+
+        for profile in candidates:
+            if daily_sent + sent_count >= MARKETING_DAILY_EMAIL_CAP:
+                break
+            try:
+                uid = profile.get("id")
+                if not uid:
+                    continue
+
+                # Never email if already sent this nudge or recent re-engagement
+                if has_recent_message(uid, "signup_tg_trial_nudge", 30):
+                    continue
+                if has_recent_message(uid, "trial_reengagement_fix_nov25", 7):
+                    continue
+
+                # Strictly exclude users who already had a trial, subscription, approved order, or founders slot
+                t_res = supabase.table("subscription_trials").select("user_id").eq("user_id", uid).limit(1).execute()
+                if t_res.data:
+                    continue
+                s_res = supabase.table("subscriptions").select("id").eq("user_id", uid).limit(1).execute()
+                if s_res.data:
+                    continue
+                o_res = (
+                    supabase.table("local_payment_orders")
+                    .select("id")
+                    .eq("user_id", uid)
+                    .eq("status", "approved")
+                    .limit(1)
+                    .execute()
+                )
+                if o_res.data:
+                    continue
+                f_res = supabase.table("founders_offer_members").select("user_id").eq("user_id", uid).limit(1).execute()
+                if f_res.data:
+                    continue
+
+                user_email = get_user_email(uid)
+                if not user_email or "@" not in user_email:
+                    continue
+                if is_user_unsubscribed(uid, user_email):
+                    continue
+
+                display_name = profile.get("display_name") or profile.get("username") or "صديقنا العزيز"
+                bot_url = f"https://t.me/egxbots_bot?start={uid}"
+                start_code = f"/start {uid}"
+
+                subject = "🎁 خطوة واحدة (5 ثوانٍ) لتفعيل 3 أيام Pro مجاناً في EGX BOTS"
+                greeting = f"أهلاً {display_name} 👋"
+                paragraphs = [
+                    "مرحباً بك في <strong>EGX BOTS</strong>! لاحظنا أنك أنشأت حسابك بنجاح، لكنك لم تربط حسابك ببوت تليجرام لتفعيل <strong>تجربتك المجانية لمدة 3 أيام كاملة (بدون بطاقة بنكية)</strong>.",
+                    "<strong>كيف تفعّل تجربتك خلال 5 ثوانٍ؟</strong><br>"
+                    "1️⃣ اضغط على الزر بالأسفل لفتح بوت <strong>@egxbots_bot</strong> على تليجرام.<br>"
+                    "2️⃣ اضغط <strong>Start / ابدأ</strong> داخل المحادثة — وسيتم ربط حسابك وتفعيل <strong>3 أيام Pro مجاناً</strong> تلقائياً خلال ثانية!<br>"
+                    "3️⃣ استمتع بمساعد التحليل الفني <strong>ARTORO AI</strong>، رادار السيولة، وتنبيهات قناة VIP.",
+                    f"<div style='background:#f9fafb;border:1px dashed #9ca3af;border-radius:8px;padding:12px;margin-top:8px;'>"
+                    f"<div style='font-size:12px;color:#4b5563;margin-bottom:6px;'>💡 إذا لم يفتح الرابط مباشرة، افتح تليجرام وابحث عن <strong>@egxbots_bot</strong> وأرسل له هذا الكود:</div>"
+                    f"<div dir='ltr' style='font-family:monospace;font-size:13px;background:#111827;color:#93c5fd;padding:8px 10px;border-radius:6px;text-align:left;word-break:break-all;'>{start_code}</div>"
+                    f"</div>",
+                    "<span style='font-size:12px;color:#6b7280;'>ملاحظة: EGX BOTS أداة تحليلية برمجية للأبحاث الشخصية والتعليمية فقط ولا تُقدّم نصيحة استثمارية.</span>",
+                ]
+
+                message_id = str(uuid.uuid4())
+                html = _build_email_html(
+                    subject,
+                    greeting,
+                    paragraphs,
+                    "اربط تليجرام وفعّل 3 أيام مجاناً ⚡",
+                    bot_url,
+                    uid,
+                    user_email,
+                    "signup_tg_trial_nudge",
+                    message_id,
+                )
+                send_info: dict = {}
+                if send_resend_email(user_email, subject, html, send_info):
+                    record_marketing_message(
+                        uid,
+                        user_email,
+                        "signup_tg_trial_nudge",
+                        {"created_at": profile.get("created_at")},
+                        message_id,
+                        send_info.get("provider_message_id"),
+                    )
+                    sent_count += 1
+            except Exception as item_err:
+                print(f"[MARKETING] Error sending signup_tg_trial_nudge for {profile.get('id')}: {item_err}")
+                continue
+    except Exception as e:
+        print(f"[MARKETING] Error in process_signup_telegram_nudge: {e}")
+
+    return sent_count
+
+
 def run_marketing_lifecycle() -> Dict[str, Any]:
     """
     Main entry point for automated marketing lifecycle runs.
@@ -832,6 +952,7 @@ def run_marketing_lifecycle() -> Dict[str, Any]:
         return {"status": "capped", "sent_today": daily_count}
 
     print(f"[MARKETING] Starting marketing lifecycle run. (Sent today: {daily_count}/{MARKETING_DAILY_EMAIL_CAP})")
+    signup_nudge = process_signup_telegram_nudge()
     abandoned = process_abandoned_checkouts()
     welcome = process_trial_welcome()
     nudges_enabled = os.getenv("MARKETING_TRIAL_NUDGES_ENABLED", "").strip().lower() in ("1", "true", "yes")
@@ -840,12 +961,13 @@ def run_marketing_lifecycle() -> Dict[str, Any]:
     trials = process_trial_expiring()
     final_48h_sent = 0
 
-    total_sent = abandoned + welcome + day1 + day2 + trials
+    total_sent = signup_nudge + abandoned + welcome + day1 + day2 + trials
     print(f"[MARKETING] Lifecycle run finished. Sent: {total_sent} "
-          f"(Abandoned: {abandoned}, Trial welcome: {welcome}, Trial day1: {day1}, Day2: {day2}, "
+          f"(Signup TG nudge: {signup_nudge}, Abandoned: {abandoned}, Trial welcome: {welcome}, Trial day1: {day1}, Day2: {day2}, "
           f"Trials expiring: {trials})")
     return {
         "status": "ok",
+        "signup_tg_nudge_sent": signup_nudge,
         "abandoned_sent": abandoned,
         "trial_welcome_sent": welcome,
         "trial_day1_sent": day1,
@@ -861,6 +983,7 @@ class MarketingLifecycleEngine:
     """Class wrapper for Marketing Lifecycle operations."""
     run = staticmethod(run_marketing_lifecycle)
     send_email = staticmethod(send_resend_email)
+    process_signup_telegram_nudge = staticmethod(process_signup_telegram_nudge)
     process_abandoned = staticmethod(process_abandoned_checkouts)
     process_trial_welcome = staticmethod(process_trial_welcome)
     process_trial_day1 = staticmethod(process_trial_day1)
