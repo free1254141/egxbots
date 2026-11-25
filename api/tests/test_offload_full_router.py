@@ -639,10 +639,18 @@ def test_backtests_rejects_admin_spoof_and_payments_founders():
         assert bt.status_code == 200
         assert [row["id"] for row in bt.json()] == ["pub-1"]
 
-        # Trial succeeds without mandatory telegram link when user is otherwise eligible
+        # Trial MUST require a linked Telegram account (400 TELEGRAM_LINK_REQUIRED when unlinked)
         tr_no_tg = client.post("/api/subscription/trial", json={})
-        assert tr_no_tg.status_code == 200
-        assert tr_no_tg.json()["success"] is True
+        assert tr_no_tg.status_code == 400
+        assert tr_no_tg.json()["error"] == "TELEGRAM_LINK_REQUIRED"
+        assert "t.me/egxbots_bot?start=u1" in tr_no_tg.json().get("telegram_bot_url", "")
+
+        # Once Telegram is linked on the user's profile, trial activates cleanly
+        db.tables["profiles"] = [{"id": "u1", "telegram_chat_id": "99887766"}]
+        tr_with_tg = client.post("/api/subscription/trial", json={})
+        assert tr_with_tg.status_code == 200
+        assert tr_with_tg.json()["success"] is True
+        db.tables["profiles"] = []
 
         # Disposable email trial is still rejected (403)
         with mock.patch(

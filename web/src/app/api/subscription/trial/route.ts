@@ -273,7 +273,7 @@ export async function GET(request: Request) {
         eligible: true,
         has_used_trial: false,
         telegram_linked: Boolean(telegramChatId),
-        requires_telegram_link: false,
+        requires_telegram_link: true,
       },
       { headers: TRIAL_CACHE_HEADERS }
     );
@@ -357,6 +357,18 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { ok: false, error: abuse.error, message: abuse.message },
         { status: 403 }
+      );
+    }
+
+    if (!telegramChatId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "TELEGRAM_LINK_REQUIRED",
+          message: "يرجى ربط حسابك ببوت تليجرام أولاً لتفعيل التجربة المجانية لمدة 3 أيام (خطوة واحدة في 5 ثوانٍ).",
+          telegram_bot_url: `https://t.me/egxbots_bot?start=${user.id}`,
+        },
+        { status: 400 }
       );
     }
 

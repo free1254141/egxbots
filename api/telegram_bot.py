@@ -987,9 +987,14 @@ class TelegramBot:
                     if not is_pro and not prior_tg_uid:
                         try:
                             prev_trial = supabase.table("subscription_trials").select("user_id").eq("user_id", uid).limit(1).execute()
+                            prev_tg_trial = None
+                            try:
+                                prev_tg_trial = supabase.table("subscription_trials").select("user_id").eq("telegram_chat_id", str(chat_id)).limit(1).execute()
+                            except Exception:
+                                prev_tg_trial = None
                             prev_ord = supabase.table("local_payment_orders").select("id").eq("user_id", uid).eq("status", "approved").limit(1).execute()
                             prev_fnd = supabase.table("founders_offer_members").select("user_id").eq("user_id", uid).limit(1).execute()
-                            if not (prev_trial and prev_trial.data) and not (prev_ord and prev_ord.data) and not (prev_fnd and prev_fnd.data):
+                            if not (prev_trial and prev_trial.data) and not (prev_tg_trial and prev_tg_trial.data) and not (prev_ord and prev_ord.data) and not (prev_fnd and prev_fnd.data):
                                 rpc_data = None
                                 try:
                                     rpc_res = supabase.rpc("start_pro_trial", {

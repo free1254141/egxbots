@@ -3588,7 +3588,7 @@ def get_subscription_trial(request: Request):
             return JSONResponse({"ok": True, "eligible": False, "has_used_trial": True, "reason": abuse["message"]}, headers=_PRIVATE_NO_STORE)
 
         return JSONResponse(
-            {"ok": True, "eligible": True, "has_used_trial": False, "telegram_linked": bool(tg_id), "requires_telegram_link": False},
+            {"ok": True, "eligible": True, "has_used_trial": False, "telegram_linked": bool(tg_id), "requires_telegram_link": True},
             headers=_PRIVATE_NO_STORE,
         )
     except Exception as exc:
@@ -3624,6 +3624,18 @@ async def post_subscription_trial(request: Request):
     abuse = _check_trial_abuse(sb, uid, viewer.get("email"), tg_id, ip_h, dev_h)
     if abuse["blocked"]:
         return JSONResponse({"ok": False, "error": abuse["error"], "message": abuse["message"]}, status_code=403, headers=_PRIVATE_NO_STORE)
+
+    if not tg_id:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "TELEGRAM_LINK_REQUIRED",
+                "message": "يرجى ربط حسابك ببوت تليجرام أولاً لتفعيل التجربة المجانية لمدة 3 أيام (خطوة واحدة في 5 ثوانٍ).",
+                "telegram_bot_url": f"https://t.me/egxbots_bot?start={uid}",
+            },
+            status_code=400,
+            headers=_PRIVATE_NO_STORE,
+        )
 
     rpc_data: Any = None
     try:
