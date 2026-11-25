@@ -128,6 +128,32 @@ export default function GroupedDisclosureCard({
     );
   };
 
+  const getRealityCheckBadge = (item?: DisclosureItem) => {
+    const rc = item?.reality_check;
+    if (!rc || !rc.label_ar) return null;
+    const toneClass =
+      rc.tone === "positive"
+        ? "bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-200 border-emerald-700"
+        : rc.tone === "warning"
+        ? "bg-amber-100 dark:bg-amber-950/70 text-amber-950 dark:text-amber-200 border-amber-700"
+        : rc.tone === "negative"
+        ? "bg-rose-100 dark:bg-rose-950/70 text-rose-900 dark:text-rose-200 border-rose-700"
+        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border-zinc-500";
+    const chgTag =
+      typeof rc.change_pct === "number"
+        ? ` (${rc.change_pct > 0 ? "+" : ""}${rc.change_pct.toFixed(1)}%)`
+        : "";
+    return (
+      <span
+        title={isAr ? rc.summary_ar : rc.summary_en}
+        className={`px-2 py-0.5 text-[10px] font-black border-2 shadow-[1px_1px_0px_#000] whitespace-nowrap ${toneClass}`}
+      >
+        {isAr ? rc.label_ar : rc.label_en}
+        {chgTag}
+      </span>
+    );
+  };
+
   // ------------------ GRID LAYOUT ------------------
   if (layoutMode === "grid") {
     return (
@@ -165,7 +191,8 @@ export default function GroupedDisclosureCard({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              {getRealityCheckBadge(activeItem)}
               {getGroupSentimentBadge()}
             </div>
           </div>
@@ -442,11 +469,12 @@ export default function GroupedDisclosureCard({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-black text-zinc-500 flex items-center gap-1">
                   <Calendar className="w-3.5 h-3.5" />
                   {group.latest_date}
                 </span>
+                {getRealityCheckBadge(activeItem)}
                 {getGroupSentimentBadge()}
               </div>
             </div>

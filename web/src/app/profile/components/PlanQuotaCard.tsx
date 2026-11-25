@@ -69,9 +69,10 @@ interface QuotaData {
 interface Props {
   refreshTrigger?: number;
   onQuotaLoaded?: (data: QuotaData) => void;
+  hideCollapseToggle?: boolean;
 }
 
-export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Props) {
+export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded, hideCollapseToggle = false }: Props) {
   const { language } = useLanguage();
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -102,6 +103,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
       return next;
     });
   };
+  const effectiveCollapsed = hideCollapseToggle ? false : isCollapsed;
 
   const fetchQuota = useCallback(async (isSilent = false, fromBroadcast = false, forceRefresh = false) => {
     if (!isSilent) setRefreshing(true);
@@ -207,7 +209,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
     >
       {/* ── Top Header ── */}
       <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
-        isCollapsed ? "mb-0 pb-0 border-b-0" : "border-b-4 border-black dark:border-zinc-800 pb-5 mb-6"
+        effectiveCollapsed ? "mb-0 pb-0 border-b-0" : "border-b-4 border-black dark:border-zinc-800 pb-5 mb-6"
       }`}>
         <div className="flex items-center gap-3">
           <div
@@ -252,13 +254,13 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
                   ⭐ {isAr ? `مؤسس #${data.plan.founding_member_number || ""}` : `FOUNDER #${data.plan.founding_member_number || ""}`}
                 </span>
               )}
-              {isCollapsed && (
+              {effectiveCollapsed && (
                 <span className="border-2 border-black dark:border-white bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-[1px_1px_0px_rgba(0,0,0,1)]">
                   {isAr ? "مطوية" : "Collapsed"}
                 </span>
               )}
             </div>
-            {!isCollapsed ? (
+            {!effectiveCollapsed ? (
               <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mt-0.5">
                 {data?.plan?.is_lifetime
                   ? isAr
@@ -360,32 +362,34 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
             </Link>
           )}
 
-          <button
-            type="button"
-            onClick={toggleCollapse}
-            className={`h-9 px-3 border-2 border-black dark:border-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all ${
-              isCollapsed
-                ? "bg-[#FFE600] text-black hover:bg-amber-300"
-                : "bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-300 dark:hover:bg-zinc-700"
-            }`}
-            title={isCollapsed ? (isAr ? "عرض تفاصيل الخطة" : "Expand Plan") : (isAr ? "طي السيكشن" : "Collapse Section")}
-          >
-            {isCollapsed ? (
-              <>
-                <ChevronDown className="w-3.5 h-3.5" />
-                <span>{isAr ? "عرض الخطة" : "Expand"}</span>
-              </>
-            ) : (
-              <>
-                <ChevronUp className="w-3.5 h-3.5" />
-                <span>{isAr ? "طي السيكشن" : "Collapse"}</span>
-              </>
-            )}
-          </button>
+          {!hideCollapseToggle && (
+            <button
+              type="button"
+              onClick={toggleCollapse}
+              className={`h-9 px-3 border-2 border-black dark:border-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all ${
+                effectiveCollapsed
+                  ? "bg-[#FFE600] text-black hover:bg-amber-300"
+                  : "bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-300 dark:hover:bg-zinc-700"
+              }`}
+              title={effectiveCollapsed ? (isAr ? "عرض تفاصيل الخطة" : "Expand Plan") : (isAr ? "طي السيكشن" : "Collapse Section")}
+            >
+              {effectiveCollapsed ? (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                  <span>{isAr ? "عرض الخطة" : "Expand"}</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                  <span>{isAr ? "طي السيكشن" : "Collapse"}</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
-      {!isCollapsed && (
+      {!effectiveCollapsed && (
         <>
 
       {/* ── Quota Metrics Grid ── */}

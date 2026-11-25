@@ -38,6 +38,24 @@ class MarketStrategyTests(unittest.TestCase):
         self.assertTrue(result["sectors"]["banks"]["defensive_exit"])
         self.assertEqual(result["weak_symbols"], ["A"])
 
+    def test_dead_cat_bounce_below_sma20_and_sma50_blocks_new_buys_without_panic_stress(self):
+        # 50 down sessions followed by a small +0.5% 5-day bounce still below SMA20 & SMA50
+        changes = [-0.4] * 50 + [0.1] * 5
+        egx30 = index_rows(100, changes)
+        egx100 = index_rows(100, changes)
+        result = market_context(egx30, egx100, {"advancing_pct": 48})
+        self.assertTrue(result["reject_buys"])
+        self.assertFalse(result["market_stress"])
+        self.assertIn("egx30_below_sma20_and_sma50", result["reasons"])
+
+    def test_healthy_uptrend_above_sma20_and_sma50_allows_buys(self):
+        changes = [0.25] * 55
+        egx30 = index_rows(100, changes)
+        egx100 = index_rows(100, changes)
+        result = market_context(egx30, egx100, {"advancing_pct": 62})
+        self.assertFalse(result["reject_buys"])
+        self.assertEqual(result["regime"], "bull")
+
 
 if __name__ == "__main__":
     unittest.main()

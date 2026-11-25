@@ -1,0 +1,719 @@
+{
+  "live_scan_results": {
+    "trades": 156,
+    "wins": 84,
+    "losses": 72,
+    "win_rate": 53.8,
+    "profit_factor": 2.686,
+    "total_return_pct": 237.96,
+    "avg_pl_pct": 8.28,
+    "max_drawdown_pct": 32.23,
+    "signals_raw": 156,
+    "by_month": {
+      "2026-06": {
+        "trades": 18,
+        "wins": 13,
+        "losses": 5,
+        "win_rate": 72.2,
+        "profit_factor": 9.219,
+        "total_return_pct": 28.38,
+        "avg_pl_pct": 14.38,
+        "max_drawdown_pct": 1.12
+      },
+      "2026-07": {
+        "trades": 39,
+        "wins": 33,
+        "losses": 6,
+        "win_rate": 84.6,
+        "profit_factor": 16.296,
+        "total_return_pct": 134.43,
+        "avg_pl_pct": 22.85,
+        "max_drawdown_pct": 2.39
+      },
+      "2026-08": {
+        "trades": 49,
+        "wins": 30,
+        "losses": 19,
+        "win_rate": 61.2,
+        "profit_factor": 3.187,
+        "total_return_pct": 57.77,
+        "avg_pl_pct": 9.74,
+        "max_drawdown_pct": 9.73
+      },
+      "2026-09": {
+        "trades": 38,
+        "wins": 7,
+        "losses": 31,
+        "win_rate": 18.4,
+        "profit_factor": 0.339,
+        "total_return_pct": -21.47,
+        "avg_pl_pct": -6.26,
+        "max_drawdown_pct": 21.63
+      },
+      "2026-11": {
+        "trades": 12,
+        "wins": 1,
+        "losses": 11,
+        "win_rate": 8.3,
+        "profit_factor": 0.008,
+        "total_return_pct": -9.36,
+        "avg_pl_pct": -8.15,
+        "max_drawdown_pct": 9.36
+      }
+    }
+  },
+  "oos_lockbox_period": "2026-06-01 -> 2026-11-24",
+  "models": {
+    "old_model_EGX.bin": {
+      "primary_threshold": 0.6,
+      "meta_threshold": 0.6,
+      "classification": {
+        "auc": 0.5809,
+        "meta_auc": 0.5537,
+        "average_precision": 0.4157,
+        "base_rate": 0.3364,
+        "precision": 0.4845,
+        "top_decile_precision": 0.4821,
+        "raw_signals": 1610
+      },
+      "sim_no_regime_filter": {
+        "trades": 23,
+        "wins": 11,
+        "losses": 12,
+        "win_rate": 47.8,
+        "profit_factor": 1.518,
+        "total_return_pct": 4.03,
+        "avg_pl_pct": 1.76,
+        "max_drawdown_pct": 4.58,
+        "signals_raw": 1610,
+        "by_month": {
+          "2026-06": {
+            "trades": 8,
+            "wins": 6,
+            "losses": 2,
+            "win_rate": 75.0,
+            "profit_factor": 5.771,
+            "total_return_pct": 5.05,
+            "avg_pl_pct": 6.2,
+            "max_drawdown_pct": 0.54
+          },
+          "2026-07": {
+            "trades": 5,
+            "wins": 3,
+            "losses": 2,
+            "win_rate": 60.0,
+            "profit_factor": 3.749,
+            "total_return_pct": 2.75,
+            "avg_pl_pct": 5.49,
+            "max_drawdown_pct": 1.0
+          },
+          "2026-08": {
+            "trades": 3,
+            "wins": 1,
+            "losses": 2,
+            "win_rate": 33.3,
+            "profit_factor": 0.912,
+            "total_return_pct": -0.1,
+            "avg_pl_pct": -0.32,
+            "max_drawdown_pct": 1.09
+          },
+          "2026-09": {
+            "trades": 6,
+            "wins": 1,
+            "losses": 5,
+            "win_rate": 16.7,
+            "profit_factor": 0.277,
+            "total_return_pct": -2.84,
+            "avg_pl_pct": -4.77,
+            "max_drawdown_pct": 2.84
+          },
+          "2026-10": {
+            "trades": 1,
+            "wins": 0,
+            "losses": 1,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "total_return_pct": -0.7,
+            "avg_pl_pct": -7.04,
+            "max_drawdown_pct": 0.7
+          }
+        }
+      },
+      "sim_with_regime_filter": {
+        "trades": 11,
+        "wins": 5,
+        "losses": 6,
+        "win_rate": 45.5,
+        "profit_factor": 1.568,
+        "total_return_pct": 2.06,
+        "avg_pl_pct": 1.89,
+        "max_drawdown_pct": 2.64,
+        "signals_raw": 1610,
+        "by_month": {
+          "2026-06": {
+            "trades": 1,
+            "wins": 1,
+            "losses": 0,
+            "win_rate": 100.0,
+            "profit_factor": 99.0,
+            "total_return_pct": 1.0,
+            "avg_pl_pct": 10.0,
+            "max_drawdown_pct": 0.0
+          },
+          "2026-07": {
+            "trades": 5,
+            "wins": 3,
+            "losses": 2,
+            "win_rate": 60.0,
+            "profit_factor": 3.749,
+            "total_return_pct": 2.75,
+            "avg_pl_pct": 5.49,
+            "max_drawdown_pct": 1.0
+          },
+          "2026-08": {
+            "trades": 3,
+            "wins": 1,
+            "losses": 2,
+            "win_rate": 33.3,
+            "profit_factor": 0.912,
+            "total_return_pct": -0.1,
+            "avg_pl_pct": -0.32,
+            "max_drawdown_pct": 1.09
+          },
+          "2026-09": {
+            "trades": 2,
+            "wins": 0,
+            "losses": 2,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "total_return_pct": -1.56,
+            "avg_pl_pct": -7.83,
+            "max_drawdown_pct": 1.56
+          }
+        }
+      }
+    },
+    "old_KING.bin": {
+      "primary_threshold": 0.6146347490099584,
+      "meta_threshold": 0.6,
+      "classification": {
+        "auc": 0.5514,
+        "meta_auc": 0.4982,
+        "average_precision": 0.3688,
+        "base_rate": 0.3364,
+        "precision": 0.4081,
+        "top_decile_precision": 0.3753,
+        "raw_signals": 446
+      },
+      "sim_no_regime_filter": {
+        "trades": 11,
+        "wins": 5,
+        "losses": 6,
+        "win_rate": 45.5,
+        "profit_factor": 1.397,
+        "total_return_pct": 1.79,
+        "avg_pl_pct": 1.67,
+        "max_drawdown_pct": 2.35,
+        "signals_raw": 446,
+        "by_month": {
+          "2026-06": {
+            "trades": 1,
+            "wins": 1,
+            "losses": 0,
+            "win_rate": 100.0,
+            "profit_factor": 99.0,
+            "total_return_pct": 1.0,
+            "avg_pl_pct": 10.0,
+            "max_drawdown_pct": 0.0
+          },
+          "2026-07": {
+            "trades": 2,
+            "wins": 1,
+            "losses": 1,
+            "win_rate": 50.0,
+            "profit_factor": 2.372,
+            "total_return_pct": 0.93,
+            "avg_pl_pct": 4.73,
+            "max_drawdown_pct": 0.69
+          },
+          "2026-08": {
+            "trades": 1,
+            "wins": 1,
+            "losses": 0,
+            "win_rate": 100.0,
+            "profit_factor": 99.0,
+            "total_return_pct": 1.61,
+            "avg_pl_pct": 16.09,
+            "max_drawdown_pct": 0.0
+          },
+          "2026-09": {
+            "trades": 6,
+            "wins": 2,
+            "losses": 4,
+            "win_rate": 33.3,
+            "profit_factor": 0.728,
+            "total_return_pct": -0.86,
+            "avg_pl_pct": -1.39,
+            "max_drawdown_pct": 2.35
+          },
+          "2026-10": {
+            "trades": 1,
+            "wins": 0,
+            "losses": 1,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "total_return_pct": -0.88,
+            "avg_pl_pct": -8.79,
+            "max_drawdown_pct": 0.88
+          }
+        }
+      },
+      "sim_with_regime_filter": {
+        "trades": 7,
+        "wins": 2,
+        "losses": 5,
+        "win_rate": 28.6,
+        "profit_factor": 0.737,
+        "total_return_pct": -1.02,
+        "avg_pl_pct": -1.41,
+        "max_drawdown_pct": 2.61,
+        "signals_raw": 446,
+        "by_month": {
+          "2026-07": {
+            "trades": 2,
+            "wins": 1,
+            "losses": 1,
+            "win_rate": 50.0,
+            "profit_factor": 2.372,
+            "total_return_pct": 0.93,
+            "avg_pl_pct": 4.73,
+            "max_drawdown_pct": 0.69
+          },
+          "2026-09": {
+            "trades": 5,
+            "wins": 1,
+            "losses": 4,
+            "win_rate": 20.0,
+            "profit_factor": 0.37,
+            "total_return_pct": -1.93,
+            "avg_pl_pct": -3.87,
+            "max_drawdown_pct": 2.35
+          }
+        }
+      }
+    },
+    "new_model_EGX_v2_oos": {
+      "primary_threshold": 0.4372,
+      "meta_threshold": 0.3827,
+      "classification": {
+        "auc": 0.5812,
+        "meta_auc": 0.5878,
+        "average_precision": 0.3812,
+        "base_rate": 0.3364,
+        "precision": 0.3654,
+        "top_decile_precision": 0.361,
+        "raw_signals": 1787
+      },
+      "sim_no_regime_filter": {
+        "trades": 26,
+        "wins": 11,
+        "losses": 15,
+        "win_rate": 42.3,
+        "profit_factor": 1.186,
+        "total_return_pct": 1.83,
+        "avg_pl_pct": 0.74,
+        "max_drawdown_pct": 5.05,
+        "signals_raw": 1787,
+        "by_month": {
+          "2026-06": {
+            "trades": 4,
+            "wins": 3,
+            "losses": 1,
+            "win_rate": 75.0,
+            "profit_factor": 4.618,
+            "total_return_pct": 1.96,
+            "avg_pl_pct": 4.88,
+            "max_drawdown_pct": 0.54
+          },
+          "2026-07": {
+            "trades": 5,
+            "wins": 3,
+            "losses": 2,
+            "win_rate": 60.0,
+            "profit_factor": 4.358,
+            "total_return_pct": 3.36,
+            "avg_pl_pct": 6.69,
+            "max_drawdown_pct": 0.5
+          },
+          "2026-08": {
+            "trades": 2,
+            "wins": 1,
+            "losses": 1,
+            "win_rate": 50.0,
+            "profit_factor": 1.81,
+            "total_return_pct": 0.71,
+            "avg_pl_pct": 3.6,
+            "max_drawdown_pct": 0.89
+          },
+          "2026-09": {
+            "trades": 8,
+            "wins": 4,
+            "losses": 4,
+            "win_rate": 50.0,
+            "profit_factor": 1.388,
+            "total_return_pct": 1.05,
+            "avg_pl_pct": 1.35,
+            "max_drawdown_pct": 1.38
+          },
+          "2026-10": {
+            "trades": 7,
+            "wins": 0,
+            "losses": 7,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "total_return_pct": -5.05,
+            "avg_pl_pct": -7.37,
+            "max_drawdown_pct": 5.05
+          }
+        }
+      },
+      "sim_with_regime_filter": {
+        "trades": 11,
+        "wins": 5,
+        "losses": 6,
+        "win_rate": 45.5,
+        "profit_factor": 1.793,
+        "total_return_pct": 3.13,
+        "avg_pl_pct": 2.86,
+        "max_drawdown_pct": 1.84,
+        "signals_raw": 1787,
+        "by_month": {
+          "2026-07": {
+            "trades": 5,
+            "wins": 3,
+            "losses": 2,
+            "win_rate": 60.0,
+            "profit_factor": 4.358,
+            "total_return_pct": 3.36,
+            "avg_pl_pct": 6.69,
+            "max_drawdown_pct": 0.5
+          },
+          "2026-08": {
+            "trades": 1,
+            "wins": 0,
+            "losses": 1,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "total_return_pct": -0.89,
+            "avg_pl_pct": -8.89,
+            "max_drawdown_pct": 0.89
+          },
+          "2026-09": {
+            "trades": 5,
+            "wins": 2,
+            "losses": 3,
+            "win_rate": 40.0,
+            "profit_factor": 1.331,
+            "total_return_pct": 0.66,
+            "avg_pl_pct": 1.38,
+            "max_drawdown_pct": 1.38
+          }
+        }
+      }
+    },
+    "new_KING_v2_oos": {
+      "primary_threshold": 0.3466,
+      "meta_threshold": 0.3341,
+      "classification": {
+        "auc": 0.5832,
+        "meta_auc": 0.5935,
+        "average_precision": 0.388,
+        "base_rate": 0.3364,
+        "precision": 0.3849,
+        "top_decile_precision": 0.3762,
+        "raw_signals": 3149
+      },
+      "sim_no_regime_filter": {
+        "trades": 60,
+        "wins": 22,
+        "losses": 38,
+        "win_rate": 36.7,
+        "profit_factor": 0.897,
+        "total_return_pct": -2.98,
+        "avg_pl_pct": -0.46,
+        "max_drawdown_pct": 11.03,
+        "signals_raw": 3149,
+        "by_month": {
+          "2026-06": {
+            "trades": 12,
+            "wins": 5,
+            "losses": 7,
+            "win_rate": 41.7,
+            "profit_factor": 1.202,
+            "total_return_pct": 0.81,
+            "avg_pl_pct": 0.71,
+            "max_drawdown_pct": 2.13
+          },
+          "2026-07": {
+            "trades": 10,
+            "wins": 7,
+            "losses": 3,
+            "win_rate": 70.0,
+            "profit_factor": 5.166,
+            "total_return_pct": 7.2,
+            "avg_pl_pct": 7.02,
+            "max_drawdown_pct": 0.69
+          },
+          "2026-08": {
+            "trades": 5,
+            "wins": 2,
+            "losses": 3,
+            "win_rate": 40.0,
+            "profit_factor": 0.911,
+            "total_return_pct": -0.21,
+            "avg_pl_pct": -0.38,
+            "max_drawdown_pct": 1.79
+          },
+          "2026-09": {
+            "trades": 19,
+            "wins": 7,
+            "losses": 12,
+            "win_rate": 36.8,
+            "profit_factor": 0.902,
+            "total_return_pct": -0.98,
+            "avg_pl_pct": -0.47,
+            "max_drawdown_pct": 2.68
+          },
+          "2026-10": {
+            "trades": 14,
+            "wins": 1,
+            "losses": 13,
+            "win_rate": 7.1,
+            "profit_factor": 0.031,
+            "total_return_pct": -9.15,
+            "avg_pl_pct": -6.83,
+            "max_drawdown_pct": 9.15
+          }
+        }
+      },
+      "sim_with_regime_filter": {
+        "trades": 27,
+        "wins": 12,
+        "losses": 15,
+        "win_rate": 44.4,
+        "profit_factor": 1.409,
+        "total_return_pct": 4.18,
+        "avg_pl_pct": 1.57,
+        "max_drawdown_pct": 3.64,
+        "signals_raw": 3149,
+        "by_month": {
+          "2026-06": {
+            "trades": 5,
+            "wins": 2,
+            "losses": 3,
+            "win_rate": 40.0,
+            "profit_factor": 1.237,
+            "total_return_pct": 0.47,
+            "avg_pl_pct": 0.99,
+            "max_drawdown_pct": 0.86
+          },
+          "2026-07": {
+            "trades": 9,
+            "wins": 6,
+            "losses": 3,
+            "win_rate": 66.7,
+            "profit_factor": 4.49,
+            "total_return_pct": 6.0,
+            "avg_pl_pct": 6.53,
+            "max_drawdown_pct": 0.69
+          },
+          "2026-08": {
+            "trades": 4,
+            "wins": 1,
+            "losses": 3,
+            "win_rate": 25.0,
+            "profit_factor": 0.152,
+            "total_return_pct": -1.79,
+            "avg_pl_pct": -4.49,
+            "max_drawdown_pct": 1.79
+          },
+          "2026-09": {
+            "trades": 9,
+            "wins": 3,
+            "losses": 6,
+            "win_rate": 33.3,
+            "profit_factor": 0.921,
+            "total_return_pct": -0.4,
+            "avg_pl_pct": -0.39,
+            "max_drawdown_pct": 2.3
+          }
+        }
+      }
+    },
+    "new_council_consensus_oos": {
+      "primary_threshold": 0.01,
+      "meta_threshold": 0.01,
+      "sim_no_regime_filter": {
+        "trades": 25,
+        "wins": 10,
+        "losses": 15,
+        "win_rate": 40.0,
+        "profit_factor": 1.09,
+        "total_return_pct": 0.82,
+        "avg_pl_pct": 0.37,
+        "max_drawdown_pct": 5.05,
+        "signals_raw": 1616,
+        "by_month": {
+          "2026-06": {
+            "trades": 3,
+            "wins": 2,
+            "losses": 1,
+            "win_rate": 66.7,
+            "profit_factor": 2.766,
+            "total_return_pct": 0.95,
+            "avg_pl_pct": 3.17,
+            "max_drawdown_pct": 0.54
+          },
+          "2026-07": {
+            "trades": 5,
+            "wins": 3,
+            "losses": 2,
+            "win_rate": 60.0,
+            "profit_factor": 4.358,
+            "total_return_pct": 3.36,
+            "avg_pl_pct": 6.69,
+            "max_drawdown_pct": 0.5
+          },
+          "2026-08": {
+            "trades": 2,
+            "wins": 1,
+            "losses": 1,
+            "win_rate": 50.0,
+            "profit_factor": 1.81,
+            "total_return_pct": 0.71,
+            "avg_pl_pct": 3.6,
+            "max_drawdown_pct": 0.89
+          },
+          "2026-09": {
+            "trades": 8,
+            "wins": 4,
+            "losses": 4,
+            "win_rate": 50.0,
+            "profit_factor": 1.388,
+            "total_return_pct": 1.05,
+            "avg_pl_pct": 1.35,
+            "max_drawdown_pct": 1.38
+          },
+          "2026-10": {
+            "trades": 7,
+            "wins": 0,
+            "losses": 7,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "total_return_pct": -5.05,
+            "avg_pl_pct": -7.37,
+            "max_drawdown_pct": 5.05
+          }
+        }
+      },
+      "sim_with_regime_filter": {
+        "trades": 11,
+        "wins": 5,
+        "losses": 6,
+        "win_rate": 45.5,
+        "profit_factor": 1.793,
+        "total_return_pct": 3.13,
+        "avg_pl_pct": 2.86,
+        "max_drawdown_pct": 1.84,
+        "signals_raw": 1616,
+        "by_month": {
+          "2026-07": {
+            "trades": 5,
+            "wins": 3,
+            "losses": 2,
+            "win_rate": 60.0,
+            "profit_factor": 4.358,
+            "total_return_pct": 3.36,
+            "avg_pl_pct": 6.69,
+            "max_drawdown_pct": 0.5
+          },
+          "2026-08": {
+            "trades": 1,
+            "wins": 0,
+            "losses": 1,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "total_return_pct": -0.89,
+            "avg_pl_pct": -8.89,
+            "max_drawdown_pct": 0.89
+          },
+          "2026-09": {
+            "trades": 5,
+            "wins": 2,
+            "losses": 3,
+            "win_rate": 40.0,
+            "profit_factor": 1.331,
+            "total_return_pct": 0.66,
+            "avg_pl_pct": 1.38,
+            "max_drawdown_pct": 1.38
+          }
+        }
+      }
+    }
+  },
+  "fresh_candidates_20261125": {
+    "note": "Trained through 2026-10-20 (NOT OOS on June-Oct 2026; saved strictly in api/models/candidates/)",
+    "model_EGX_v2_20261125": {
+      "saved_path": "E:\\stokscan_AI\\api\\models\\candidates/model_EGX_v2_20261125.pkl",
+      "optimal_threshold": 0.3911,
+      "meta_threshold": 0.4093,
+      "train_samples": 396682,
+      "tune_samples": 74598,
+      "dev_calibration": {
+        "dev_precision": 0.3736,
+        "dev_base_rate": 0.3407,
+        "dev_signals": 1713,
+        "dev_sim_trades": 25,
+        "dev_sim_wr": 56.0,
+        "dev_sim_pf": 2.469,
+        "p_q": 0.92,
+        "m_q": 0.65
+      },
+      "best_iteration": 202,
+      "walk_forward_summary": {
+        "n_splits": 5,
+        "average_precision": 0.44772039430181143,
+        "average_recall": 0.2134045606539973,
+        "average_f1": 0.28809221593201356,
+        "average_auc": 0.6305951510831591,
+        "std_precision": 0.04008779577920338,
+        "std_recall": 0.027955084499419955,
+        "std_f1": 0.029211413079118714,
+        "std_auc": 0.04084482844464235,
+        "min_f1": 0.24490922896389866,
+        "max_f1": 0.32399575467146946
+      },
+      "duration_s": 174.1
+    },
+    "KING_v2_20261125": {
+      "saved_path": "E:\\stokscan_AI\\api\\models\\candidates/KING_v2_20261125.pkl",
+      "optimal_threshold": 0.3321,
+      "meta_threshold": 0.3375,
+      "train_samples": 396682,
+      "tune_samples": 74598,
+      "dev_calibration": {
+        "dev_precision": 0.3402,
+        "dev_base_rate": 0.2974,
+        "dev_signals": 1884,
+        "dev_sim_trades": 24,
+        "dev_sim_wr": 54.2,
+        "dev_sim_pf": 2.184,
+        "p_q": 0.9,
+        "m_q": 0.55
+      },
+      "best_iteration": 202,
+      "walk_forward_summary": {},
+      "duration_s": 69.4
+    }
+  }
+}

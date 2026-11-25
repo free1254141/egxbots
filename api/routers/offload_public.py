@@ -3658,7 +3658,7 @@ def _load_disclosures_page_data() -> Dict[str, Any]:
         )
 
     def _run_prices():
-        return sb.table("stock_technical_indicators").select("symbol, close, change_pct").limit(350).execute()
+        return sb.table("stock_technical_indicators").select("symbol, close, change_pct, r_vol").limit(350).execute()
 
     def _run_fundamentals():
         return sb.table("stock_fundamentals").select("symbol, data").limit(350).execute()
@@ -3684,7 +3684,29 @@ def _load_disclosures_page_data() -> Dict[str, Any]:
             price_map[sym] = {
                 "close": close_val,
                 "change_pct": float(row["change_pct"]) if row.get("change_pct") is not None else 0.0,
+                "r_vol": float(row["r_vol"]) if row.get("r_vol") is not None else None,
             }
+
+    from api.corporate_events_engine import classify_event_reality_check
+
+    def _attach_rc(rows_list: List[Dict[str, Any]]) -> None:
+        for d in rows_list:
+            sym_d = str(d.get("symbol") or "").strip().upper()
+            pinfo = price_map.get(sym_d)
+            if not pinfo:
+                continue
+            rc = classify_event_reality_check(
+                sentiment=d.get("sentiment"),
+                action_type=d.get("action_type"),
+                title=d.get("title"),
+                change_pct=pinfo.get("change_pct"),
+                r_vol=pinfo.get("r_vol"),
+            )
+            if rc:
+                d["reality_check"] = rc
+
+    _attach_rc(items)
+    _attach_rc(all_disclosures)
 
     for row in getattr(fund_res, "data", None) or []:
         sym = str(row.get("symbol") or "").strip().upper()

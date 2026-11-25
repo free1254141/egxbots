@@ -248,6 +248,82 @@ def test_agentic_chat_optimize_portfolio_tool_and_sharia_filter():
 
     assert res_pf["status"] == "success"
     assert res_pf["optimization"]["hasExistingHoldings"] is True
+
+
+def test_cash_reserve_absorption_and_no_buy_guards_on_real_portfolios():
+    """
+    Replay both real 2026-11-25 portfolios:
+    1) OBRI (35% cap) + IDRE (excluded 0%) + MAAL (excluded 0%) -> must NEVER buy MAAL; 65% becomes Cash Reserve!
+    2) ETEL (68.4% -> trimmed to 35%) + SWDY (19.9%) + MTIE (4.9% downtrend NO-BUY cap) -> must NEVER buy MTIE!
+    """
+    rets = _synthetic_returns(60)
+
+    # Case 1: OBRI + IDRE (excluded) + MAAL (excluded)
+    p1_assets = [
+        AssetInput(
+            symbol="OBRI", price=21.70, name_ar="العبور", sector="عقارات",
+            current_shares=2585, expected_score=0.25, returns_by_date=rets["LOWV"],
+            max_weight_override=0.35,
+        ),
+        AssetInput(
+            symbol="IDRE", price=39.91, name_ar="رواد السياحة", sector="عقارات",
+            current_shares=1426, expected_score=-0.85, returns_by_date=rets["HVA"],
+            max_weight_override=0.0, exclusion_reason="مكرر ربحية متضخم مع اتجاه هابط — مستبعد من الشراء",
+        ),
+        AssetInput(
+            symbol="MAAL", price=5.94, name_ar="مرسيليا", sector="عقارات",
+            current_shares=1500, expected_score=-0.85, returns_by_date=rets["HVB"],
+            max_weight_override=0.0, exclusion_reason="تقييم مالي ضعيف واتجاه هابط — مستبعد من الشراء",
+        ),
+    ]
+    res1 = optimize_portfolio_or(
+        p1_assets,
+        total_capital=121916.16,
+        objective="hrp",
+        max_weight_pct=35.0,
+        max_sector_pct=45.0,
+        exchange="EGX",
+    )
+    by1 = {r["symbol"]: r for r in res1["allocations"]}
+    assert by1["MAAL"]["action"] == "SELL"
+    assert by1["MAAL"]["targetShares"] == 0
+    assert by1["IDRE"]["action"] == "SELL"
+    assert by1["IDRE"]["targetShares"] == 0
+    assert by1["OBRI"]["actualWeightPct"] <= 35.5
+    assert res1["leftoverCash"] >= 121916.16 * 0.64  # >= 64% Cash Reserve instead of buying MAAL!
+    assert any("كاش احتياطي" in n for n in res1["constraints"]["relaxationNotes"])
+
+    # Case 2: ETEL (68.4%) + SWDY (19.9%) + MTIE (4.9% capped at current weight due to full downtrend)
+    p2_assets = [
+        AssetInput(
+            symbol="ETEL", price=140.84, name_ar="المصرية للاتصالات", sector="اتصالات",
+            current_shares=1000, expected_score=0.45, returns_by_date=rets["LOWV"],
+        ),
+        AssetInput(
+            symbol="SWDY", price=116.69, name_ar="السويدي", sector="صناعات هندسية",
+            current_shares=352, expected_score=0.20, returns_by_date=rets["UNCR"],
+        ),
+        AssetInput(
+            symbol="MTIE", price=6.60, name_ar="إم إم جروب", sector="توزيع",
+            current_shares=1530, expected_score=0.10, returns_by_date=rets["HVA"],
+            max_weight_override=0.049, exclusion_reason="مسار هابط تحت EMA50 وEMA200 — يُمنع التعزيز التلقائي",
+        ),
+    ]
+    res2 = optimize_portfolio_or(
+        p2_assets,
+        total_capital=206012.88,
+        objective="hrp",
+        max_weight_pct=35.0,
+        max_sector_pct=45.0,
+        exchange="EGX",
+    )
+    by2 = {r["symbol"]: r for r in res2["allocations"]}
+    assert by2["ETEL"]["action"] == "SELL"
+    assert by2["ETEL"]["actualWeightPct"] <= 35.5
+    assert by2["MTIE"]["action"] != "BUY"
+    assert by2["MTIE"]["deltaShares"] <= 0
+    assert res2["leftoverCash"] >= 206012.88 * 0.24  # Excess cash preserved instead of dumping into MTIE!
+
     assert res_pf["optimization"]["totalCapital"] == pytest.approx(600 * 82.0 + 200 * 55.0 + 10000.0, abs=1.0)
 
 
@@ -382,4 +458,116 @@ def test_tadawul_multimarket_routing_telegram_portfolio_capital_and_guards():
         # holdings = 1000*28 + 200*90 = 46,000 + existing_cash 5,000 + top-up 20,000 = 71,000
         assert res_tg["optimization"]["totalCapital"] == pytest.approx(71000.0, abs=1.0)
         assert sum(a["currentWeightPct"] for a in res_tg["optimization"]["allocations"]) <= 100.0
+
+
+def test_cash_reserve_absorption_and_no_buy_guards_on_real_portfolios():
+    """Replay both real 2026-11-25 user portfolios to guarantee zero destructive BUY orders."""
+    from api.portfolio_or_optimizer import AssetInput, build_smart_dca_plan, optimize_portfolio_or
+
+    # Case 1: OBRI (healthy 46%) + IDRE (hard-excluded P/E 1606x) + MAAL (hard-excluded weak fund 37 + downtrend)
+    assets_1 = [
+        AssetInput(
+            symbol="OBRI",
+            price=18.29,
+            sector="عقارات",
+            current_shares=2400,
+            expected_score=0.25,
+            fallback_daily_vol=0.022,
+        ),
+        AssetInput(
+            symbol="IDRE",
+            price=44.50,
+            sector="عقارات",
+            current_shares=1000,
+            expected_score=-0.85,
+            fallback_daily_vol=0.028,
+            max_weight_override=0.0,
+            exclusion_reason="مكرر ربحية متضخم",
+        ),
+        AssetInput(
+            symbol="MAAL",
+            price=1.02,
+            sector="عقارات",
+            current_shares=6800,
+            expected_score=-0.85,
+            fallback_daily_vol=0.030,
+            max_weight_override=0.0,
+            exclusion_reason="تقييم مالي ضعيف (37/100) ومسار هابط",
+        ),
+    ]
+    res_1 = optimize_portfolio_or(
+        assets_1,
+        total_capital=95332.0,
+        objective="hrp",
+        max_weight_pct=35.0,
+        max_sector_pct=45.0,
+        exchange="EGX",
+    )
+    by_sym_1 = {r["symbol"]: r for r in res_1["allocations"]}
+    assert by_sym_1["IDRE"]["targetWeightPct"] == 0.0
+    assert by_sym_1["IDRE"]["action"] == "SELL"
+    assert by_sym_1["MAAL"]["targetWeightPct"] == 0.0
+    assert by_sym_1["MAAL"]["action"] == "SELL"
+    assert by_sym_1["OBRI"]["targetWeightPct"] <= 35.5
+    assert res_1["leftoverCashPct"] >= 64.0
+    assert any("كاش احتياطي" in n for n in res_1["constraints"]["relaxationNotes"])
+
+    # Case 2: ETEL (68.4%) + SWDY (19.9%) + MTIE (4.9%, full downtrend capped at current weight) + 14,000 cash
+    assets_2 = [
+        AssetInput(
+            symbol="ETEL",
+            price=78.40,
+            sector="اتصالات",
+            current_shares=1800,
+            expected_score=0.55,
+            fallback_daily_vol=0.019,
+        ),
+        AssetInput(
+            symbol="SWDY",
+            price=82.00,
+            sector="صناعة",
+            current_shares=500,
+            expected_score=0.40,
+            fallback_daily_vol=0.021,
+        ),
+        AssetInput(
+            symbol="MTIE",
+            price=6.60,
+            sector="اتصالات",
+            current_shares=1545,
+            expected_score=-0.10,
+            fallback_daily_vol=0.026,
+            max_weight_override=0.049,
+            exclusion_reason="مسار هابط تحت EMA50 وEMA200 — يُمنع التعزيز التلقائي",
+        ),
+    ]
+    res_2 = optimize_portfolio_or(
+        assets_2,
+        total_capital=206317.0,
+        objective="hrp",
+        max_weight_pct=35.0,
+        max_sector_pct=45.0,
+        exchange="EGX",
+    )
+    by_sym_2 = {r["symbol"]: r for r in res_2["allocations"]}
+    assert by_sym_2["ETEL"]["targetWeightPct"] <= 35.5
+    assert by_sym_2["MTIE"]["action"] != "BUY"
+    assert by_sym_2["MTIE"]["deltaShares"] <= 0
+    assert by_sym_2["MTIE"]["targetWeightPct"] <= 5.2
+    assert res_2["leftoverCashPct"] >= 24.0
+
+    # Case 3: Smart DCA blocks weak fundamentals (< 42/100, e.g. MAAL = 37)
+    dca_maal = build_smart_dca_plan(
+        symbol="MAAL",
+        current_price=1.02,
+        old_avg_price=1.35,
+        old_shares=6800,
+        dca_budget=10000.0,
+        fund_score=37.0,
+        setup_regime="watch_wait",
+        exchange="EGX",
+    )
+    assert dca_maal["dca_allowed"] is False
+    assert "37/100" in dca_maal["rejection_reason_ar"]
+
 

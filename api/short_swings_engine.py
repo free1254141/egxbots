@@ -899,6 +899,7 @@ def compute_short_swings(
         sig_rs_leader = (
             (~mkt_ok)
             & (df["breadth"] >= 0.22)
+            & (df["breadth_d5"] >= MIN_BREADTH_DELTA5)
             & trend_aligned
             & saudi_quality
             & (df["close"] >= df["high20"])
@@ -909,13 +910,23 @@ def compute_short_swings(
         )
         sig_defensive_pb = pd.Series(False, index=df.index)
     else:
+        # EGX anti-blowoff & quality guard: avoid extreme vertical chasing (>25% above EMA20), extreme RSI, or erratic ATR spikes.
+        egx_quality = (
+            (df["close"] >= 1.5)
+            & (df["atr_pct"].fillna(0.0) <= 0.085)
+            & (df["close"] <= df["ema20"] * 1.25)
+            & (df["rsi14"].fillna(50.0) <= 85.0)
+        )
+        sig_base_bo = sig_base_bo & egx_quality
         # Disable EGX Power Pullback & Defensive Pullback (1.29 / 0.56 PF in choppy regimes).
         sig_power_pb = pd.Series(False, index=df.index)
-        # Strict Relative Strength Leader in selective breadth (30% <= breadth < bull threshold):
+        # Strict Relative Strength Leader in selective breadth (30% <= breadth < bull threshold, breadth not collapsing):
         sig_rs_leader = (
             (~mkt_ok)
             & (df["breadth"] >= 0.30)
+            & (df["breadth_d5"] >= MIN_BREADTH_DELTA5)
             & trend_aligned
+            & egx_quality
             & (df["close"] >= df["high20"])
             & (df["volume"] >= df["vol_ma20"] * 1.5)
             & (df["close"] > df["open"])

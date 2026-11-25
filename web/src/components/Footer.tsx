@@ -630,6 +630,15 @@ export default function Footer() {
               <ul className="space-y-2 text-xs font-bold">
                 <li>
                   <Link
+                    href="/blogs/best-ai-chatbot-egyptian-saudi-gulf-stock-market"
+                    prefetch={false}
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "أفضل شات ذكاء اصطناعي متخصص في البورصة المصرية والسعودية والخليجية 2026" : "Best AI Chatbot for Egyptian (EGX), Saudi (TASI) & Gulf Stock Markets"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
                     href="/blogs/best-tasi-ai-stock-analysis-software"
                     className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
                     prefetch={false}

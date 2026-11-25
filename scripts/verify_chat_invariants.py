@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 CRITICAL_MODULES = [
     *sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "api" / "agentic_chat").glob("*.py")),
+    "api/corporate_events_engine.py",
     "api/fair_value_engine.py",
     "api/portfolio_or_optimizer.py",
     "api/scheduled_automations_worker.py",
@@ -36,6 +37,7 @@ CRITICAL_MODULES = [
 CRITICAL_MODULES = [m for m in CRITICAL_MODULES if m]
 
 OFFLINE_TEST_SUITES = [
+    "api/tests/test_corporate_events_engine.py",
     "api/tests/test_intraday_and_cache_hardening.py",
     "api/tests/test_quant_intelligence_engine.py",
     "api/tests/test_portfolio_or_optimizer.py",

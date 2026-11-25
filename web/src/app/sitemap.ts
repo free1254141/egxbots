@@ -137,6 +137,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.90,
     },
     {
+      url: `${baseUrl}/blogs/best-ai-chatbot-egyptian-saudi-gulf-stock-market`,
+      changeFrequency: 'weekly',
+      priority: 0.95,
+    },
+    {
       url: `${baseUrl}/news`,
       changeFrequency: 'hourly',
       priority: 0.8,

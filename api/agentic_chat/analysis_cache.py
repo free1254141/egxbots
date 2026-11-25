@@ -64,6 +64,13 @@ logger = logging.getLogger("agentic_chat.cache")
 
 CAIRO_TZ = ZoneInfo("Africa/Cairo")
 LIVE_SESSION_TTL_SECONDS = 15 * 60  # 15 minutes during live trading
+LIVE_EOD_SCAN_TTL_SECONDS = 60 * 60  # 60 minutes intraday for EOD-driven scans (Wyckoff accumulation / open recs / traps)
+_EOD_SCAN_CACHE_KEYS = frozenset({
+    "vip_accumulation",
+    "vip_open_recommendations",
+    "vip_disclosures",
+    "vip_price_traps",
+})
 MAX_OFF_HOURS_AGE_SECONDS = 4 * 24 * 3600  # Never serve anything older than 4 days
 MAX_MEMORY_CACHE_ENTRIES = 1500
 
@@ -174,11 +181,13 @@ def resolve_cache_validity(
     computed_at_ts: float,
     now_ts: Optional[float] = None,
     market: str = "EGX",
+    *,
+    cache_key: Optional[str] = None,
 ) -> bool:
     """
     Decide whether a cached entry may still be served for ANY registered exchange:
-    - Always valid for the first 15 minutes.
-    - During live session of `market`: never valid beyond 15 minutes.
+    - Always valid for the first 15 minutes (or 60 minutes for EOD-driven scans like `vip_accumulation`).
+    - During live session of `market`: never valid beyond its live TTL.
     - Outside session: valid only if computed at or after the latest completed session's
       post-close ready time for `market`, so weekend/holiday checks never serve older sessions.
     """
@@ -188,7 +197,8 @@ def resolve_cache_validity(
 
     if age_seconds < -60.0:
         return False  # Clock skew guard
-    if age_seconds < LIVE_SESSION_TTL_SECONDS:
+    live_ttl = LIVE_EOD_SCAN_TTL_SECONDS if (cache_key in _EOD_SCAN_CACHE_KEYS) else LIVE_SESSION_TTL_SECONDS
+    if age_seconds < live_ttl:
         return True
     if age_seconds > MAX_OFF_HOURS_AGE_SECONDS:
         return False
@@ -1139,7 +1149,7 @@ def get_vip_analysis_cache(
         mem = _memory_cache.get(storage_key)
         if mem:
             computed_at = mem.get("computed_at", 0.0)
-            if resolve_cache_validity(computed_at, now_ts, market=exch):
+            if resolve_cache_validity(computed_at, now_ts, market=exch, cache_key=cache_key):
                 reply = mem.get("reply", "")
                 if reply and len(reply) >= min_length:
                     logger.info(f"[analysis_cache] Tier 1 Memory Hit for key: {storage_key}")
@@ -1179,7 +1189,7 @@ def get_vip_analysis_cache(
                 computed_dt = dt.datetime.fromisoformat(computed_str.replace("Z", "+00:00"))
                 computed_at_ts = computed_dt.timestamp()
 
-                if resolve_cache_validity(computed_at_ts, now_ts, market=exch):
+                if resolve_cache_validity(computed_at_ts, now_ts, market=exch, cache_key=cache_key):
                     reply = payload.get("reply", "")
                     if reply and len(reply) >= min_length:
                         logger.info(f"[analysis_cache] Tier 2 Supabase Hit for key: {storage_key}")

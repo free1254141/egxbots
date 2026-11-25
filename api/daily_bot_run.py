@@ -1994,7 +1994,7 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
         lifecycle["signal_reference"] = reference
         policy = dict(details.get("recommendation_policy") or {})
         management = dict(details.get("management_policy") or {})
-        if not management and os.getenv("PUBLIC_PROFIT_PROTECTION_ENABLED", "false").lower() in {"1", "true", "yes", "on"}:
+        if not management and os.getenv("PUBLIC_PROFIT_PROTECTION_ENABLED", "true").lower() in {"1", "true", "yes", "on"}:
             management = _profit_protection_policy()
             details = {**details, "management_policy": management}
         # Legacy rows have no independent bar cursor. Bootstrap once from their
@@ -3016,12 +3016,37 @@ async def generate_daily_recommendations(
         elif os.path.exists(os.path.join(base_dir, "api", "models", "The_Council_Validator.bin")):
             validator_model = "The_Council_Validator.bin"
 
-    print(f"[RECOMMENDATIONS] Running ML fast scan for EGX stocks using model: {resolved_model} (council: {council_model}, validator: {validator_model}, stressed={is_market_stressed})...")
+    # Resolve calibrated stationary threshold if the selected model carries a stationary model card
+    calibrated_preset = None
+    calibrated_opt_th = None
+    try:
+        card_candidates = [
+            os.path.join(base_dir, "api", "models", f"{resolved_model}.model_card.json"),
+            os.path.join(base_dir, "api", "models", f"{resolved_model.replace('.bin', '.pkl')}.model_card.json"),
+        ]
+        for cpath in card_candidates:
+            if os.path.exists(cpath):
+                with open(cpath, "r", encoding="utf-8") as cf:
+                    cdata = json.load(cf)
+                calibrated_preset = cdata.get("feature_preset") or cdata.get("featurePreset")
+                raw_th = cdata.get("optimal_threshold") or cdata.get("buyThreshold") or (cdata.get("training") or {}).get("threshold")
+                if isinstance(raw_th, (int, float)) and 0.05 < float(raw_th) < 0.95:
+                    calibrated_opt_th = float(raw_th)
+                break
+    except Exception:
+        pass
+
+    is_stationary_calibrated = calibrated_preset == "stationary" and calibrated_opt_th is not None
+    scan_min_precision = round(calibrated_opt_th, 4) if is_stationary_calibrated else (0.62 if is_market_stressed else 0.5)
+    scan_buy_threshold = round(calibrated_opt_th, 4) if is_stationary_calibrated else 0.60
+
+    print(f"[RECOMMENDATIONS] Running ML fast scan for EGX stocks using model: {resolved_model} (council: {council_model}, validator: {validator_model}, stressed={is_market_stressed}, threshold={scan_buy_threshold})...")
     scan_resp = fast_scan(
         country="Egypt",
         limit=200,
-        min_precision=0.62 if is_market_stressed else 0.5,
+        min_precision=scan_min_precision,
         model_name=resolved_model,
+        buy_threshold=scan_buy_threshold,
         council_model=council_model,
         validator_model=validator_model,
         bulk_cache_ttl_seconds=bulk_cache_ttl_seconds,
@@ -3079,14 +3104,12 @@ async def generate_daily_recommendations(
             env_thresh = os.getenv("COUNCIL_THRESHOLD")
             if env_thresh:
                 council_threshold = _normalize_percent_score(env_thresh, default=55.0)
-            elif is_market_stressed:
-                # In market stress/correction, KING model is dormant (0.0), so 2-model consensus average is around 30-36%.
-                # Adaptive threshold allows top defensive consensus candidates (>= 30.0%)
-                council_threshold = 30.0
+            elif is_stationary_calibrated and calibrated_opt_th is not None:
+                council_threshold = round(calibrated_opt_th * 100.0, 1)
             else:
                 council_threshold = 50.0
         except Exception:
-            council_threshold = 30.0 if is_market_stressed else 50.0
+            council_threshold = round(calibrated_opt_th * 100.0, 1) if (is_stationary_calibrated and calibrated_opt_th is not None) else 50.0
 
         filtered_results = []
         for item in results:
@@ -3280,7 +3303,7 @@ async def generate_daily_recommendations(
             "features": res_item.get("features", []),  # Stored as jsonb
             "rich_details": {
                 "recommendation_policy": {"version": POLICY_VERSION, "max_sessions": max_sessions, "trail_pct": None},
-                "management_policy": _profit_protection_policy() if os.getenv("PUBLIC_PROFIT_PROTECTION_ENABLED", "false").lower() in {"1", "true", "yes", "on"} else {},
+                "management_policy": _profit_protection_policy() if os.getenv("PUBLIC_PROFIT_PROTECTION_ENABLED", "true").lower() in {"1", "true", "yes", "on"} else {},
                 "entry_snapshot": {
                     "target_price": res_item.get("target_price"), "stop_loss": res_item.get("stop_loss"),
                     "price_date": res_item.get("date"), "feature_names": res_item.get("feature_names", []),

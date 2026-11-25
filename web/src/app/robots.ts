@@ -12,15 +12,26 @@ export default function robots(): MetadataRoute.Robots {
         userAgent: [
           'GPTBot',
           'ChatGPT-User',
+          'OAI-SearchBot',
           'PerplexityBot',
+          'Perplexity-User',
           'ClaudeBot',
+          'Claude-Web',
+          'anthropic-ai',
+          'MistralAI-User',
           'Google-Extended',
           'Applebot-Extended',
           'cohere-ai',
-          'OAI-SearchBot'
+          'Bravebot',
+          'DuckAssistBot',
+          'Meta-ExternalAgent',
+          'YouBot'
         ],
         allow: [
           '/',
+          '/chat',
+          '/markets',
+          '/markets/*',
           '/stocks',
           '/stocks/*',
           '/fair-value',

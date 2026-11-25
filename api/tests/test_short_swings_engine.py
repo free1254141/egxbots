@@ -561,3 +561,50 @@ def test_short_swings_entry_day_corporate_action_gap_requires_confirmation(monke
     assert [t for t in res_unconf["active_trades"] if t["symbol"] == "CAX2"] == []
     assert [t for t in res_unconf["closed_trades"] if t["symbol"] == "CAX2"] == []
     assert len(res_unconf.get("unconfirmed_discontinuities", [])) == 1
+
+
+def test_short_swings_vip_message_no_stray_plus_and_egx_anti_chasing(monkeypatch, tmp_path):
+    """VIP entry message omits '+' before EGP price, and EGX engine filters extended parabolic chasing."""
+    from api.short_swings_daily import build_vip_entry_message
+
+    msg = build_vip_entry_message(
+        [{"symbol": "COMI", "name_ar": "التجاري الدولي", "reference_close": 100.0, "stop_loss": 96.0, "sector": "البنوك"}],
+        "2026-11-25",
+        "https://egxbots.com",
+    )
+    assert "+105.00" not in msg
+    assert "`105.00`" in msg
+
+    # Genuine blow-off spike (> 25% above EMA20) on EGX must be rejected by egx_quality anti-blowoff guard
+    rows = _build_uptrend_rows("PARA", start_end_date="2026-11-09", periods=90)
+    last_close = rows[-1]["close"]
+    spike_close = round(last_close * 1.35, 2)
+    rows.append({
+        "symbol": "PARA",
+        "exchange": "EGX",
+        "date": "2026-11-10",
+        "open": round(last_close * 1.02, 2),
+        "high": round(spike_close * 1.01, 2),
+        "low": round(last_close * 1.01, 2),
+        "close": spike_close,
+        "volume": 500_000.0,
+    })
+    rows.append({
+        "symbol": "PARA",
+        "exchange": "EGX",
+        "date": "2026-11-11",
+        "open": spike_close,
+        "high": round(spike_close * 1.02, 2),
+        "low": round(spike_close * 0.99, 2),
+        "close": round(spike_close * 1.01, 2),
+        "volume": 350_000.0,
+    })
+    res = _run_offline_engine(
+        monkeypatch,
+        tmp_path,
+        rows,
+        now_iso="2026-11-11T16:00:00+02:00",
+        confirmed_action_dates={},
+    )
+    assert [t for t in res["active_trades"] if t["symbol"] == "PARA"] == []
+    assert [t for t in res["closed_trades"] if t["symbol"] == "PARA"] == []

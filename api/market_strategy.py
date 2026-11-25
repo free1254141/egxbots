@@ -48,6 +48,7 @@ def index_metrics(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "return_1d_pct": period_return(1),
         "return_5d_pct": period_return(5),
         "return_10d_pct": period_return(10),
+        "return_20d_pct": period_return(20),
         "sma20": sma20,
         "sma50": sma50,
         "above_sma20": bool(latest is not None and sma20 is not None and latest >= sma20),
@@ -79,6 +80,16 @@ def market_context(egx30_rows, egx100_rows, breadth: Dict[str, Any] | None = Non
         not egx30.get("above_sma50") and not egx100.get("above_sma50")
         and metric(egx30, "return_5d_pct") < 0 and metric(egx100, "return_5d_pct") < 0
     )
+    egx30_downtrend = same_session and (
+        egx30.get("sma50") is not None
+        and not egx30.get("above_sma50")
+        and not egx30.get("above_sma20")
+    )
+    egx30_weak_momentum = same_session and (
+        egx30.get("return_20d_pct") is not None
+        and not egx30.get("above_sma20")
+        and metric(egx30, "return_20d_pct") <= -1.0
+    )
     advancing_pct = breadth.get("advancing_pct")
     weak_breadth = advancing_pct is not None and _number(advancing_pct, 100.0) < 35.0
     breadth_confirmed_selloff = weak_breadth and same_session and (
@@ -86,7 +97,7 @@ def market_context(egx30_rows, egx100_rows, breadth: Dict[str, Any] | None = Non
     )
 
     confirmed_stress = one_day_panic or five_day_selloff or ten_day_break or trend_break or breadth_confirmed_selloff
-    reject_buys = data_incomplete or confirmed_stress
+    reject_buys = data_incomplete or confirmed_stress or egx30_downtrend or egx30_weak_momentum
     if one_day_panic or five_day_selloff:
         regime = "panic"
     elif reject_buys:
@@ -108,6 +119,10 @@ def market_context(egx30_rows, egx100_rows, breadth: Dict[str, Any] | None = Non
         reasons.append("broad_ten_day_break")
     if trend_break:
         reasons.append("both_indices_below_sma50")
+    if egx30_downtrend:
+        reasons.append("egx30_below_sma20_and_sma50")
+    if egx30_weak_momentum:
+        reasons.append("egx30_below_sma20_weak_20d")
     if breadth_confirmed_selloff:
         reasons.append("weak_market_breadth")
 

@@ -3,6 +3,7 @@ import pickle
 import time
 import datetime
 import random
+import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
@@ -38,7 +39,7 @@ from api.train_exchange_model import add_massive_features, add_market_context
 from api.council import TheCouncil
 from api.council_validator import CouncilValidator, load_council_validator_from_path
 from api.market_status_gate import should_reject_new_buys
-from api.model_utils import safe_model_path
+from api.model_utils import align_pandas_categories_to_booster, safe_model_path
 
 router = APIRouter(prefix="/scan/fast", tags=["scan-fast"])
 
@@ -112,17 +113,6 @@ def _get_exchange_fundamentals_map(exchange: str) -> Dict[str, Dict[str, Any]]:
             sample_ex = sorted({str(r.get("exchange") or "").strip() for r in rows[:50]})
             print(f"DEBUG FUND: sample exchanges (first 50 rows)={sample_ex}")
 
-        sector_by_sym: Dict[str, str] = {}
-        try:
-            st_res = sb.table("stocks").select("symbol, sector").eq("exchange", ex).limit(1000).execute()
-            for srow in st_res.data or []:
-                ssym = (srow.get("symbol") or "").upper()
-                ssec = str(srow.get("sector") or "").strip()
-                if ssym and ssec:
-                    sector_by_sym[ssym] = ssec
-        except Exception:
-            pass
-
         for row in rows:
             row_ex = _normalize_exchange(str(row.get("exchange") or ""))
             if row_ex != ex:
@@ -138,7 +128,7 @@ def _get_exchange_fundamentals_map(exchange: str) -> Dict[str, Dict[str, Any]]:
                 except Exception:
                     data = {}
             col_fund_score = row.get("fund_score")
-            sector_val = str(data.get("sector") or data.get("Sector") or sector_by_sym.get(symbol) or "").strip()
+            sector_val = str(data.get("sector") or data.get("Sector") or "").strip()
             fmap[symbol] = {
                 "peRatio": data.get("peRatio"),
                 "eps": data.get("eps"),
@@ -244,6 +234,17 @@ def _load_model(model_name: str, return_raw_prob: bool = False):
         meta_threshold = artifact.get("meta_threshold", 0.7)
 
         model = _MetaLabelingClassifier(primary_clf, meta_model, meta_feature_names, meta_threshold, return_raw_prob=return_raw_prob)
+        try:
+            model._primary_booster = booster
+            model.categorical_features = list(primary_art.get("categorical_features") or [])
+            opt_th = artifact.get("optimal_threshold") or artifact.get("buyThreshold")
+            if isinstance(opt_th, (int, float)) and 0.05 < float(opt_th) < 0.95:
+                model.optimal_threshold = float(opt_th)
+            preset_val = artifact.get("feature_preset") or artifact.get("featurePreset")
+            if preset_val:
+                model.feature_preset = str(preset_val)
+        except Exception:
+            pass
         is_lgbm = True
 
     # ── lgbm_booster artifact ────────────────────────────────────────────────
@@ -313,7 +314,7 @@ def _load_model(model_name: str, return_raw_prob: bool = False):
             except Exception:
                 predictors = None
 
-    # Extract optimal_threshold_by_regime from artifact if present
+    # Extract optimal_threshold_by_regime & calibrated metadata from artifact if present
     optimal_threshold_by_regime = None
     if isinstance(artifact, dict):
         optimal_threshold_by_regime = artifact.get("optimal_threshold_by_regime")
@@ -325,6 +326,20 @@ def _load_model(model_name: str, return_raw_prob: bool = False):
     if optimal_threshold_by_regime is not None and model is not None:
         try:
             model.optimal_threshold_by_regime = optimal_threshold_by_regime
+        except Exception:
+            pass
+    if isinstance(artifact, dict) and model is not None:
+        try:
+            if getattr(model, "optimal_threshold", None) is None:
+                opt_th = artifact.get("optimal_threshold") or artifact.get("buyThreshold")
+                if isinstance(opt_th, (int, float)) and 0.05 < float(opt_th) < 0.95:
+                    model.optimal_threshold = float(opt_th)
+            if getattr(model, "feature_preset", None) is None:
+                preset_val = artifact.get("feature_preset") or artifact.get("featurePreset")
+                if preset_val:
+                    model.feature_preset = str(preset_val)
+            if getattr(model, "categorical_features", None) is None:
+                model.categorical_features = list(artifact.get("categorical_features") or [])
         except Exception:
             pass
 
@@ -469,8 +484,20 @@ def _process_symbol(
         if len(candidate) < 60:
             return None
 
+        # Stationary ratios expected by stationary meta_labeling_system models (matches training)
+        close_s = pd.to_numeric(candidate["Close"], errors="coerce").replace(0.0, np.nan)
+        ratio_cols: Dict[str, Any] = {}
+        if "ATR_14" in candidate.columns and "ATR_pct" not in candidate.columns:
+            ratio_cols["ATR_pct"] = (pd.to_numeric(candidate["ATR_14"], errors="coerce") / close_s).fillna(0.02)
+        if "SMA_50" in candidate.columns and "SMA_50_Ratio" not in candidate.columns:
+            ratio_cols["SMA_50_Ratio"] = (close_s / pd.to_numeric(candidate["SMA_50"], errors="coerce").replace(0.0, np.nan) - 1.0).fillna(0.0)
+        if "EMA_50" in candidate.columns and "EMA_50_Ratio" not in candidate.columns:
+            ratio_cols["EMA_50_Ratio"] = (close_s / pd.to_numeric(candidate["EMA_50"], errors="coerce").replace(0.0, np.nan) - 1.0).fillna(0.0)
+        if ratio_cols:
+            candidate = candidate.assign(**ratio_cols)
+
         # Liquidity guard for Egypt: Reject illiquid stocks with low trading volume
-        if (str(ex).upper() == "EGX" or str(country).lower() == "egypt") and buy_threshold > 0.0 and not return_raw_prob:
+        if str(ex).upper() == "EGX" and buy_threshold > 0.0 and not return_raw_prob:
             recent_close = candidate["Close"]
             recent_vol = candidate["Volume"]
             recent_turnover = recent_close * recent_vol
@@ -485,6 +512,15 @@ def _process_symbol(
 
         _ensure_feature_columns(candidate, predictors)
         available_predictors = [p for p in predictors if p in candidate.columns]
+        primary_booster = getattr(model, "_primary_booster", None) or getattr(getattr(model, "primary_model", None), "booster", None)
+        cat_cols = [c for c in (getattr(model, "categorical_features", None) or ["sector"]) if c in candidate.columns]
+        if primary_booster is not None and cat_cols:
+            candidate = align_pandas_categories_to_booster(
+                candidate,
+                cat_cols=cat_cols,
+                booster=primary_booster,
+                cat_cols_order=cat_cols,
+            )
 
         if os.getenv("DEBUG_FUNDAMENTALS") == "1" and random.random() < 0.02:
             r = candidate.iloc[0]
@@ -517,8 +553,6 @@ def _process_symbol(
         validator_score = None
         if validator is not None and precision is not None:
             try:
-                import numpy as np
-
                 validator_score = float(
                     validator.predict_proba(candidate, primary_conf=np.asarray([float(precision)]))[0][1]
                 )
@@ -537,8 +571,22 @@ def _process_symbol(
 
             detailed_votes = {m: float(v[0]) for m, v in votes.items() if len(v) > 0}
 
-            # Consensus Ratio string e.g. "2/4"
-            passing_votes = sum(1 for v in detailed_votes.values() if v >= 0.55)
+            # Consensus Ratio string e.g. "2/4" using calibrated threshold per voter when available
+            def _voter_threshold(m_name: str) -> float:
+                m_obj = (getattr(council, "models", None) or {}).get(m_name)
+                if isinstance(m_obj, dict):
+                    val = m_obj.get("optimal_threshold") or m_obj.get("buyThreshold")
+                    if isinstance(val, (int, float)) and 0.05 < float(val) < 0.95:
+                        return float(val)
+                elif m_obj is not None:
+                    val = getattr(m_obj, "optimal_threshold", None)
+                    if isinstance(val, (int, float)) and 0.05 < float(val) < 0.95:
+                        return float(val)
+                if isinstance(buy_threshold, (int, float)) and 0.05 < float(buy_threshold) < 0.95:
+                    return float(buy_threshold)
+                return 0.55
+
+            passing_votes = sum(1 for m_name, v in detailed_votes.items() if v >= _voter_threshold(m_name))
             total_voters = len(detailed_votes)
             consensus_ratio = f"{passing_votes}/{total_voters}"
 
@@ -609,6 +657,36 @@ def _process_symbol(
                     f"sentiment ({news_sentiment.get('sentiment_score', 0.0)})"
                 )
                 return None
+
+            # Proven OOS stock-quality gate for EGX live BUY setups (matches OOS simulation PF=1.79)
+            if str(ex).upper() == "EGX" and buy_threshold > 0.0:
+                last_r = candidate.iloc[-1]
+                ema50_ratio = float(last_r.get("EMA_50_Ratio") or 0.0)
+                sma50_ratio = float(last_r.get("SMA_50_Ratio") or 0.0)
+                rsi_val = float(last_r.get("RSI") or 50.0)
+                adx_val_gate = float(last_r.get("ADX_14") or 0.0)
+                cmf_val = float(last_r.get("CMF_20") or 0.0)
+                mm_dist = float(last_r.get("MM_Distribution") or 0.0)
+                rvol_val = float(last_r.get("R_VOL") or 0.0)
+                rel_str = float(last_r.get("feat_rel_strength") or 0.0)
+                pos_52w = float(last_r.get("feat_52w_position")) if "feat_52w_position" in last_r and pd.notna(last_r.get("feat_52w_position")) else 0.5
+                if (
+                    ema50_ratio <= 0.0
+                    or sma50_ratio <= 0.0
+                    or rsi_val < 35.0
+                    or rsi_val > 70.0
+                    or adx_val_gate < 18.0
+                    or pos_52w < 0.45
+                    or cmf_val < 0.0
+                    or mm_dist > 0.30
+                    or rvol_val < 0.90
+                    or rel_str < 0.0
+                ):
+                    print(
+                        f"[QUALITY_GATE] Rejecting {sym}: EMA50_R={ema50_ratio:.3f}, SMA50_R={sma50_ratio:.3f}, "
+                        f"RSI={rsi_val:.1f}, ADX={adx_val_gate:.1f}, CMF={cmf_val:.2f}, RVOL={rvol_val:.2f}, RS={rel_str:.3f}"
+                    )
+                    return None
 
             last_close = float(candidate.iloc[-1]["Close"])
 
@@ -946,6 +1024,11 @@ def fast_scan(
         if calibrated_threshold and buy_threshold > 0.0 and not return_raw_prob:
             print(f"DEBUG SCAN: Dynamically overriding buy_threshold with model's calibrated {active_regime.upper()} threshold: {calibrated_threshold}")
             buy_threshold = calibrated_threshold
+    elif not return_raw_prob and buy_threshold > 0.0 and getattr(model, "feature_preset", None) == "stationary":
+        cal_th = getattr(model, "optimal_threshold", None)
+        if isinstance(cal_th, (int, float)) and 0.05 < float(cal_th) < 0.95:
+            buy_threshold = float(cal_th)
+            print(f"DEBUG SCAN: Using calibrated stationary optimal_threshold={buy_threshold:.4f} for {model_name}")
 
     # Initialize Council if requested
     council = None

@@ -1438,3 +1438,63 @@ def test_bot_get_candles_and_archive_reader_support_saudi_storage(monkeypatch):
     merged = merge_with_archive(fake_sb, "IHC", live_df, exchange="ADX")
     assert len(merged) == 2
     assert list(merged["close"]) == [12.3, 402.0]
+
+
+def test_saudi_scanner_blocks_panic_and_dedups_cross_system_symbols(monkeypatch):
+    """Saudi System 3 blocks entries on panic regime and excludes symbols open in S1/S2 across bear & bull."""
+    from api import saudi_scanner_alerts_engine as ssae
+
+    monkeypatch.setattr(ssae, "get_riyadh_now", lambda: {
+        "now": dt.datetime(2026, 11, 25, 11, 30, tzinfo=SAUDI_TZ),
+        "date_str": "2026-11-25",
+        "time_str": "11:30",
+        "is_trading_day": True,
+        "is_trading_hours": True,
+    })
+
+    base_tables = {
+        "stock_technical_indicators": [
+            {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-25", "close": 95.0, "change_pct": 4.0, "volume": 200_000, "vol_sma20": 70_000, "r_vol": 2.9, "rsi_14": 60.0, "ema_20": 90.0, "ema_50": 86.0, "bb_upper": 94.0},
+            {"symbol": "2222", "exchange": "TADAWUL", "date": "2026-11-25", "close": 28.0, "change_pct": 3.5, "volume": 500_000, "vol_sma20": 180_000, "r_vol": 2.8, "rsi_14": 58.0, "ema_20": 27.0, "ema_50": 26.0, "bb_upper": 27.8},
+        ],
+        "stock_prices": [
+            {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-25", "open": 91.5, "high": 95.2, "low": 91.4, "close": 95.0, "volume": 200_000},
+            {"symbol": "2222", "exchange": "TADAWUL", "date": "2026-11-25", "open": 27.1, "high": 28.1, "low": 27.0, "close": 28.0, "volume": 500_000},
+        ],
+        "scan_results": [
+            {"symbol": "1120", "exchange": "TADAWUL", "is_public": True, "status": "open"},
+        ],
+        "market_cache": [
+            {"cache_key": "market_status_Saudi Arabia", "country": "Saudi Arabia", "payload": {"regime": "panic", "reject_buys": True}},
+            {"cache_key": "saudi_short_swings_v1", "country": "Saudi Arabia", "payload": {"active_trades": [{"symbol": "2222"}]}},
+        ],
+    }
+
+    fake_sb_panic = _FakeSaudiSupabase(base_tables)
+    res_panic = ssae.execute_saudi_scanner_alerts_native(
+        force=False,
+        refresh_prices=False,
+        dry_run=True,
+        sb=fake_sb_panic,
+    )
+    assert res_panic["ok"] is True
+    assert res_panic["new_signals"] == 0
+    assert res_panic["active_count"] == 0
+
+    # Under bear/bull regime, symbols open in S1 (1120) and S2 (2222) must still be skipped by cross-system dedup
+    for reg in ("bear", "bull"):
+        reg_tables = dict(base_tables)
+        reg_tables["market_cache"] = [
+            {"cache_key": "market_status_Saudi Arabia", "country": "Saudi Arabia", "payload": {"regime": reg, "reject_buys": reg == "bear"}},
+            {"cache_key": "saudi_short_swings_v1", "country": "Saudi Arabia", "payload": {"active_trades": [{"symbol": "2222"}]}},
+        ]
+        fake_sb_reg = _FakeSaudiSupabase(reg_tables)
+        res_reg = ssae.execute_saudi_scanner_alerts_native(
+            force=False,
+            refresh_prices=False,
+            dry_run=True,
+            sb=fake_sb_reg,
+        )
+        assert res_reg["ok"] is True
+        assert res_reg["new_signals"] == 0
+        assert res_reg["active_count"] == 0

@@ -467,8 +467,8 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                     },
                     "objective": {
                         "type": "string",
-                        "enum": ["balanced", "min_risk", "risk_parity", "max_diversification", "hrp"],
-                        "description": "هدف التحسين الرياضي: balanced (متوازن عائد ومخاطرة - افتراضي)، min_risk (أقل مخاطرة وتذبذب GMV)، risk_parity (توزيع متكافئ للمخاطرة)، max_diversification (أقصى تنويع)، hrp (توزيع مخاطر هرمي صامد للتقلبات والانهيارات).",
+                        "enum": ["hrp", "balanced", "min_risk", "risk_parity", "max_diversification"],
+                        "description": "هدف التحسين الرياضي: hrp (توزيع مخاطر هرمي صامد للتقلبات والانهيارات - افتراضي)، balanced (متوازن عائد ومخاطرة)، min_risk (أقل مخاطرة وتذبذب GMV)، risk_parity (توزيع متكافئ للمخاطرة)، max_diversification (أقصى تنويع).",
                     },
                     "max_weight_pct": {
                         "type": "number",
@@ -620,6 +620,66 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["operation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_corporate_action",
+            "description": (
+                "حاسبة حتمية دقيقة لأثر الإجراءات المؤسسية يوم التداول بدون حق (Ex-Date): "
+                "الأسهم المجانية (bonus_shares)، تجزئة السهم (stock_split)، الكوبون النقدي وصافي العائد بعد الضريبة والعائد على متوسط الشراء (cash_dividend)، "
+                "وزيادة رأس المال بحقوق الاكتتاب وحساب السعر النظري TERP وقيمة الحق (rights_issue). "
+                "تسحب السعر الحالي وكمية/متوسط المستخدم من محفظته تلقائياً عند توفرها."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action_type": {
+                        "type": "string",
+                        "enum": ["bonus_shares", "stock_split", "cash_dividend", "rights_issue"],
+                        "description": "نوع الإجراء: bonus_shares (أسهم مجانية/منحة)، stock_split (تجزئة)، cash_dividend (كوبون نقدي)، rights_issue (حق اكتتاب/زيادة رأس مال).",
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "كود أو اسم السهم (اختياري، لجلب السعر الحالي وكمية/متوسط محفظة المستخدم تلقائياً).",
+                    },
+                    "pre_ex_price": {
+                        "type": "number",
+                        "description": "سعر السهم قبل تاريخ الحق (اختياري إذا تم تمرير symbol؛ يُجلب آخر سعر إغلاق تلقائياً).",
+                    },
+                    "shares": {
+                        "type": "number",
+                        "description": "عدد الأسهم المملوكة (اختياري؛ يُجلب من محفظة المستخدم أو يُفترض 1000 سهم).",
+                    },
+                    "avg_buy_price": {
+                        "type": "number",
+                        "description": "متوسط سعر شراء المستخدم الحالي (اختياري؛ يُجلب من المحفظة أو يُفترض مساوياً لـ pre_ex_price).",
+                    },
+                    "ratio_new": {
+                        "type": "number",
+                        "description": "عدد الأسهم الجديدة/المجانية (مثلاً 1 في 'سهم مجاني لكل 4 أسهم' أو 5 في 'تجزئة 5 إلى 1').",
+                    },
+                    "ratio_for": {
+                        "type": "number",
+                        "description": "عدد الأسهم الأصلية المقابلة (مثلاً 4 في 'سهم لكل 4 أسهم'، الافتراضي 1).",
+                    },
+                    "dividend_per_share": {
+                        "type": "number",
+                        "description": "قيمة الكوبون النقدي للسهم الواحد (عند action_type='cash_dividend').",
+                    },
+                    "tax_rate_pct": {
+                        "type": "number",
+                        "description": "نسبة ضريبة التوزيعات % (الافتراضي 5% للبورصة المصرية EGX و0% للسوق السعودي والخليجي).",
+                    },
+                    "subscription_price": {
+                        "type": "number",
+                        "description": "سعر الاكتتاب للسهم الجديد (عند action_type='rights_issue').",
+                    },
+                    "market": dict(_MARKET_PARAM_SCHEMA),
+                },
+                "required": ["action_type"],
             },
         },
     },

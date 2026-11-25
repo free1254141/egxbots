@@ -1638,6 +1638,28 @@ def _detect_and_adjust_price_split(
     return ema_50, ema_200, out_split_factor, False
 
 
+_WYCKOFF_PHASE_AR_MAP: Dict[str, str] = {
+    "strong_accumulation": "تجميع مؤسسي قوي",
+    "accumulation": "تجميع مؤسسي",
+    "weak_accumulation": "تجميع ضعيف",
+    "strong_distribution": "تصريف مؤسسي قوي",
+    "distribution": "تصريف مؤسسي",
+    "weak_distribution": "تصريف ضعيف",
+    "neutral": "محايد",
+    "markup": "اتجاه صاعد (Markup)",
+    "markdown": "اتجاه هابط (Markdown)",
+}
+
+
+def _localize_wyckoff_phase(raw_phase: Any) -> Optional[str]:
+    if raw_phase is None:
+        return None
+    txt = str(raw_phase).strip()
+    if not txt:
+        return None
+    return _WYCKOFF_PHASE_AR_MAP.get(txt.lower(), txt)
+
+
 def _normalize_split_adjusted_fundamentals(
     fd: Any,
     close_price: Optional[float],
@@ -2007,8 +2029,9 @@ def _build_fundamental_diagnosis(
     # 4. Cash Flow Quality & Dividends Pillar
     cash_quality_label = "غير متاح"
     neg_fcf_vs_profit = False
+    _loss_flag_cf = bool((eps is not None and eps <= 0) or (ni is not None and ni < 0) or (roe is not None and roe < 0))
     if not is_bank and fcf is not None:
-        if ni is not None and ni > 0:
+        if not _loss_flag_cf and ni is not None and ni > 0:
             if fcf >= 0.7 * ni:
                 cash_quality_label = "أرباح نقدية حقيقية (التدفق النقدي الحر يغطي صافي الربح)"
                 strengths.append("أرباح عالية الجودة مدعومة بتدفق نقدي حر موجب وقوي (كاش فعلي)")
@@ -2021,7 +2044,7 @@ def _build_fundamental_diagnosis(
         elif fcf > 0:
             cash_quality_label = "تدفق نقدي حر موجب"
         else:
-            cash_quality_label = "تدفق نقدي حر سالب"
+            cash_quality_label = "تدفق نقدي حر سالب بالتوازي مع الخسائر" if _loss_flag_cf else "تدفق نقدي حر سالب"
 
     if dy is not None and dy >= 4.0:
         strengths.append(f"توزيعات نقدية مجزية (عائد توزيع {dy:.1f}%)")
@@ -2164,6 +2187,15 @@ def _extract_rich_fundamentals(
         "fund_score": _safe_float(fund_score),
     }
     clean = {k: v for k, v in raw.items() if v is not None}
+    eps_chk = clean.get("eps")
+    ni_chk = clean.get("net_income")
+    roe_chk = clean.get("roe_pct")
+    if (
+        (isinstance(eps_chk, (int, float)) and eps_chk <= 0)
+        or (isinstance(ni_chk, (int, float)) and ni_chk < 0)
+        or (isinstance(roe_chk, (int, float)) and roe_chk < 0)
+    ):
+        clean.pop("pe_ratio", None)
     roe_v = clean.get("roe_pct")
     pe_v = clean.get("pe_ratio")
     pb_v = clean.get("pb_ratio")
@@ -2872,7 +2904,7 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                 "entry_zone": entry_zone,
                 "king_ai_score": king_score,
                 "egx_ai_score": _safe_float(latest_tech.get("egx_ai_score")),
-                "wyckoff_phase": wyckoff_info.get("wyckoff_phase"),
+                "wyckoff_phase": _localize_wyckoff_phase(wyckoff_info.get("wyckoff_phase")),
                 "scan_signal": wyckoff_info.get("signal"),
                 "accumulation_score": acc_score,
                 "distribution_score": dist_score,
@@ -5114,8 +5146,36 @@ def _sync_get_news(
         if egx_syms:
             q_disc = q_disc.in_("symbol", egx_syms[:10])
         res = q_disc.execute()
-        for r in (res.data or []):
-            news_items.append({
+        disc_rows = res.data or []
+        disc_syms = list({str(r.get("symbol") or "").strip().upper() for r in disc_rows if r.get("symbol")})
+        tech_by_sym: Dict[str, Dict[str, Any]] = {}
+        if disc_syms:
+            try:
+                t_res = (
+                    sb.from_("stock_technical_indicators")
+                    .select("symbol,change_pct,r_vol")
+                    .in_("symbol", disc_syms[:12])
+                    .limit(12)
+                    .execute()
+                )
+                for tr in (t_res.data or []):
+                    ts = str(tr.get("symbol") or "").strip().upper()
+                    if ts:
+                        tech_by_sym[ts] = tr
+            except Exception:
+                tech_by_sym = {}
+        from api.corporate_events_engine import classify_event_reality_check
+        for r in disc_rows:
+            sym_r = str(r.get("symbol") or "").strip().upper()
+            t_info = tech_by_sym.get(sym_r) or {}
+            rc = classify_event_reality_check(
+                sentiment=r.get("sentiment"),
+                action_type=r.get("action_type"),
+                title=r.get("title"),
+                change_pct=t_info.get("change_pct"),
+                r_vol=t_info.get("r_vol"),
+            )
+            item_out: Dict[str, Any] = {
                 "symbol": r.get("symbol"),
                 "company_name": r.get("company_name"),
                 "title": r.get("title"),
@@ -5124,7 +5184,10 @@ def _sync_get_news(
                 "type": r.get("disclosure_type"),
                 "date": r.get("disclosure_date"),
                 "source_url": r.get("source_url"),
-            })
+            }
+            if rc:
+                item_out["reality_check"] = rc
+            news_items.append(item_out)
     except Exception:
         pass
 
@@ -6277,6 +6340,39 @@ def _sync_get_disclosures(
     except Exception as e:
         return {"status": "error", "message": f"تعذر جلب الإفصاحات: {str(e)}"}
 
+    # Attach deterministic Event Reality-Check (price & r_vol reaction vs disclosure polarity)
+    if rows:
+        disc_syms = list({str(r.get("symbol") or "").strip().upper() for r in rows if r.get("symbol")})
+        tech_map: Dict[str, Dict[str, Any]] = {}
+        if disc_syms:
+            try:
+                t_res = (
+                    sb.from_("stock_technical_indicators")
+                    .select("symbol,change_pct,r_vol")
+                    .in_("symbol", disc_syms[:20])
+                    .limit(20)
+                    .execute()
+                )
+                for tr in (t_res.data or []):
+                    ts = str(tr.get("symbol") or "").strip().upper()
+                    if ts:
+                        tech_map[ts] = tr
+            except Exception:
+                tech_map = {}
+        from api.corporate_events_engine import classify_event_reality_check
+        for r in rows:
+            sym_r = str(r.get("symbol") or "").strip().upper()
+            t_info = tech_map.get(sym_r) or {}
+            rc = classify_event_reality_check(
+                sentiment=r.get("sentiment"),
+                action_type=r.get("action_type"),
+                title=r.get("title"),
+                change_pct=t_info.get("change_pct"),
+                r_vol=t_info.get("r_vol"),
+            )
+            if rc:
+                r["reality_check"] = rc
+
     return {
         "status": "success",
         "market": ui_mkt,
@@ -6285,6 +6381,121 @@ def _sync_get_disclosures(
         "count": len(rows),
         "disclosures": rows,
     }
+
+
+def _sync_calculate_corporate_action(
+    action_type: str,
+    symbol: Optional[str] = None,
+    pre_ex_price: Optional[float] = None,
+    shares: Optional[float] = None,
+    avg_buy_price: Optional[float] = None,
+    ratio_new: Optional[float] = None,
+    ratio_for: float = 1.0,
+    dividend_per_share: Optional[float] = None,
+    tax_rate_pct: Optional[float] = None,
+    subscription_price: Optional[float] = None,
+    market: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Deterministic Ex-Date Corporate Actions Calculator with optional live price + portfolio auto-fill."""
+    from api.corporate_events_engine import calculate_corporate_action
+
+    clean_sym: Optional[str] = None
+    eff_mkt = _resolve_effective_market(market=market, symbols=[symbol] if symbol else None)
+    if symbol:
+        clean_sym, resolved_mkt = _resolve_symbol_and_market(symbol, explicit_market=market)
+        eff_mkt = resolved_mkt or eff_mkt
+    currency = _currency_for_market(eff_mkt)
+
+    eff_price = pre_ex_price
+    eff_shares = shares
+    eff_avg = avg_buy_price
+    used_pf = False
+
+    if clean_sym:
+        # 1. Auto-fetch latest close if pre_ex_price omitted
+        if eff_price is None or float(eff_price or 0) <= 0:
+            try:
+                sb_mkt = _get_sb_for_market(eff_mkt) if eff_mkt != "EGX" else _get_sb()
+                if sb_mkt is not None:
+                    q_p = sb_mkt.from_("stock_technical_indicators").select("close").eq("symbol", clean_sym)
+                    if eff_mkt != "EGX":
+                        q_p = q_p.eq("exchange", eff_mkt)
+                    p_res = q_p.limit(1).execute()
+                    if p_res.data and p_res.data[0].get("close") is not None:
+                        eff_price = float(p_res.data[0]["close"])
+            except Exception:
+                pass
+
+        # 2. Auto-fetch user's saved position if shares or avg_buy_price omitted
+        if user_id and (eff_shares is None or eff_avg is None):
+            try:
+                sb = _get_sb()
+                pos_res = (
+                    sb.from_("positions")
+                    .select("symbol,quantity,entry_price")
+                    .eq("user_id", user_id)
+                    .eq("symbol", clean_sym)
+                    .limit(1)
+                    .execute()
+                )
+                if pos_res.data:
+                    row = pos_res.data[0]
+                    if eff_shares is None and row.get("quantity") is not None:
+                        eff_shares = float(row["quantity"])
+                        used_pf = True
+                    if eff_avg is None and row.get("entry_price") is not None:
+                        eff_avg = float(row["entry_price"])
+                        used_pf = True
+            except Exception:
+                pass
+
+    return calculate_corporate_action(
+        action_type=action_type,
+        pre_ex_price=float(eff_price or 0.0),
+        shares=float(eff_shares) if eff_shares is not None else 1000.0,
+        avg_buy_price=float(eff_avg) if eff_avg is not None else None,
+        ratio_new=ratio_new,
+        ratio_for=ratio_for,
+        dividend_per_share=dividend_per_share,
+        tax_rate_pct=tax_rate_pct,
+        subscription_price=subscription_price,
+        exchange=eff_mkt,
+        currency=currency,
+        symbol=clean_sym,
+        used_portfolio_position=used_pf,
+    )
+
+
+async def execute_calculate_corporate_action(
+    action_type: str,
+    symbol: Optional[str] = None,
+    pre_ex_price: Optional[float] = None,
+    shares: Optional[float] = None,
+    avg_buy_price: Optional[float] = None,
+    ratio_new: Optional[float] = None,
+    ratio_for: float = 1.0,
+    dividend_per_share: Optional[float] = None,
+    tax_rate_pct: Optional[float] = None,
+    subscription_price: Optional[float] = None,
+    market: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        _sync_calculate_corporate_action,
+        action_type,
+        symbol,
+        pre_ex_price,
+        shares,
+        avg_buy_price,
+        ratio_new,
+        ratio_for,
+        dividend_per_share,
+        tax_rate_pct,
+        subscription_price,
+        market,
+        user_id,
+    )
 
 
 async def execute_get_disclosures(
@@ -6656,7 +6867,7 @@ def _build_portfolio_view_payload(
                 else {}
             ),
             "king_ai_score": _normalize_king_ai_score(t_row.get("king_ai_score")),
-            "wyckoff_phase": w_row.get("wyckoff_phase"),
+            "wyckoff_phase": _localize_wyckoff_phase(w_row.get("wyckoff_phase")),
             "acc_score": _safe_float(w_row.get("acc_score")),
             "dist_score": _safe_float(w_row.get("dist_score")),
             "fund_score": f_score,
@@ -7456,7 +7667,7 @@ def _sync_optimize_portfolio(
     symbols: Optional[List[str]] = None,
     capital: Optional[float] = None,
     use_my_portfolio: bool = False,
-    objective: str = "balanced",
+    objective: str = "hrp",
     max_weight_pct: Optional[float] = None,
     max_sector_pct: Optional[float] = None,
     min_cash_pct: Optional[float] = None,
@@ -7783,8 +7994,21 @@ def _sync_optimize_portfolio(
             and f_pe > 30.0
             and ((f_fcf is not None and f_fcf < 0) or (adj_ema50 and price < adj_ema50))
         )
-        is_hard_excluded = bool(is_illiquid or is_negative_equity or is_loss_making or over_and_weak)
-        is_hold_core = bool((not is_hard_excluded) and (f_score is not None and f_score >= 65.0) and (f_pe is None or f_pe <= 22.0))
+        weak_fund_downtrend = bool(
+            (f_score is not None and f_score < 45.0)
+            and (adj_ema50 and price < adj_ema50)
+        )
+        is_full_downtrend = bool(
+            adj_ema50 and adj_ema50 > 0 and price < adj_ema50
+            and adj_ema200 and adj_ema200 > 0 and price < adj_ema200
+        )
+        is_hard_excluded = bool(is_illiquid or is_negative_equity or is_loss_making or over_and_weak or weak_fund_downtrend)
+        is_hold_core = bool(
+            (not is_hard_excluded)
+            and (not is_full_downtrend)
+            and (f_score is not None and f_score >= 65.0)
+            and (f_pe is None or f_pe <= 22.0)
+        )
 
         fund_summary_by_sym[sym] = {
             k: v
@@ -7859,8 +8083,11 @@ def _sync_optimize_portfolio(
             "is_negative_equity": is_negative_equity,
             "is_hard_excluded": is_hard_excluded,
             "is_hold_core": is_hold_core,
+            "is_full_downtrend": is_full_downtrend,
+            "weak_fund_downtrend": weak_fund_downtrend,
             "over_and_weak": over_and_weak,
             "f_pe": f_pe,
+            "f_score": f_score,
             "avg_vol_10": liq_opt.get("avg_vol_10"),
             "zero_vol_days_10": zero_vol_days_10,
         })
@@ -7900,7 +8127,7 @@ def _sync_optimize_portfolio(
         max_w_ov = None
         excl_reason = None
         sc = item["score"]
-        if healthy_count >= 2 and item["is_hard_excluded"]:
+        if (use_pf or healthy_count >= 1) and item["is_hard_excluded"]:
             max_w_ov = 0.0
             sc = -0.85
             if item["is_illiquid"] and item["is_loss_making"]:
@@ -7913,8 +8140,20 @@ def _sync_optimize_portfolio(
                 excl_reason = "شركة تحقق صافي خسائر — مستبعد من الشراء أو التعزيز"
             elif item["over_and_weak"]:
                 excl_reason = f"مكرر ربحية متضخم (P/E={float(item['f_pe']):.1f}x) مع اتجاه هابط أو تدفق نقدي سالب — مستبعد من الشراء"
+            elif item["weak_fund_downtrend"]:
+                excl_reason = f"تقييم مالي ضعيف ({float(item['f_score']):.0f}/100) ومسار هابط تحت المتوسط 50 — مستبعد من الشراء أو التعزيز"
             else:
                 excl_reason = "شركة خاسرة وتقييم مالي ضعيف — مستبعد من زيادة الوزن"
+        elif use_pf and item["existing_shares"] > 0 and (
+            item["is_full_downtrend"] or (item["f_score"] is not None and float(item["f_score"]) < 45.0)
+        ):
+            curr_w_frac = ((item["existing_shares"] * item["price"]) / est_total_eq) if est_total_eq > 0 else 0.0
+            base_watch_cap = min(eff_cap_frac, 0.15) if (healthy_count >= 3 and item["is_thin_liquidity"]) else eff_cap_frac
+            max_w_ov = min(base_watch_cap, curr_w_frac)
+            if item["is_full_downtrend"]:
+                excl_reason = "مسار هابط تحت EMA50 وEMA200 — يُمنع التعزيز التلقائي (احتفاظ أو تقليص فقط)"
+            else:
+                excl_reason = f"تقييم مالي ضعيف ({float(item['f_score']):.0f}/100) — يُمنع التعزيز التلقائي"
         elif cap_hold_watch and (not item["is_hold_core"]):
             curr_w_frac = ((item["existing_shares"] * item["price"]) / est_total_eq) if est_total_eq > 0 else 0.0
             base_watch_cap = min(eff_cap_frac, 0.15) if (healthy_count >= 3 and item["is_thin_liquidity"]) else eff_cap_frac
@@ -8010,7 +8249,7 @@ async def execute_optimize_portfolio(
     symbols: Optional[List[str]] = None,
     capital: Optional[float] = None,
     use_my_portfolio: bool = False,
-    objective: str = "balanced",
+    objective: str = "hrp",
     max_weight_pct: Optional[float] = None,
     max_sector_pct: Optional[float] = None,
     min_cash_pct: Optional[float] = None,
@@ -8765,13 +9004,29 @@ async def dispatch_tool(
                 user_id=user_id,
             )
 
+        elif tool_name == "calculate_corporate_action":
+            result = await execute_calculate_corporate_action(
+                action_type=str(arguments.get("action_type") or ""),
+                symbol=arguments.get("symbol"),
+                pre_ex_price=arguments.get("pre_ex_price"),
+                shares=arguments.get("shares"),
+                avg_buy_price=arguments.get("avg_buy_price"),
+                ratio_new=arguments.get("ratio_new"),
+                ratio_for=arguments.get("ratio_for", 1.0),
+                dividend_per_share=arguments.get("dividend_per_share"),
+                tax_rate_pct=arguments.get("tax_rate_pct"),
+                subscription_price=arguments.get("subscription_price"),
+                market=arguments.get("market"),
+                user_id=user_id,
+            )
+
         elif tool_name == "optimize_portfolio":
             result = await execute_optimize_portfolio(
                 user_id=user_id,
                 symbols=arguments.get("symbols"),
                 capital=arguments.get("capital"),
                 use_my_portfolio=bool(arguments.get("use_my_portfolio") or arguments.get("use_user_portfolio")),
-                objective=str(arguments.get("objective") or "balanced"),
+                objective=str(arguments.get("objective") or "hrp"),
                 max_weight_pct=arguments.get("max_weight_pct"),
                 max_sector_pct=arguments.get("max_sector_pct"),
                 min_cash_pct=arguments.get("min_cash_pct"),

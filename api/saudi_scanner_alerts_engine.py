@@ -76,6 +76,39 @@ def _write_cache(sb, cache_key: str, payload: Dict[str, Any]) -> None:
     ).execute()
 
 
+def _load_saudi_cross_system_open_symbols(sb) -> Set[str]:
+    """Collect symbols currently open in Saudi System 1 (scan_results) or System 2 (Short Swings)."""
+    blocked: Set[str] = set()
+    if sb is None:
+        return blocked
+    try:
+        res = (
+            sb.table("scan_results")
+            .select("symbol")
+            .eq("exchange", "TADAWUL")
+            .eq("is_public", True)
+            .eq("status", "open")
+            .limit(50)
+            .execute()
+        )
+        for row in res.data or []:
+            sym = str(row.get("symbol") or "").strip().split(".")[0].upper()
+            if sym:
+                blocked.add(sym)
+    except Exception as exc:
+        print(f"[SAUDI-SCANNER] cross-system scan_results check skipped: {exc}")
+
+    try:
+        swings_payload = _read_cache(sb, "saudi_short_swings_v1")
+        for t in swings_payload.get("active_trades") or []:
+            sym = str(t.get("symbol") or "").strip().split(".")[0].upper()
+            if sym:
+                blocked.add(sym)
+    except Exception as exc:
+        print(f"[SAUDI-SCANNER] cross-system short_swings check skipped: {exc}")
+    return blocked
+
+
 def _send_saudi_vip_html(text: str, chat_id: Optional[str] = None, dry_run: bool = False) -> Dict[str, Any]:
     from api.saudi_telegram_dispatch import _send_telegram_message
 
@@ -198,6 +231,7 @@ def execute_saudi_scanner_alerts_native(
     market_status = _read_cache(sb, f"market_status_{SAUDI_COUNTRY}")
     regime = str(market_status.get("regime") or "neutral").lower()
     regime_blocked = regime == "panic"
+    cross_open_syms = _load_saudi_cross_system_open_symbols(sb)
     has_today_indicators = as_of_date == riyadh["date_str"]
     allow_new_entries = bool((force or (has_today_indicators and riyadh["time_str"] < "14:50")) and (force or not regime_blocked))
     eval_res = evaluate_scanner_candidates(
@@ -206,6 +240,8 @@ def execute_saudi_scanner_alerts_native(
         force=force,
         limit_per_category=2,
         exchange="TADAWUL",
+        blocked_symbols=cross_open_syms,
+        market_downtrend=regime_blocked,
     )
     final_vol = eval_res["final_vol"] if allow_new_entries else []
     final_bo = eval_res["final_bo"] if allow_new_entries else []
@@ -254,6 +290,7 @@ def execute_saudi_scanner_alerts_native(
         allow_new_entries=allow_new_entries,
         exchange="TADAWUL",
         confirmed_action_dates=confirmed_action_dates,
+        blocked_symbols=cross_open_syms,
     )
 
     newly_hit_targets = [s for s in hit_target_signals if s.get("exit_date") == riyadh["date_str"]]
@@ -279,10 +316,13 @@ def execute_saudi_scanner_alerts_native(
 
     # VIP-ONLY Telegram Dispatch (Strictly NO Free channel for Saudi)
     if newly_hit_targets:
-        lines = ["🇸🇦 🎯 <b>تحقيق هدف — الرادار اللحظي تداول VIP</b>", f"📅 <code>{as_of_date}</code>", "━━━━━━━━━━━━━━━━━━━━"]
+        lines = ["🇸🇦 🎯 <b>تحقيق هدف / تأمين أرباح — الرادار اللحظي تداول VIP</b>", f"📅 <code>{as_of_date}</code>", "━━━━━━━━━━━━━━━━━━━━"]
         for s in newly_hit_targets:
+            is_be = bool(s.get("is_breakeven"))
+            badge = "🛡️" if is_be else "🟢"
+            label = " (حماية أرباح / وقف التعادل)" if is_be else ""
             lines.append(
-                f"🟢 <b>{s['symbol']}</b> | الدخول: {s['entry_price']:.2f} ر.س → الخروج: {s['exit_price']:.2f} ر.س (<b>{s['return_pct']:+.2f}%</b>)"
+                f"{badge} <b>{s['symbol']}</b>{label} | الدخول: {s['entry_price']:.2f} ر.س → الخروج: {s['exit_price']:.2f} ر.س (<b>{s['return_pct']:+.2f}%</b>)"
             )
         lines.append(f"\n📲 <a href=\"{origin}/scanner/backtests?market=sa&tab=fast_scanner\">لوحة الرادار اللحظي تداول</a>")
         if _send_saudi_vip_html("\n".join(lines), chat_id=chat_id, dry_run=dry_run).get("ok"):

@@ -46,7 +46,7 @@ SCANNER_PROFILES = {
         "t2_pct": 7.5,
         "sl_pct": 3.0,
         "max_sessions": 4,
-        "be_lock_pct": 0.0,
+        "be_lock_pct": 0.5,
         "title_ar": "السيولة الفائقة",
     },
     "breakout": {
@@ -54,7 +54,7 @@ SCANNER_PROFILES = {
         "t2_pct": 9.5,
         "sl_pct": 3.5,
         "max_sessions": 5,
-        "be_lock_pct": 0.0,
+        "be_lock_pct": 0.5,
         "title_ar": "اختراق فني",
     },
     "rsi_oversold": {
@@ -62,7 +62,7 @@ SCANNER_PROFILES = {
         "t2_pct": 6.5,
         "sl_pct": 2.8,
         "max_sessions": 3,
-        "be_lock_pct": 0.0,
+        "be_lock_pct": 0.5,
         "title_ar": "تشبع بيعي",
     },
 }
@@ -380,6 +380,18 @@ def count_elapsed_sessions(entry_date: str, current_date: str) -> int:
 MAX_PORTFOLIO_ACTIVE = 8
 
 
+def _norm_scanner_symbol(sym: Any) -> str:
+    return (
+        str(sym or "")
+        .upper()
+        .replace(".CA", "")
+        .replace(".EGX", "")
+        .replace(".SR", "")
+        .replace(".TADAWUL", "")
+        .strip()
+    )
+
+
 def evaluate_scanner_candidates(
     latest_by_symbol: Dict[str, Dict[str, Any]],
     *,
@@ -387,10 +399,13 @@ def evaluate_scanner_candidates(
     force: bool = True,
     limit_per_category: int = 2,
     exchange: str = "EGX",
+    blocked_symbols: Optional[Set[str]] = None,
+    market_downtrend: bool = False,
 ) -> Dict[str, Any]:
-    """Scanner classification, breadth-adaptive sniper gate, and deduplication per exchange."""
+    """Scanner classification, breadth-adaptive sniper gate, regime guard, and deduplication per exchange."""
     is_saudi = _is_saudi_exchange(exchange)
     sent = sent_keys or set()
+    blocked_set = {_norm_scanner_symbol(s) for s in (blocked_symbols or set()) if s}
     volume_matches: List[Dict[str, Any]] = []
     breakout_matches: List[Dict[str, Any]] = []
     oversold_matches: List[Dict[str, Any]] = []
@@ -415,10 +430,13 @@ def evaluate_scanner_candidates(
     else:
         is_market_healthy = True
 
+    if market_downtrend:
+        is_market_healthy = False
+
     if is_saudi:
         effective_limit = min(limit_per_category, 1)
     else:
-        effective_limit = min(limit_per_category, 1) if not is_market_healthy else limit_per_category
+        effective_limit = min(limit_per_category, 1) if (not is_market_healthy or market_downtrend) else limit_per_category
 
     for sym, row in latest_by_symbol.items():
         close = float(row.get("close") or 0.0)
@@ -446,6 +464,8 @@ def evaluate_scanner_candidates(
             neutral_stocks += 1
 
         if is_saudi:
+            if market_downtrend:
+                continue
             candle_range = high_p - low_p
             close_pos = (close - low_p) / candle_range if candle_range > 0 else 1.0
             sniper_mode = len(valid_rows) >= 50
@@ -502,17 +522,23 @@ def evaluate_scanner_candidates(
         if close < 1.5 or (open_p > 0 and close < open_p * 0.995):
             continue
 
-        is_uptrend = ema_20 <= 0 or close >= ema_20 * 0.99
+        candle_range = high_p - low_p
+        close_pos = (close - low_p) / candle_range if candle_range > 0 else 1.0
+        is_uptrend = (ema_20 <= 0 or close >= ema_20) and (ema_50 <= 0 or close >= ema_50)
+        not_extended = ema_20 <= 0 or close <= ema_20 * 1.12
 
-        # 1. Volume Surge (sniper mode in weak breadth, capped to avoid chasing parabolic peaks)
+        # 1. Volume Surge (disabled in confirmed market downtrend; requires uptrend & solid candle close)
         min_vol_rvol = 2.0 if is_market_healthy else 2.2
         min_vol_turnover = 400_000.0 if is_market_healthy else 500_000.0
         if (
-            r_vol >= min_vol_rvol
+            not market_downtrend
+            and r_vol >= min_vol_rvol
             and vol >= 50_000
             and turnover >= min_vol_turnover
             and 1.5 <= ch_pct <= 7.5
             and is_uptrend
+            and not_extended
+            and (candle_range <= 0 or close_pos >= 0.55)
             and 35.0 <= rsi <= 72.0
         ):
             volume_matches.append({
@@ -523,17 +549,21 @@ def evaluate_scanner_candidates(
                 "rsi_14": rsi,
             })
 
-        # 2. Breakout (BB upper penetration with volume confirmation, RSI & chase capped)
+        # 2. Breakout (disabled in confirmed market downtrend; strict green strong-close above EMA20 & EMA50)
         min_bo_change = 2.2 if is_market_healthy else 2.5
         bb_ok = (bb_upper > 0 and close >= bb_upper * 0.998) if has_bb_upper else True
         if (
-            bb_ok
-            and r_vol >= 1.8
+            not market_downtrend
+            and bb_ok
+            and r_vol >= 2.0
             and vol >= 50_000
             and turnover >= 500_000.0
             and min_bo_change <= ch_pct <= 7.5
             and is_uptrend
-            and rsi <= 74.0
+            and not_extended
+            and (open_p <= 0 or close > open_p)
+            and (candle_range <= 0 or close_pos >= 0.60)
+            and rsi <= 72.0
         ):
             breakout_matches.append({
                 "symbol": sym,
@@ -543,12 +573,13 @@ def evaluate_scanner_candidates(
                 "rsi_14": rsi,
             })
 
-        # 3. RSI Oversold Rebound (avoid knife-catching crashes and illiquid microcaps)
+        # 3. RSI Oversold Rebound (allowed in downtrends only for deep oversold + strong reversal)
         not_crashing = ema_20 <= 0 or close >= ema_20 * 0.85
-        max_os_rsi = 28.0 if is_market_healthy else 26.0
+        max_os_rsi = 26.0 if (not is_market_healthy or market_downtrend) else 28.0
+        min_os_chg = 1.5 if market_downtrend else 1.0
         if (
             0.0 < rsi <= max_os_rsi
-            and ch_pct >= 1.0
+            and ch_pct >= min_os_chg
             and not_crashing
             and vol >= 50_000
             and turnover >= 250_000.0
@@ -571,7 +602,7 @@ def evaluate_scanner_candidates(
         picked: List[Dict[str, Any]] = []
         for s in cands:
             sym = s["symbol"]
-            if sym in seen_fresh_symbols:
+            if sym in seen_fresh_symbols or _norm_scanner_symbol(sym) in blocked_set:
                 continue
             if not force and (
                 f"{sym}:volume_surge" in sent
@@ -593,6 +624,7 @@ def evaluate_scanner_candidates(
         "negative_stocks": negative_stocks,
         "neutral_stocks": neutral_stocks,
         "is_market_healthy": is_market_healthy,
+        "market_downtrend": bool(market_downtrend),
     }
 
 
@@ -670,9 +702,11 @@ def step_scanner_lifecycle(
     allow_new_entries: bool = True,
     exchange: str = "EGX",
     confirmed_action_dates: Optional[Dict[str, List[str]]] = None,
+    blocked_symbols: Optional[Set[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Advance tracked scanner signals using exchange-calibrated breakeven, target, stop, and expiry rules."""
     is_saudi = _is_saudi_exchange(exchange)
+    blocked_set = {_norm_scanner_symbol(s) for s in (blocked_symbols or set()) if s}
     hit_target_signals: List[Dict[str, Any]] = []
     stopped_out_signals: List[Dict[str, Any]] = []
     still_active_signals: List[Dict[str, Any]] = []
@@ -843,20 +877,25 @@ def step_scanner_lifecycle(
                 exit_price = effective_stop
             realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
             is_be = has_breakeven and (exit_price >= entry_price)
+            is_flat_be = is_be and (realized_return <= 0.0)
             sig_patch = {
-                "status": "target_hit" if is_be else "stopped_out",
+                "status": "breakeven" if is_flat_be else ("target_hit" if is_be else "stopped_out"),
                 "exit_price": exit_price,
                 "return_pct": realized_return,
                 "exit_date": action_date,
                 "exit_time": action_time,
-                "exit_reason": "حماية الأرباح / تفعيل وقف التعادل 🛡️" if is_be else "ضرب وقف الخسارة 🛑",
+                "exit_reason": (
+                    "خروج آمن بتفعيل وقف التعادل 🛡️"
+                    if is_flat_be
+                    else ("حماية الأرباح / تفعيل وقف التعادل 🛡️" if is_be else "ضرب وقف الخسارة 🛑")
+                ),
             }
             if is_be:
-                sig_patch["is_breakeven"] = realized_return == 0.0
+                sig_patch["is_breakeven"] = True
             updated_sig.update(sig_patch)
-            if is_be:
+            if is_be and not is_flat_be:
                 hit_target_signals.append(updated_sig)
-            else:
+            elif not is_be:
                 stopped_out_signals.append(updated_sig)
             current_closed.insert(0, updated_sig)
         elif highest_price >= target_1:
@@ -892,9 +931,12 @@ def step_scanner_lifecycle(
             still_active_signals.append(updated_sig)
 
     def _is_symbol_active_or_closed_today(symbol: str) -> bool:
-        if any(s.get("symbol") == symbol for s in still_active_signals):
+        norm_sym = _norm_scanner_symbol(symbol)
+        if norm_sym in blocked_set:
             return True
-        if any(s.get("symbol") == symbol and s.get("entry_date") == action_date for s in current_closed):
+        if any(_norm_scanner_symbol(s.get("symbol")) == norm_sym for s in still_active_signals):
+            return True
+        if any(_norm_scanner_symbol(s.get("symbol")) == norm_sym and s.get("entry_date") == action_date for s in current_closed):
             return True
         return False
 
@@ -948,17 +990,17 @@ def compute_scanner_signals_kpis(
 
     decided_count = len(closed_wins) + len(closed_losses)
     breakeven_count = sum(1 for s in final_closed if float(s.get("return_pct") or 0.0) == 0.0)
-    win_rate = round((len(closed_wins) / decided_count) * 100, 1) if decided_count > 0 else 80.0
-    strict_win_rate = round((len(closed_wins) / len(final_closed)) * 100, 1) if final_closed else 80.0
-    profit_factor = round(sum_wins / sum_losses, 2) if sum_losses > 0 else 4.5
+    win_rate = round((len(closed_wins) / decided_count) * 100, 1) if decided_count > 0 else 0.0
+    strict_win_rate = round((len(closed_wins) / len(final_closed)) * 100, 1) if final_closed else 0.0
+    profit_factor = round(sum_wins / sum_losses, 2) if sum_losses > 0 else (round(sum_wins, 2) if sum_wins > 0 else 0.0)
     return {
         "win_rate_pct": win_rate,
         "strict_win_rate_pct": strict_win_rate,
         "breakeven_count": breakeven_count,
         "total_closed": len(final_closed),
         "total_active": len(final_active),
-        "avg_win_pct": round(sum_wins / max(1, len(closed_wins)), 1) if closed_wins else 3.5,
-        "avg_loss_pct": round(sum_losses / max(1, len(closed_losses)), 1) if closed_losses else 2.0,
+        "avg_win_pct": round(sum_wins / len(closed_wins), 1) if closed_wins else 0.0,
+        "avg_loss_pct": round(sum_losses / len(closed_losses), 1) if closed_losses else 0.0,
         "profit_factor": profit_factor,
         "top_win_pct": max((float(s.get("return_pct") or 0.0) for s in final_closed), default=0.0),
     }
@@ -1176,6 +1218,58 @@ def run_scanner_alerts_simulation(
         },
     }
 
+def _is_egx_market_downtrend() -> bool:
+    """Read EGX market regime so System 3 aligns with System 1 market_status_Egypt."""
+    try:
+        rows = supabase_get(
+            "market_cache?cache_key=eq.market_status_Egypt&country=eq.Egypt&select=payload&limit=1"
+        )
+        if rows and isinstance(rows[0].get("payload"), dict):
+            payload = rows[0]["payload"]
+            regime = str(payload.get("regime") or "").strip().lower()
+            if bool(payload.get("reject_buys")) or regime in {"bear", "bearish", "panic", "stressed", "downtrend"}:
+                return True
+            return False
+    except Exception as exc:
+        logger.warning(f"[SCANNER_PY] market_status_Egypt check failed: {exc}")
+
+    try:
+        from api.market_status_gate import load_market_status_cache
+
+        status = load_market_status_cache(max_age_hours=72)
+        regime = str(status.get("regime") or "").strip().lower()
+        return bool(status.get("reject_buys")) or regime in {"bear", "bearish", "panic", "stressed", "downtrend"}
+    except Exception:
+        return False
+
+
+def _load_egx_cross_system_open_symbols() -> Set[str]:
+    """Collect symbols currently open in EGX System 1 (scan_results) or System 2 (Short Swings)."""
+    blocked: Set[str] = set()
+    try:
+        rows = supabase_get(
+            "scan_results?exchange=eq.EGX&is_public=eq.true&status=eq.open&select=symbol&limit=50"
+        )
+        for row in rows or []:
+            sym = _norm_scanner_symbol(row.get("symbol"))
+            if sym:
+                blocked.add(sym)
+    except Exception as exc:
+        logger.warning(f"[SCANNER_PY] cross-system scan_results check skipped: {exc}")
+
+    try:
+        from api.short_swings_engine import get_cached_short_swings
+
+        swings = get_cached_short_swings(exchange="EGX")
+        for t in (swings or {}).get("active_trades") or []:
+            sym = _norm_scanner_symbol(t.get("symbol"))
+            if sym:
+                blocked.add(sym)
+    except Exception as exc:
+        logger.warning(f"[SCANNER_PY] cross-system short_swings check skipped: {exc}")
+    return blocked
+
+
 def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = False) -> Dict[str, Any]:
     start_time = time.time()
     cairo = get_cairo_now()
@@ -1202,7 +1296,10 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     as_of_date = latest_date_rows[0].get("date") if latest_date_rows else cairo["date_str"]
 
     # Fetch indicators and price OHLC for the asOfDate
-    ind_rows = supabase_get(f"stock_technical_indicators?exchange=eq.EGX&date=eq.{as_of_date}&select=symbol,close,change_pct,volume,vol_sma20,r_vol,rsi_14,bb_upper,ema_20&limit=300")
+    ind_rows = supabase_get(
+        f"stock_technical_indicators?exchange=eq.EGX&date=eq.{as_of_date}"
+        "&select=symbol,close,change_pct,volume,vol_sma20,r_vol,rsi_14,bb_upper,ema_20,ema_50&limit=300"
+    )
     if not ind_rows:
         return {"ok": False, "error": f"No technical indicators found for date {as_of_date}"}
 
@@ -1213,7 +1310,7 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     for p in price_rows:
         sym = p.get("symbol")
         if sym:
-            clean_sym = str(sym).upper().replace(".CA", "").replace(".EGX", "")
+            clean_sym = _norm_scanner_symbol(sym)
             c = float(p.get("close") or 0.0)
             price_map[clean_sym] = {
                 "open": float(p.get("open") or c),
@@ -1229,18 +1326,24 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         sym = r.get("symbol")
         if not sym:
             continue
-        clean_sym = str(sym).upper().replace(".CA", "").replace(".EGX", "")
+        clean_sym = _norm_scanner_symbol(sym)
         p_info = price_map.get(clean_sym, {})
         close_val = float(r.get("close") or p_info.get("close") or 0.0)
+        vol_val = float(r.get("volume") or p_info.get("volume") or 0.0)
+        vol_sma20_val = float(r.get("vol_sma20") or 0.0)
+        raw_r_vol = float(r.get("r_vol") or 0.0)
+        if raw_r_vol <= 0 and vol_sma20_val > 0 and vol_val > 0:
+            raw_r_vol = round(vol_val / vol_sma20_val, 4)
         latest_by_symbol[clean_sym] = {
             "symbol": clean_sym,
             "close": close_val,
             "change_pct": float(r.get("change_pct") or 0.0),
-            "volume": float(r.get("volume") or p_info.get("volume") or 0.0),
-            "vol_sma20": float(r.get("vol_sma20") or 0.0),
-            "r_vol": float(r.get("r_vol") or 1.0),
+            "volume": vol_val,
+            "vol_sma20": vol_sma20_val,
+            "r_vol": raw_r_vol,
             "rsi_14": float(r.get("rsi_14") or 50.0),
             "ema_20": float(r.get("ema_20") or 0.0),
+            "ema_50": float(r.get("ema_50") or 0.0),
             "bb_upper": float(r.get("bb_upper") or 0.0),
             "open": p_info.get("open", close_val),
             "high": p_info.get("high", close_val),
@@ -1253,13 +1356,19 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         sent_today = {"date": cairo["date_str"], "sent_keys": []}
     sent_keys = set(sent_today.get("sent_keys", []))
 
-    # Evaluate Scanners via shared helper (exact EGX rules)
+    egx_downtrend = _is_egx_market_downtrend()
+    cross_open_syms = _load_egx_cross_system_open_symbols()
+
+    # Evaluate Scanners via shared helper (exact EGX rules + unified regime & cross-system dedup)
     allow_new_entries = bool(force or cairo["time_str"] < "14:25")
     eval_res = evaluate_scanner_candidates(
         latest_by_symbol,
         sent_keys=sent_keys,
         force=force,
         limit_per_category=2,
+        exchange="EGX",
+        blocked_symbols=cross_open_syms,
+        market_downtrend=egx_downtrend,
     )
     final_vol = eval_res["final_vol"] if allow_new_entries else []
     final_bo = eval_res["final_bo"] if allow_new_entries else []
@@ -1306,7 +1415,9 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         causal_be_prev_only=False,
         intraday_live=True,
         allow_new_entries=allow_new_entries,
+        exchange="EGX",
         confirmed_action_dates=confirmed_action_dates,
+        blocked_symbols=cross_open_syms,
     )
 
     # Send Follow-Up Target Hit Alerts (VIP & Free channels)
@@ -1341,15 +1452,15 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
                 "━━━━━━━━━━━━━━━━━━━━",
             ]
             for s in dedup_hits:
-                is_be = abs(float(s.get("return_pct", 0.0))) < 0.2
+                is_be = bool(s.get("is_breakeven")) or abs(float(s.get("return_pct", 0.0))) < 0.6
                 ret_str = f"+{s['return_pct']:.1f}%" if s['return_pct'] >= 0 else f"{s['return_pct']:.1f}%"
                 exit_price = float(s.get("exit_price") or s.get("target_1", 0.0))
                 entry_price = float(s.get("entry_price", 0.0))
                 peak_str = f"+{s.get('max_gain_pct', 0.0):.1f}%"
                 if is_be:
                     hit_lines.append(
-                        f"🛡️ <b>#{s['symbol']}</b> — <b>خروج آمن بتفعيل وقف التعادل (0.0%)</b>\n"
-                        f"   • سعر الدخول والخروج: <b>{entry_price:.2f} ج.م</b>\n"
+                        f"🛡️ <b>#{s['symbol']}</b> — <b>خروج آمن بتأمين الأرباح / وقف التعادل ({ret_str})</b>\n"
+                        f"   • سعر الدخول: <b>{entry_price:.2f} ج.م</b>  ←  الإغلاق: <b>{exit_price:.2f} ج.م</b>\n"
                         f"   • أعلى قمة وصلها السهم: <b>{peak_str}</b> (تم تأمين رأس المال بالكامل)"
                     )
                 else:
@@ -1369,8 +1480,11 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         else:
             logger.info(f"[SCANNER_PY] Target hit Telegram dispatch skipped by Supabase lock (symbols={hit_symbols})")
 
-        # Social Proof for Free Channel
-        winning_hits = [s for s in dedup_hits if float(s.get("return_pct", 0.0)) > 0]
+        # Social Proof for Free Channel (full targets only, never breakeven stops)
+        winning_hits = [
+            s for s in dedup_hits
+            if float(s.get("return_pct", 0.0)) > 0 and not s.get("is_breakeven")
+        ]
         if winning_hits and free_channel:
             free_lines = [
                 "🎯 <b>تحقيق مستهدف فني في إشارات الرصد اللحظي — EGX BOTS</b> 🚀",

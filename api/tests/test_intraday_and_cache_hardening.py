@@ -1379,5 +1379,61 @@ def test_unified_fair_value_engine_parity_oils_soap_and_usd_egx():
     assert web_ndrl["grahamValue"] < 25.0
 
 
+def test_p2_p3_chart_fast_track_eod_scan_ttl_and_wyckoff_localization():
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    from api.agentic_chat.analysis_cache import resolve_cache_validity
+    from api.agentic_chat.pipeline import _CHART_SINGLE_STOCK_RE
+    from api.agentic_chat.tools_execution import _localize_wyckoff_phase
+
+    # 1. Chart-button prompt matches single-stock Fast-Track regex cleanly
+    m1 = _CHART_SINGLE_STOCK_RE.match("حلل سهم AMES في الشارت panel-1، الفريم 1D، آخر 500 شمعة.")
+    assert m1 is not None and m1.group(1).upper() == "AMES"
+    m2 = _CHART_SINGLE_STOCK_RE.match("حلل سهم 2222.SR في الشارت panel-1، الفريم 1D")
+    assert m2 is not None and m2.group(1).upper() == "2222.SR"
+    assert _CHART_SINGLE_STOCK_RE.match("حلل سهم AMES وقارنه مع POUL") is None
+
+    # 2. EOD scan cache key (vip_accumulation) stays valid at 20 min during live EGX session, while live stock key expires
+    cairo_tz = ZoneInfo("Africa/Cairo")
+    live_now = dt.datetime(2026, 11, 25, 12, 20, tzinfo=cairo_tz).timestamp()
+    twenty_min_ago = live_now - (20 * 60)
+    assert resolve_cache_validity(twenty_min_ago, now_ts=live_now, market="EGX", cache_key="vip_accumulation") is True
+    assert resolve_cache_validity(twenty_min_ago, now_ts=live_now, market="EGX", cache_key="vip_stock_COMI") is False
+
+    # 3. Wyckoff raw English phases localize cleanly at the source (zero internal_field_leaked:weak_distribution)
+    assert _localize_wyckoff_phase("weak_distribution") == "تصريف ضعيف"
+    assert _localize_wyckoff_phase("strong_accumulation") == "تجميع مؤسسي قوي"
+    assert _localize_wyckoff_phase("neutral") == "محايد"
+    assert _localize_wyckoff_phase(None) is None
+
+    # 4. ACTF alias ("اكت" / "أكت") and loss-making P/E + FCF contradiction guard (RKAZ)
+    from api.stock_aliases import resolve_stock_symbol
+    from api.agentic_chat.tools_execution import _extract_rich_fundamentals
+
+    assert resolve_stock_symbol("اكت") == "ACTF"
+    assert resolve_stock_symbol("أكت") == "ACTF"
+    assert resolve_stock_symbol("أكتوبر فارما") == "OCPH"
+
+    rkaz_clean = _extract_rich_fundamentals(
+        {
+            "symbol": "RKAZ",
+            "eps": -0.0706,
+            "peRatio": 2856.0,
+            "roe": -7.0,
+            "netIncome": 500000.0,
+            "freeCashFlow": -1090000.0,
+            "bookValuePerShare": 0.95,
+            "pbRatio": 4.26,
+        },
+        close_price=4.06,
+        name="ركاز للاستثمار",
+    )
+    assert "pe_ratio" not in rkaz_clean
+    diag = rkaz_clean.get("fundamental_diagnosis") or {}
+    assert "الربح المحاسبي موجب" not in (diag.get("cash_quality") or "")
+
+
+
+
 
 

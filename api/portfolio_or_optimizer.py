@@ -501,13 +501,25 @@ def solve_optimal_weights(
         ],
         dtype=float,
     )
+    has_explicit_overrides = any(a.max_weight_override is not None for a in assets)
     if float(np.sum(ub)) < invested_total - 1e-6:
-        ub = np.where(ub > 1e-9, eff_max_w, 0.0)
-        if float(np.sum(ub)) < invested_total - 1e-6:
-            ub = np.full(n, eff_max_w, dtype=float)
+        if has_explicit_overrides:
+            # Never override safety exclusions or no-buy downtrend caps!
+            # Absorb unallocated weight into Cash Reserve for healthier future opportunities.
+            invested_total = max(0.0, float(np.sum(ub)))
+            cash_res_pct = round((1.0 - invested_total) * 100.0, 1)
+            notes.append(
+                f"تم الاحتفاظ بـ {cash_res_pct:.1f}% كاش احتياطي للفرص البديلة بدلاً من إجبار المحفظة على الشراء في أسهم مستبعدة أو في مسار هابط."
+            )
+            if invested_total <= 1e-9:
+                return np.zeros(n, dtype=float), eff_max_w, eff_max_sec, notes
+        else:
+            ub = np.where(ub > 1e-9, eff_max_w, 0.0)
+            if float(np.sum(ub)) < invested_total - 1e-6:
+                ub = np.full(n, eff_max_w, dtype=float)
 
     if n == 1:
-        return np.array([invested_total], dtype=float), eff_max_w, eff_max_sec, notes
+        return np.array([min(invested_total, float(ub[0]))], dtype=float), eff_max_w, eff_max_sec, notes
 
     obj = normalize_objective(objective)
     if obj == "hrp":
@@ -709,8 +721,14 @@ def allocate_integer_shares(
                 continue
             cur_v = shares[i] * p
             new_v = cur_v + p
-            # Respect hard stock & sector caps (allow tiny 1% rounding cushion only if still under budget)
-            if new_v > total_capital * (max_weight + 0.015):
+            # Respect hard stock, override & sector caps (never exceed explicit max_weight_override)
+            eff_cap_i = (
+                min(max_weight, float(assets[i].max_weight_override))
+                if assets[i].max_weight_override is not None
+                else max_weight
+            )
+            cap_cushion = 0.002 if assets[i].max_weight_override is not None else 0.015
+            if new_v > total_capital * (eff_cap_i + cap_cushion):
                 continue
             if sec_vals[sector_map[i]] + p > total_capital * (max_sector_weight + 0.015):
                 continue
@@ -1140,8 +1158,8 @@ def build_smart_dca_plan(
         reasons.append(f"رصد تصريف مؤسسي قوي ({float(dist_score):.0f}/100)")
     if is_loss_making is True:
         reasons.append("الشركة تحقق خسائر مالية صافية حالياً")
-    if fund_score is not None and float(fund_score) < 32.0:
-        reasons.append(f"الجودة المالية ضعيفة جداً ({float(fund_score):.0f}/100)")
+    if fund_score is not None and float(fund_score) < 42.0:
+        reasons.append(f"الجودة المالية ضعيفة ({float(fund_score):.0f}/100)")
 
     if reasons:
         hard_stop = round(stop_loss if (stop_loss and 0 < stop_loss < cur_p) else (cur_p * 0.94), dec)

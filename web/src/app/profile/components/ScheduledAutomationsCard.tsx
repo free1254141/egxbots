@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Clock,
   Bot,
@@ -40,6 +40,7 @@ interface Props {
   language?: string;
   telegramLinked?: boolean;
   onQuotaConsumed?: () => void;
+  onCountChange?: (count: number) => void;
 }
 
 const PRESET_PROMPTS = [
@@ -70,10 +71,12 @@ export default function ScheduledAutomationsCard({
   language = "ar",
   telegramLinked = false,
   onQuotaConsumed,
+  onCountChange,
 }: Props) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const isAr = language === "ar";
+  const formRef = useRef<HTMLFormElement | null>(null);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -172,6 +175,10 @@ export default function ScheduledAutomationsCard({
     void loadAutomations(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  useEffect(() => {
+    onCountChange?.(automations.length);
+  }, [automations.length, onCountChange]);
 
   const handleSelectPreset = (preset: typeof PRESET_PROMPTS[0]) => {
     setFormName(preset.title);
@@ -332,7 +339,7 @@ export default function ScheduledAutomationsCard({
     setFormDays(auto.days_of_week || "trading_days");
     setFormCustomChatId(auto.telegram_chat_id || "");
     setShowAddForm(true);
-    window.scrollTo({ top: 400, behavior: "smooth" });
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 40);
   };
 
   return (
@@ -351,6 +358,14 @@ export default function ScheduledAutomationsCard({
               <span className="border-2 border-black dark:border-white bg-sky-400 text-black px-2 py-0.5 text-xs font-black uppercase tracking-wider shadow-[1px_1px_0px_rgba(0,0,0,1)]">
                 PRO EXCLUSIVE
               </span>
+              {(telegramLinked || serverTgLinked) && (
+                <span
+                  className="border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[11px] font-black rounded-full"
+                  title={serverTgChatId ? `Telegram ID: ${serverTgChatId}` : undefined}
+                >
+                  🟢 {isAr ? "تليجرام متصل" : "Telegram Linked"}
+                </span>
+              )}
             </div>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 font-bold mt-1">
               {isAr
@@ -380,8 +395,8 @@ export default function ScheduledAutomationsCard({
         </div>
       </div>
 
-      {/* Telegram Link Warning */}
-      {(!telegramLinked && !serverTgLinked) ? (
+      {/* Telegram Link Warning (only when unlinked) */}
+      {(!telegramLinked && !serverTgLinked) && (
         <div className="border-3 border-amber-500 bg-amber-50 dark:bg-amber-950/40 p-3 sm:p-4 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-900 dark:text-amber-200">
           <div className="flex items-start gap-3 text-xs">
             <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -406,15 +421,6 @@ export default function ScheduledAutomationsCard({
             <span>{isAr ? "ربط وتفعيل البوت الآن" : "Link Bot Now"}</span>
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
-        </div>
-      ) : (
-        <div className="border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 p-2.5 rounded-lg flex items-center justify-between gap-2 text-emerald-900 dark:text-emerald-200 text-xs font-bold">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>{isAr ? "بوت تليجرام مفعل ومتصل جاهز لاستلام الاستشارات" : "Telegram Bot active and ready for automations"}:</span>
-            {serverTgChatId && <span className="font-mono font-black text-emerald-700 dark:text-emerald-300">{serverTgChatId}</span>}
-          </div>
-          <span className="text-[10px] bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded font-black">متصل 🟢</span>
         </div>
       )}
 
@@ -460,7 +466,7 @@ export default function ScheduledAutomationsCard({
 
       {/* Add / Edit Form Modal / Inline */}
       {showAddForm && (
-        <form onSubmit={handleSave} className="p-4 sm:p-5 border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-800/80 rounded-xl space-y-4 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+        <form ref={formRef} onSubmit={handleSave} className="p-4 sm:p-5 border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-800/80 rounded-xl space-y-4 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
           <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-3">
             <h3 className="font-black text-base flex items-center gap-2 text-black dark:text-white">
               <Bot className="w-5 h-5 text-sky-500" />
@@ -622,14 +628,14 @@ export default function ScheduledAutomationsCard({
           )}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {automations.map((auto) => (
             <div
               key={auto.id}
-              className={`p-4 border-3 border-black dark:border-white rounded-xl bg-white dark:bg-zinc-900 shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all ${!auto.is_active ? "opacity-60 bg-zinc-100 dark:bg-zinc-800/40" : ""}`}
+              className={`p-4 border-3 border-black dark:border-white rounded-xl bg-white dark:bg-zinc-900 shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] flex flex-col justify-between gap-3 transition-all ${!auto.is_active ? "opacity-60 bg-zinc-100 dark:bg-zinc-800/40" : ""}`}
             >
               {/* Info */}
-              <div className="space-y-1.5 flex-1">
+              <div className="space-y-2 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-black text-base text-black dark:text-white">
                     {auto.name}
@@ -652,7 +658,7 @@ export default function ScheduledAutomationsCard({
                   )}
                 </div>
 
-                <p className="text-xs text-zinc-600 dark:text-zinc-300 font-medium bg-zinc-50 dark:bg-zinc-800 p-2 rounded border border-zinc-200 dark:border-zinc-700">
+                <p className="text-xs text-zinc-600 dark:text-zinc-300 font-medium bg-zinc-50 dark:bg-zinc-800 p-2.5 rounded border border-zinc-200 dark:border-zinc-700 line-clamp-3">
                   <span className="font-bold text-zinc-400 mr-1">السؤال:</span>
                   &quot;{auto.prompt}&quot;
                 </p>
@@ -682,7 +688,7 @@ export default function ScheduledAutomationsCard({
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-zinc-200 dark:border-zinc-800 flex-wrap">
                 {/* Test Run button */}
                 <button
                   type="button"
@@ -695,35 +701,37 @@ export default function ScheduledAutomationsCard({
                   <span>{testingId === auto.id ? (isAr ? "جاري الإرسال..." : "Sending...") : (isAr ? "تجربة الآن" : "Test Run")}</span>
                 </button>
 
-                {/* Toggle On/Off */}
-                <button
-                  type="button"
-                  onClick={() => handleToggleActive(auto)}
-                  className={`p-1.5 border-2 border-black dark:border-white font-black text-xs shadow-[2px_2px_0px_rgba(0,0,0,1)] cursor-pointer active:translate-x-[1px] active:translate-y-[1px] ${auto.is_active ? "bg-emerald-400 text-black" : "bg-zinc-300 text-zinc-600"}`}
-                  title={auto.is_active ? (isAr ? "إيقاف مؤقت" : "Pause") : (isAr ? "تفعيل" : "Activate")}
-                >
-                  <Power className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Toggle On/Off */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleActive(auto)}
+                    className={`p-1.5 border-2 border-black dark:border-white font-black text-xs shadow-[2px_2px_0px_rgba(0,0,0,1)] cursor-pointer active:translate-x-[1px] active:translate-y-[1px] ${auto.is_active ? "bg-emerald-400 text-black" : "bg-zinc-300 text-zinc-600"}`}
+                    title={auto.is_active ? (isAr ? "إيقاف مؤقت" : "Pause") : (isAr ? "تفعيل" : "Activate")}
+                  >
+                    <Power className="w-4 h-4" />
+                  </button>
 
-                {/* Edit */}
-                <button
-                  type="button"
-                  onClick={() => handleStartEdit(auto)}
-                  className="p-1.5 border-2 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs shadow-[2px_2px_0px_rgba(0,0,0,1)] cursor-pointer active:translate-x-[1px] active:translate-y-[1px]"
-                  title={isAr ? "تعديل" : "Edit"}
-                >
-                  <Edit3 className="w-4 h-4" />
-                </button>
+                  {/* Edit */}
+                  <button
+                    type="button"
+                    onClick={() => handleStartEdit(auto)}
+                    className="p-1.5 border-2 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs shadow-[2px_2px_0px_rgba(0,0,0,1)] cursor-pointer active:translate-x-[1px] active:translate-y-[1px]"
+                    title={isAr ? "تعديل" : "Edit"}
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
 
-                {/* Delete */}
-                <button
-                  type="button"
-                  onClick={() => handleDelete(auto.id)}
-                  className="p-1.5 border-2 border-black dark:border-white bg-red-500 hover:bg-red-400 text-white font-black text-xs shadow-[2px_2px_0px_rgba(0,0,0,1)] cursor-pointer active:translate-x-[1px] active:translate-y-[1px]"
-                  title={isAr ? "حذف" : "Delete"}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                  {/* Delete */}
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(auto.id)}
+                    className="p-1.5 border-2 border-black dark:border-white bg-red-500 hover:bg-red-400 text-white font-black text-xs shadow-[2px_2px_0px_rgba(0,0,0,1)] cursor-pointer active:translate-x-[1px] active:translate-y-[1px]"
+                    title={isAr ? "حذف" : "Delete"}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}

@@ -6,7 +6,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import {
     Loader2, RefreshCw, Plus, Trash2, Pencil, Check, X, Wallet,
     TrendingUp, TrendingDown, Coins, Save, BadgeDollarSign, MessageSquare,
-    ChevronDown, ChevronUp,
+    ChevronDown, ChevronUp, Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePortfolio, type PortfolioRow, type PortfolioSnapshot } from "@/contexts/PortfolioContext";
@@ -35,7 +35,13 @@ const numericOnly = (value: string): string => {
     return cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
 };
 
-export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolioUpdated?: () => void }) {
+export default function MyPortfolioSection({
+    onPortfolioUpdated,
+    hideCollapseToggle = false,
+}: {
+    onPortfolioUpdated?: () => void;
+    hideCollapseToggle?: boolean;
+}) {
     const { user, loading: authLoading } = useAuth();
     const { language } = useLanguage();
     const isAr = language === "ar";
@@ -43,7 +49,9 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
     const { snapshot, loading, refresh: load } = usePortfolio();
     const [busy, setBusy] = useState(false);
     const reportState = usePortfolioReport(user?.id || null, snapshot);
-    const [saleDraft,setSaleDraft] = useState<{symbol:string;quantity:number|null;key:number}|null>(null);
+    const [saleDraft, setSaleDraft] = useState<{ symbol: string; quantity: number | null; key: number } | null>(null);
+    const [holdingsQuery, setHoldingsQuery] = useState("");
+    const [sortBy, setSortBy] = useState<"default" | "value" | "pnl">("default");
 
     const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
         if (typeof window !== "undefined") {
@@ -55,6 +63,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
         }
         return false;
     });
+    const effectiveCollapsed = hideCollapseToggle ? false : isCollapsed;
 
     const toggleCollapse = () => {
         setIsCollapsed(prev => {
@@ -210,16 +219,33 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
         }
     };
 
+    const totals = snapshot?.totals;
+    const positions = useMemo(() => snapshot?.positions || [], [snapshot?.positions]);
+    const filteredPositions = useMemo(() => {
+        const q = holdingsQuery.trim().toUpperCase();
+        const list = q
+            ? positions.filter(
+                  (r) =>
+                      r.symbol.toUpperCase().includes(q) ||
+                      (r.name || "").toUpperCase().includes(q),
+              )
+            : [...positions];
+        if (sortBy === "value") {
+            list.sort((a, b) => (b.market_value ?? -Infinity) - (a.market_value ?? -Infinity));
+        } else if (sortBy === "pnl") {
+            list.sort((a, b) => (b.profit_pct ?? -Infinity) - (a.profit_pct ?? -Infinity));
+        }
+        return list;
+    }, [holdingsQuery, positions, sortBy]);
+
     if (authLoading) return null;
 
-    const totals = snapshot?.totals;
-    const positions = snapshot?.positions || [];
     const totalProfit = totals?.profit_value ?? null;
     const profitTone = totalProfit === null ? "text-zinc-500" : totalProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
 
     return (
-        <section className={`relative z-10 min-w-0 rounded-2xl p-3 sm:p-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-sm transition-all duration-200 ${isCollapsed ? "space-y-0" : "space-y-5"}`}>
-            <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${isCollapsed ? "" : "border-b border-zinc-200 dark:border-zinc-800 pb-5"}`}>
+        <section className={`relative z-10 min-w-0 rounded-2xl p-3 sm:p-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-sm transition-all duration-200 ${effectiveCollapsed ? "space-y-0" : "space-y-5"}`}>
+            <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${effectiveCollapsed ? "" : "border-b border-zinc-200 dark:border-zinc-800 pb-5"}`}>
                 <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-3">
                         <div className="h-10 w-10 border-4 border-black dark:border-white bg-emerald-500 text-white flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] shrink-0">
@@ -229,14 +255,14 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                             <h2 className="text-2xl font-black text-black dark:text-white uppercase tracking-tight">
                                 {isAr ? "محفظتى" : "My Portfolio"}
                             </h2>
-                            {isCollapsed && (
+                            {effectiveCollapsed && (
                                 <span className="border-2 border-black dark:border-white bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-[1px_1px_0px_rgba(0,0,0,1)]">
                                     {isAr ? "مطوية" : "Collapsed"}
                                 </span>
                             )}
                         </div>
                     </div>
-                    {!isCollapsed ? (
+                    {!effectiveCollapsed ? (
                         <p className="text-xs text-zinc-600 dark:text-zinc-400 font-black uppercase tracking-widest leading-relaxed">
                             {isAr
                                 ? "أسهمك وسيولتك — حدّثها من هنا أو كلّم الشات بوت وهو يحدّثها لك"
@@ -272,7 +298,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                         <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                     </button>
 
-                    {!isCollapsed && (
+                    {!effectiveCollapsed && (
                         <>
                             <button
                                 onClick={() => {
@@ -303,32 +329,34 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                         </>
                     )}
 
-                    <button
-                        type="button"
-                        onClick={toggleCollapse}
-                        className={`h-10 px-3 flex items-center justify-center gap-1.5 border-4 border-black dark:border-white font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all ${
-                            isCollapsed
-                                ? "bg-[#FFE600] text-black hover:bg-amber-300"
-                                : "bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-300 dark:hover:bg-zinc-700"
-                        }`}
-                        title={isCollapsed ? (isAr ? "فتح وتوسيع المحفظة" : "Expand Portfolio") : (isAr ? "إغلاق وطي السيكشن" : "Collapse Section")}
-                    >
-                        {isCollapsed ? (
-                            <>
-                                <ChevronDown className="h-4 w-4" />
-                                <span>{isAr ? "عرض المحفظة" : "Expand"}</span>
-                            </>
-                        ) : (
-                            <>
-                                <ChevronUp className="h-4 w-4" />
-                                <span>{isAr ? "طي السيكشن" : "Collapse"}</span>
-                            </>
-                        )}
-                    </button>
+                    {!hideCollapseToggle && (
+                        <button
+                            type="button"
+                            onClick={toggleCollapse}
+                            className={`h-10 px-3 flex items-center justify-center gap-1.5 border-4 border-black dark:border-white font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all ${
+                                effectiveCollapsed
+                                    ? "bg-[#FFE600] text-black hover:bg-amber-300"
+                                    : "bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-300 dark:hover:bg-zinc-700"
+                            }`}
+                            title={effectiveCollapsed ? (isAr ? "فتح وتوسيع المحفظة" : "Expand Portfolio") : (isAr ? "إغلاق وطي السيكشن" : "Collapse Section")}
+                        >
+                            {effectiveCollapsed ? (
+                                <>
+                                    <ChevronDown className="h-4 w-4" />
+                                    <span>{isAr ? "عرض المحفظة" : "Expand"}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <ChevronUp className="h-4 w-4" />
+                                    <span>{isAr ? "طي السيكشن" : "Collapse"}</span>
+                                </>
+                            )}
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {!isCollapsed && (
+            {!effectiveCollapsed && (
               <>
 
             {/* Add form — Multi-stock bulk add */}
@@ -513,111 +541,174 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                 </div>
             </div>
 
-            <PortfolioOverview report={reportState.report} snapshot={snapshot} isAr={isAr} loading={reportState.loading} error={reportState.error} onRefresh={reportState.refresh} />
-            <PortfolioPerformanceDashboard userId={user?.id || null} snapshot={snapshot} isAr={isAr} supplied={reportState} />
-            <PortfolioTransactions snapshot={snapshot} events={reportState.report?.transactions || []} isAr={isAr} initialSale={saleDraft}
-                onSaved={async()=>{ await load(true); reportState.refresh(); onPortfolioUpdated?.(); }} />
+            {/* 2-Column Bento Workspace */}
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+                {/* Main Column: Holdings (front & center), Performance & Transactions */}
+                <div className="xl:col-span-8 space-y-5 min-w-0">
+                    {/* Positions Card */}
+                    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/40 dark:bg-zinc-950/30 p-3 sm:p-4 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-sm sm:text-base font-black text-black dark:text-white">
+                                    {isAr ? "الحيازات الحالية" : "Current Holdings"}
+                                </h3>
+                                <span className="rounded-full bg-zinc-200 dark:bg-zinc-800 px-2.5 py-0.5 text-xs font-black font-mono text-zinc-700 dark:text-zinc-300">
+                                    {positions.length}
+                                </span>
+                            </div>
 
-            {/* Positions */}
-            {loading ? (
-                <div className="flex items-center justify-center py-12">
-                    <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
-                </div>
-            ) : positions.length === 0 ? (
-                <div className="min-h-[160px] border-4 border-dashed border-black/40 dark:border-white/30 bg-zinc-50 dark:bg-zinc-950/30 flex flex-col items-center justify-center gap-4 text-center p-8">
-                    <Wallet className="h-8 w-8 text-zinc-400" />
-                    <p className="max-w-md text-sm font-bold text-zinc-600 dark:text-zinc-400">
-                        {isAr
-                            ? "محفظتك فاضية. ضيف أسهمك من الزر فوق، أو ابعت صورة محفظتك للشات بوت وهو يسجلها لك بعد تأكيدك."
-                            : "Your portfolio is empty. Add holdings above, or send a portfolio screenshot to the chatbot."}
-                    </p>
-                </div>
-            ) : (
-                <div className="overflow-x-auto">
-                    <table className={`${styles.holdings} w-full text-sm`}>
-                        <thead>
-                            <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-500 uppercase tracking-widest">
-                                <th className="py-3 pr-3 text-right">{isAr ? "السهم" : "Stock"}</th>
-                                <th className="py-3 px-2 text-right">{isAr ? "العدد" : "Qty"}</th>
-                                <th className="py-3 px-2 text-right">{isAr ? "متوسط الشراء" : "Avg Cost"}</th>
-                                <th className="py-3 px-2 text-right">{isAr ? "آخر سعر" : "Last"}</th>
-                                <th className="py-3 px-2 text-right">{isAr ? "القيمة" : "Value"}</th>
-                                <th className="py-3 px-2 text-right">{isAr ? "الربح/الخسارة" : "P/L"}</th>
-                                <th className="py-3 pl-3 text-left">{isAr ? "إجراءات" : "Actions"}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {positions.map((row) => {
-                                const isEditing = editingId === row.id;
-                                const profitPositive = (row.profit_value ?? 0) >= 0;
-                                return (
-                                    <tr key={row.id} className="border-b-2 border-zinc-200 dark:border-zinc-800/60 hover:bg-zinc-50 dark:hover:bg-zinc-950/40 transition-colors">
-                                        <td data-label={isAr ? "السهم" : "Stock"} className="py-3 pr-3">
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-black text-black dark:text-white uppercase">{row.symbol}</span>
-                                                {row.name && <span className="text-[10px] text-zinc-500 font-bold truncate max-w-[140px] hidden sm:block">{row.name}</span>}
-                                            </div>
-                                        </td>
-                                        <td data-label={isAr ? "العدد" : "Quantity"} className="py-3 px-2 font-mono font-bold text-black dark:text-white">
-                                            {isEditing ? (
-                                                <input value={editQty} onChange={(e) => setEditQty(numericOnly(e.target.value))} inputMode="decimal" placeholder={String(row.quantity ?? "")} className="h-8 w-20 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 text-xs font-mono outline-none" />
-                                            ) : (
-                                                money(row.quantity, 0)
-                                            )}
-                                        </td>
-                                        <td data-label={isAr ? "متوسط الشراء" : "Average cost"} className="py-3 px-2 font-mono text-zinc-600 dark:text-zinc-300">
-                                            {isEditing ? (
-                                                <input value={editPrice} onChange={(e) => setEditPrice(numericOnly(e.target.value))} inputMode="decimal" placeholder={String(row.entry_price ?? "")} className="h-8 w-20 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 text-xs font-mono outline-none" />
-                                            ) : (
-                                                money(row.entry_price)
-                                            )}
-                                        </td>
-                                        <td data-label={isAr ? "آخر سعر" : "Last price"} className="py-3 px-2 font-mono text-zinc-600 dark:text-zinc-300">{money(row.last_price)}
-                                            <span className="mt-1 block text-[11px] text-zinc-500">{row.price_updated_at ? row.price_updated_at.slice(0,10) : (isAr ? "تاريخ السعر غير متاح" : "Price date unavailable")}</span></td>
-                                        <td data-label={isAr ? "القيمة" : "Value"} className="py-3 px-2 font-mono font-black text-black dark:text-white">{money(row.market_value)}</td>
-                                        <td data-label={isAr ? "الربح/الخسارة" : "P/L"} className="py-3 px-2">
-                                            <div className={`font-mono font-black ${row.profit_value === null ? "text-zinc-500" : profitPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                                                {row.profit_value !== null && profitPositive ? "+" : ""}{money(row.profit_value)}
-                                            </div>
-                                            <div className={`text-[10px] font-bold font-mono ${row.profit_pct === null ? "text-zinc-500" : profitPositive ? "text-emerald-600/80 dark:text-emerald-400/80" : "text-rose-600/80 dark:text-rose-400/80"}`}>
-                                                {row.profit_pct !== null && row.profit_pct >= 0 ? "+" : ""}{money(row.profit_pct)}%
-                                            </div>
-                                        </td>
-                                        <td data-label={isAr ? "إجراءات" : "Actions"} className="py-3 pl-3">
-                                            <div className="flex items-center justify-end gap-1.5">
-                                                {isEditing ? (
-                                                    <>
-                                                        <button onClick={() => void handleSaveEdit(row)} disabled={busy} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-emerald-400 text-black" title={isAr ? "حفظ" : "Save"}>
-                                                            <Check className="h-4 w-4" />
-                                                        </button>
-                                                        <button onClick={() => setEditingId(null)} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white" title={isAr ? "إلغاء" : "Cancel"}>
-                                                            <X className="h-4 w-4" />
-                                                        </button>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <button onClick={() => { setEditingId(row.id); setEditQty(row.quantity !== null ? String(row.quantity) : ""); setEditPrice(row.entry_price !== null ? String(row.entry_price) : ""); }} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-amber-300 text-black" title={isAr ? "تعديل" : "Edit"}>
-                                                            <Pencil className="h-4 w-4" />
-                                                        </button>
-                                                        <button onClick={() => void handleSell(row)} disabled={busy} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-cyan-400 text-black" title={isAr ? "تسجيل بيع" : "Record sell"}>
-                                                            <BadgeDollarSign className="h-4 w-4" />
-                                                        </button>
-                                                        <button onClick={() => void handleRemove(row)} disabled={busy} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-red-400 text-black" title={isAr ? "حذف" : "Remove"}>
-                                                            <Trash2 className="h-4 w-4" />
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-            )}
+                            {positions.length > 5 && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <div className="relative">
+                                        <Search className="w-3.5 h-3.5 text-zinc-400 absolute top-1/2 -translate-y-1/2 start-2.5 pointer-events-none" />
+                                        <input
+                                            type="text"
+                                            value={holdingsQuery}
+                                            onChange={(e) => setHoldingsQuery(e.target.value)}
+                                            placeholder={isAr ? "بحث بالرمز..." : "Filter symbol..."}
+                                            className="h-8 w-36 sm:w-44 ps-8 pe-2.5 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs font-bold text-black dark:text-white outline-none focus:border-emerald-500"
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-0.5 text-[11px] font-bold">
+                                        {(
+                                            [
+                                                ["default", isAr ? "الافتراضي" : "Default"],
+                                                ["value", isAr ? "القيمة" : "Value"],
+                                                ["pnl", isAr ? "الربح %" : "P/L %"],
+                                            ] as const
+                                        ).map(([key, label]) => (
+                                            <button
+                                                key={key}
+                                                type="button"
+                                                onClick={() => setSortBy(key)}
+                                                className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                                                    sortBy === key
+                                                        ? "bg-black dark:bg-white text-white dark:text-black font-black"
+                                                        : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                                                }`}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
 
-            <PortfolioDividendsCard positions={snapshot?.positions || []} />
+                        {loading ? (
+                            <div className="flex items-center justify-center py-12">
+                                <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+                            </div>
+                        ) : positions.length === 0 ? (
+                            <div className="min-h-[160px] border-4 border-dashed border-black/40 dark:border-white/30 bg-zinc-50 dark:bg-zinc-950/30 flex flex-col items-center justify-center gap-4 text-center p-8">
+                                <Wallet className="h-8 w-8 text-zinc-400" />
+                                <p className="max-w-md text-sm font-bold text-zinc-600 dark:text-zinc-400">
+                                    {isAr
+                                        ? "محفظتك فاضية. ضيف أسهمك من الزر فوق، أو ابعت صورة محفظتك للشات بوت وهو يسجلها لك بعد تأكيدك."
+                                        : "Your portfolio is empty. Add holdings above, or send a portfolio screenshot to the chatbot."}
+                                </p>
+                            </div>
+                        ) : filteredPositions.length === 0 ? (
+                            <div className="py-8 text-center text-xs font-bold text-zinc-500">
+                                {isAr ? "لا توجد أسهم مطابقة للبحث." : "No holdings match your filter."}
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className={`${styles.holdings} w-full text-sm`}>
+                                    <thead>
+                                        <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                                            <th className="py-3 pr-3 text-right">{isAr ? "السهم" : "Stock"}</th>
+                                            <th className="py-3 px-2 text-right">{isAr ? "العدد" : "Qty"}</th>
+                                            <th className="py-3 px-2 text-right">{isAr ? "متوسط الشراء" : "Avg Cost"}</th>
+                                            <th className="py-3 px-2 text-right">{isAr ? "آخر سعر" : "Last"}</th>
+                                            <th className="py-3 px-2 text-right">{isAr ? "القيمة" : "Value"}</th>
+                                            <th className="py-3 px-2 text-right">{isAr ? "الربح/الخسارة" : "P/L"}</th>
+                                            <th className="py-3 pl-3 text-left">{isAr ? "إجراءات" : "Actions"}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredPositions.map((row) => {
+                                            const isEditing = editingId === row.id;
+                                            const profitPositive = (row.profit_value ?? 0) >= 0;
+                                            return (
+                                                <tr key={row.id} className="border-b-2 border-zinc-200 dark:border-zinc-800/60 hover:bg-zinc-50 dark:hover:bg-zinc-950/40 transition-colors">
+                                                    <td data-label={isAr ? "السهم" : "Stock"} className="py-3 pr-3">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-black text-black dark:text-white uppercase">{row.symbol}</span>
+                                                            {row.name && <span className="text-[10px] text-zinc-500 font-bold truncate max-w-[140px] hidden sm:block">{row.name}</span>}
+                                                        </div>
+                                                    </td>
+                                                    <td data-label={isAr ? "العدد" : "Quantity"} className="py-3 px-2 font-mono font-bold text-black dark:text-white">
+                                                        {isEditing ? (
+                                                            <input value={editQty} onChange={(e) => setEditQty(numericOnly(e.target.value))} inputMode="decimal" placeholder={String(row.quantity ?? "")} className="h-8 w-20 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 text-xs font-mono outline-none" />
+                                                        ) : (
+                                                            money(row.quantity, 0)
+                                                        )}
+                                                    </td>
+                                                    <td data-label={isAr ? "متوسط الشراء" : "Average cost"} className="py-3 px-2 font-mono text-zinc-600 dark:text-zinc-300">
+                                                        {isEditing ? (
+                                                            <input value={editPrice} onChange={(e) => setEditPrice(numericOnly(e.target.value))} inputMode="decimal" placeholder={String(row.entry_price ?? "")} className="h-8 w-20 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 text-xs font-mono outline-none" />
+                                                        ) : (
+                                                            money(row.entry_price)
+                                                        )}
+                                                    </td>
+                                                    <td data-label={isAr ? "آخر سعر" : "Last price"} className="py-3 px-2 font-mono text-zinc-600 dark:text-zinc-300">{money(row.last_price)}
+                                                        <span className="mt-1 block text-[11px] text-zinc-500">{row.price_updated_at ? row.price_updated_at.slice(0,10) : (isAr ? "تاريخ السعر غير متاح" : "Price date unavailable")}</span></td>
+                                                    <td data-label={isAr ? "القيمة" : "Value"} className="py-3 px-2 font-mono font-black text-black dark:text-white">{money(row.market_value)}</td>
+                                                    <td data-label={isAr ? "الربح/الخسارة" : "P/L"} className="py-3 px-2">
+                                                        <div className={`font-mono font-black ${row.profit_value === null ? "text-zinc-500" : profitPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                                                            {row.profit_value !== null && profitPositive ? "+" : ""}{money(row.profit_value)}
+                                                        </div>
+                                                        <div className={`text-[10px] font-bold font-mono ${row.profit_pct === null ? "text-zinc-500" : profitPositive ? "text-emerald-600/80 dark:text-emerald-400/80" : "text-rose-600/80 dark:text-rose-400/80"}`}>
+                                                            {row.profit_pct !== null && row.profit_pct >= 0 ? "+" : ""}{money(row.profit_pct)}%
+                                                        </div>
+                                                    </td>
+                                                    <td data-label={isAr ? "إجراءات" : "Actions"} className="py-3 pl-3">
+                                                        <div className="flex items-center justify-end gap-1.5">
+                                                            {isEditing ? (
+                                                                <>
+                                                                    <button onClick={() => void handleSaveEdit(row)} disabled={busy} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-emerald-400 text-black" title={isAr ? "حفظ" : "Save"}>
+                                                                        <Check className="h-4 w-4" />
+                                                                    </button>
+                                                                    <button onClick={() => setEditingId(null)} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white" title={isAr ? "إلغاء" : "Cancel"}>
+                                                                        <X className="h-4 w-4" />
+                                                                    </button>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <button onClick={() => { setEditingId(row.id); setEditQty(row.quantity !== null ? String(row.quantity) : ""); setEditPrice(row.entry_price !== null ? String(row.entry_price) : ""); }} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-amber-300 text-black" title={isAr ? "تعديل" : "Edit"}>
+                                                                        <Pencil className="h-4 w-4" />
+                                                                    </button>
+                                                                    <button onClick={() => void handleSell(row)} disabled={busy} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-cyan-400 text-black" title={isAr ? "تسجيل بيع" : "Record sell"}>
+                                                                        <BadgeDollarSign className="h-4 w-4" />
+                                                                    </button>
+                                                                    <button onClick={() => void handleRemove(row)} disabled={busy} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-red-400 text-black" title={isAr ? "حذف" : "Remove"}>
+                                                                        <Trash2 className="h-4 w-4" />
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+
+                    <PortfolioPerformanceDashboard userId={user?.id || null} snapshot={snapshot} isAr={isAr} supplied={reportState} />
+                    <PortfolioTransactions snapshot={snapshot} events={reportState.report?.transactions || []} isAr={isAr} initialSale={saleDraft}
+                        onSaved={async()=>{ await load(true); reportState.refresh(); onPortfolioUpdated?.(); }} />
+                </div>
+
+                {/* Side Rail: Concentration, Stress Simulator & Dividends */}
+                <div className="xl:col-span-4 space-y-5 min-w-0 xl:sticky xl:top-44">
+                    <PortfolioOverview report={reportState.report} snapshot={snapshot} isAr={isAr} loading={reportState.loading} error={reportState.error} onRefresh={reportState.refresh} compact />
+                    <PortfolioDividendsCard positions={snapshot?.positions || []} />
+                </div>
+            </div>
 
             <p className="text-[10px] text-zinc-500 font-bold text-center uppercase tracking-wider">
                 {isAr

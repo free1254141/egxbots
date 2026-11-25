@@ -30,8 +30,8 @@ try:
     from api.agentic_chat.market_registry import EGX_USD_SYMBOLS
 except Exception:
     EGX_USD_SYMBOLS = frozenset({
-        "ADPC", "ANFI", "APSW", "CERA", "DAPH", "EGBE", "EGSA", "EGTS",
-        "EKHO", "FAITA", "GPPL", "GRCA", "GMCI", "MAFI", "MENA", "MOIL",
+        "ADPC", "ANFI", "APSW", "DAPH", "EGBE", "EGSA", "EGTS",
+        "EKHO", "FAITA", "GPPL", "GRCA", "GMCI", "MAFI", "MOIL",
         "MOSC_USD", "NAHO", "NDRL", "NINH", "PHTV", "SAIB", "SCTS",
         "SMFR", "TRTO", "UNIP_USD", "VERT",
     })

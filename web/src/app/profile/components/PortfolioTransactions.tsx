@@ -21,6 +21,7 @@ export default function PortfolioTransactions({
   onSaved: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false),
+    [showAll, setShowAll] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [action, setAction] = useState("deposit"),
@@ -109,14 +110,22 @@ export default function PortfolioTransactions({
         portfolio_cash_withdraw: "Withdrawal",
         portfolio_cash_set: "Cash correction",
       };
+  const visibleEvents = showAll ? events : events.slice(0, 4);
   const input =
     "mt-1 min-h-11 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-black dark:border-zinc-700 dark:bg-zinc-950 dark:text-white";
   return (
     <section className="space-y-3 rounded-2xl border border-zinc-200 dark:border-zinc-700 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="font-bold">
-          {isAr ? "سجل العمليات" : "Transaction history"}
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="font-bold">
+            {isAr ? "سجل العمليات" : "Transaction history"}
+          </h3>
+          {events.length > 0 && (
+            <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 text-xs font-bold text-zinc-700 dark:text-zinc-300">
+              {events.length}
+            </span>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => start()}
@@ -271,7 +280,7 @@ export default function PortfolioTransactions({
           </div>
         </form>
       )}
-      <div className="space-y-2">
+      <div className={`space-y-2 ${showAll ? "max-h-[380px] overflow-y-auto pe-1" : ""}`}>
         {events.length === 0 ? (
           <p className="text-sm text-zinc-500">
             {isAr
@@ -279,7 +288,7 @@ export default function PortfolioTransactions({
               : "No saved transactions to display."}
           </p>
         ) : (
-          events.map((event) => (
+          visibleEvents.map((event) => (
             <div
               key={event.id}
               className="flex flex-wrap items-start justify-between gap-2 border-t border-zinc-200 dark:border-zinc-800 pt-2 text-sm"
@@ -318,6 +327,21 @@ export default function PortfolioTransactions({
           ))
         )}
       </div>
+      {events.length > 4 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((prev) => !prev)}
+          className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+        >
+          {showAll
+            ? isAr
+              ? "عرض أقل"
+              : "Show less"
+            : isAr
+              ? `عرض كل العمليات (${events.length})`
+              : `Show all (${events.length})`}
+        </button>
+      )}
       <p className="text-xs text-zinc-500">
         {isAr
           ? "أحدث 50 عملية محفوظة؛ إضافة الحيازات وتعديل السيولة لا يثبتان سجل تداول كاملًا."

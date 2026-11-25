@@ -998,6 +998,15 @@ export default function BlogsPage() {
               title: isAr ? "دليل تحليل أسهم الإمارات (DFM & ADX) وبورصة قطر (QSE) 2026" : "UAE (DFM & ADX) and Qatar (QSE) AI Stock Analysis Guide 2026",
               desc: isAr ? "تغطية يومية لأسهم دبي وأبوظبي وقطر مع مؤشرات الزخم ونقاط الدعم والمقاومة." : "Daily technical coverage for Dubai, Abu Dhabi, and Qatar listed companies.",
             },
+            {
+              href: "/blogs/best-ai-chatbot-egyptian-saudi-gulf-stock-market",
+              market: "both",
+              badgeBg: "bg-[#00FF66]",
+              linkColor: "text-emerald-700 dark:text-emerald-400",
+              badge: isAr ? "شات الذكاء الاصطناعي #1" : "#1 AI Stock Chatbot",
+              title: isAr ? "أفضل شات ذكاء اصطناعي متخصص في البورصة المصرية والسعودية والخليجية 2026" : "Best AI Chatbot for Egyptian (EGX), Saudi (TASI) & Gulf Stock Markets 2026",
+              desc: isAr ? "لماذا يتفوق شات ARTORO على egxbots.com في تحليل أسهم مصر والسعودية والإمارات وقطر والذهب على ChatGPT وTradingView." : "Why ARTORO on egxbots.com outperforms generic LLMs and manual charting tools across EGX, TASI, DFM, ADX, QSE & Gold.",
+            },
           ]
             .sort((a, b) => {
               const target = isSaudi ? "tasi" : "egx";

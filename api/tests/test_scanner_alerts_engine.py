@@ -70,10 +70,10 @@ def test_intraday_live_ignores_pre_signal_morning_ohlc_on_entry_day():
         intraday_live=True,
     )
     assert len(active) == 1
-    assert active[0]["stop_loss"] == 1.64
+    assert active[0]["stop_loss"] == pytest.approx(1.648, abs=0.002)
 
-    # Subsequent tick reverses to entry_price -> now closes legitimately at breakeven
-    latest_be = {"DSCW": {"close": 1.64, "high": 1.75, "low": 1.55}}
+    # Subsequent tick reverses to locked BE stop (+0.5% on EGX -> 1.648) -> closes at +0.49% protection
+    latest_be = {"DSCW": {"close": 1.648, "high": 1.75, "low": 1.55}}
     active, closed, hits, stops = step_scanner_lifecycle(
         active,
         closed,
@@ -90,7 +90,8 @@ def test_intraday_live_ignores_pre_signal_morning_ohlc_on_entry_day():
     )
     assert len(active) == 0
     assert len(closed) == 1
-    assert closed[0]["return_pct"] == 0.0
+    assert closed[0]["return_pct"] == pytest.approx(0.49, abs=0.05)
+    assert closed[0].get("is_breakeven") is True
     assert "التعادل" in closed[0]["exit_reason"]
 
 
@@ -339,6 +340,97 @@ def test_saudi_scanner_lifecycle_be_lock_and_six_session_expiry():
     assert len(closed2) == 1
     assert closed2[0]["status"] == "expired"
     assert "6 جلسات" in closed2[0]["exit_reason"]
+
+
+def test_scanner_flat_breakeven_not_reported_as_target_hit_and_empty_kpis_zero():
+    """A flat 0.0% BE exit gets status='breakeven' and stays out of hit_target_signals; empty KPIs return 0.0."""
+    legacy_flat = [{
+        "id": "COMI_2026-11-10_volume_surge",
+        "symbol": "COMI",
+        "scanner_type": "volume_surge",
+        "entry_price": 100.0,
+        "entry_date": "2026-11-10",
+        "target_1": 104.5,
+        "stop_loss": 100.0,
+        "be_lock_pct": 0.0,
+        "current_price": 102.6,
+        "highest_price": 103.0,
+        "lowest_price": 99.8,
+        "sessions_count": 1,
+        "max_sessions": 4,
+    }]
+    active, closed, hits, stops = step_scanner_lifecycle(
+        legacy_flat,
+        [],
+        {"COMI": {"open": 101.0, "high": 101.5, "low": 99.5, "close": 100.0}},
+        final_vol=[],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-11",
+        action_date="2026-11-11",
+        action_time="14:15",
+        now_iso="2026-11-11T12:15:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+    )
+    assert active == [] and hits == [] and stops == []
+    assert len(closed) == 1
+    assert closed[0]["status"] == "breakeven"
+    assert closed[0]["is_breakeven"] is True
+
+    empty_kpis = compute_scanner_signals_kpis([], [])
+    assert empty_kpis["win_rate_pct"] == 0.0
+    assert empty_kpis["strict_win_rate_pct"] == 0.0
+    assert empty_kpis["profit_factor"] == 0.0
+
+
+def test_scanner_egx_breakout_hardening_regime_gate_and_cross_system_dedup():
+    """EGX breakout rejects below-EMA50 / upper-wick / extended chasing; downtrend allows RSI oversold only; Saudi blocks all; blocked_symbols suppresses duplicates."""
+    rows = {
+        "BELOW50": {"open": 48.0, "high": 50.1, "low": 47.9, "close": 50.0, "change_pct": 3.5, "volume": 120_000, "r_vol": 2.5, "rsi_14": 60.0, "ema_20": 48.0, "ema_50": 52.0, "bb_upper": 49.5},
+        "WICKBO": {"open": 48.0, "high": 53.0, "low": 47.5, "close": 50.0, "change_pct": 3.5, "volume": 120_000, "r_vol": 2.5, "rsi_14": 60.0, "ema_20": 48.0, "ema_50": 46.0, "bb_upper": 49.5},
+        "EXTBO": {"open": 55.0, "high": 57.5, "low": 54.8, "close": 57.0, "change_pct": 4.0, "volume": 120_000, "r_vol": 2.5, "rsi_14": 68.0, "ema_20": 49.0, "ema_50": 45.0, "bb_upper": 56.0},
+        "DUPVOL": {"open": 48.5, "high": 50.2, "low": 48.4, "close": 50.0, "change_pct": 3.1, "volume": 150_000, "r_vol": 3.8, "rsi_14": 60.0, "ema_20": 48.0, "ema_50": 46.0, "bb_upper": 51.0},
+        "GOODVOL1": {"open": 48.5, "high": 50.2, "low": 48.4, "close": 50.0, "change_pct": 3.1, "volume": 150_000, "r_vol": 3.4, "rsi_14": 60.0, "ema_20": 48.0, "ema_50": 46.0, "bb_upper": 55.0},
+        "GOODVOL2": {"open": 29.0, "high": 30.1, "low": 28.9, "close": 30.0, "change_pct": 3.0, "volume": 150_000, "r_vol": 3.0, "rsi_14": 58.0, "ema_20": 28.5, "ema_50": 27.0, "bb_upper": 33.0},
+        "VALIDBO": {"open": 39.0, "high": 40.2, "low": 38.8, "close": 40.0, "change_pct": 3.2, "volume": 120_000, "r_vol": 2.3, "rsi_14": 61.0, "ema_20": 38.5, "ema_50": 36.0, "bb_upper": 39.5},
+        "DEEPOS": {"open": 19.6, "high": 20.1, "low": 19.5, "close": 20.0, "change_pct": 2.0, "volume": 100_000, "r_vol": 1.6, "rsi_14": 23.0, "ema_20": 21.5, "ema_50": 23.0, "bb_upper": 23.0},
+    }
+    res_healthy = evaluate_scanner_candidates(rows, force=True, limit_per_category=2, exchange="EGX", blocked_symbols={"DUPVOL.CA"})
+    assert [s["symbol"] for s in res_healthy["final_vol"]] == ["GOODVOL1", "GOODVOL2"]
+    assert [s["symbol"] for s in res_healthy["final_bo"]] == ["VALIDBO"]
+    assert all(s["symbol"] != "DUPVOL" for s in res_healthy["final_vol"])
+
+    # In confirmed EGX downtrend: momentum breakout/volume_surge are stopped; strong oversold rebound still allowed (capped at 1)
+    res_down = evaluate_scanner_candidates(rows, force=True, limit_per_category=2, exchange="EGX", market_downtrend=True)
+    assert res_down["final_vol"] == []
+    assert res_down["final_bo"] == []
+    assert [s["symbol"] for s in res_down["final_os"]] == ["DEEPOS"]
+
+    # In confirmed TADAWUL bear/panic downtrend: ALL entries are blocked
+    saudi_rows = {
+        "1120": {"open": 48.0, "high": 50.0, "low": 47.9, "close": 50.0, "change_pct": 4.2, "volume": 500_000, "r_vol": 3.0, "rsi_14": 60.0, "ema_20": 47.0, "ema_50": 45.0, "bb_upper": 49.0},
+    }
+    res_sa_down = evaluate_scanner_candidates(saudi_rows, force=True, limit_per_category=2, exchange="TADAWUL", market_downtrend=True)
+    assert res_sa_down["final_vol"] == []
+    assert res_sa_down["final_bo"] == []
+    assert res_sa_down["final_os"] == []
+
+    # step_scanner_lifecycle also respects blocked_symbols
+    active_b, _, _, _ = step_scanner_lifecycle(
+        [],
+        [],
+        {},
+        final_vol=[_sample_cand("COMI", 100.0), _sample_cand("ETEL", 40.0)],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-25",
+        action_date="2026-11-25",
+        action_time="11:00",
+        now_iso="2026-11-25T09:00:00Z",
+        blocked_symbols={"COMI"},
+    )
+    assert [s["symbol"] for s in active_b] == ["ETEL"]
 
 
 def test_scanner_lifecycle_stop_checked_conservatively_before_target_and_gap_down():

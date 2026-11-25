@@ -945,8 +945,14 @@ _CANONICAL_BUTTON_INPUTS = frozenset({
     "تحليل السوق الان",
     "تحليل السوق الآن",
     "أهم أخبار وإفصاحات السوق اليوم",
+    "أهم أخبار وإفصاحات البورصة المصرية اليوم",
     "أفضل الأسهم فنياً اليوم حسب المسح الفني والمؤشرات",
 })
+
+_CHART_SINGLE_STOCK_RE = re.compile(
+    r"^حلل\s+سهم\s+([A-Za-z0-9]{2,12}(?:\.[A-Za-z]{2,8})?)\s+في\s+الشارت\s+panel-",
+    re.IGNORECASE,
+)
 
 
 def _is_unambiguous_standalone_input(msg: Optional[str], market: str = "EGX") -> bool:
@@ -1411,8 +1417,18 @@ async def _run_agentic_chat_stream_impl(
     )
 
     # Single-Stock Fast-Track: works identically across ALL registered exchanges (EGX, TASI, QSE, DFM, ADX, ...).
-    # Covers both general analysis (`vip_stock_SYM`) and dedicated financial/fundamental analysis (`vip_stock_SYM_financials`),
-    # including unambiguous bare ticker lookups inside ongoing multi-turn sessions.
+    # Covers general analysis (`vip_stock_SYM`), financial analysis (`vip_stock_SYM_financials`),
+    # and TradingView chart-button prompts (`حلل سهم <SYM> في الشارت panel-...`).
+    _chart_fast_match = (
+        _CHART_SINGLE_STOCK_RE.match((message or "").strip())
+        if (
+            not has_user_rules
+            and not is_cross_market
+            and not vision_data
+            and (not images or len(images) == 0)
+        )
+        else None
+    )
     fast_stock_match = (
         re.fullmatch(r"vip_stock_([A-Z0-9]{2,12})(_financials)?", candidate_cache_key)
         if (
@@ -1425,11 +1441,15 @@ async def _run_agentic_chat_stream_impl(
         )
         else None
     )
-    if fast_stock_match:
+    if fast_stock_match or _chart_fast_match:
         used_fast_track = True
         model_confirmed_standalone = True
-        fast_sym = fast_stock_match.group(1)
-        is_financials_fast = bool(fast_stock_match.group(2))
+        if fast_stock_match:
+            fast_sym = fast_stock_match.group(1)
+            is_financials_fast = bool(fast_stock_match.group(2))
+        else:
+            fast_sym = _chart_fast_match.group(1).strip().upper().split(".")[0]  # type: ignore[union-attr]
+            is_financials_fast = False
         fast_mkt_ui = ui_market_label(effective_market)
         if is_financials_fast:
             fast_tool_specs = [

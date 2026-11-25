@@ -10,6 +10,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket, MARKET_CHANGE_EVENT, type MarketMode } from "@/contexts/MarketContext";
 import { getStockHref } from "@/lib/stock-href";
 import type { DividendMarketKey, DividendsCalendarPayload } from "@/lib/market/dividends-server";
+import CorporateActionsCalculator from "@/components/dividends/CorporateActionsCalculator";
 
 function MarketFlagIcon({ market, className = "w-4 h-3 rounded-[2px] shrink-0" }: { market: DividendMarketKey; className?: string }) {
   if (market === "tasi") return <SaudiFlag className={className} />;
@@ -383,6 +384,20 @@ export default function DividendCalendarClient({
           </table>
         </div>
       </div>
+
+      {/* Ex-Date Corporate Actions & Cost-Basis Calculator (100% Client-Side, 0% Vercel CPU) */}
+      <CorporateActionsCalculator
+        isAr={isAr}
+        market={market}
+        currencyAr={market === "tasi" ? "ر.س" : market === "qatar" ? "ر.ق" : market === "uae" ? "د.إ" : "ج.م"}
+        currencyEn={market === "tasi" ? "SAR" : market === "qatar" ? "QAR" : market === "uae" ? "AED" : "EGP"}
+        quickOptions={(initialData.dividends || []).map((d) => ({
+          symbol: d.symbol,
+          name_ar: d.name_ar,
+          amount: d.amount,
+          last_price: d.close_price,
+        }))}
+      />
 
       {/* Footer Note */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">

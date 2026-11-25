@@ -20,6 +20,7 @@ export default function PortfolioOverview({
   loading,
   error,
   onRefresh,
+  compact = false,
 }: {
   report: PortfolioPerformance | null;
   snapshot: PortfolioSnapshot | null;
@@ -27,6 +28,7 @@ export default function PortfolioOverview({
   loading: boolean;
   error: boolean;
   onRefresh: () => void;
+  compact?: boolean;
 }) {
   const [drop, setDrop] = useState(10);
   const daily = report?.daily;
@@ -48,7 +50,7 @@ export default function PortfolioOverview({
       .slice(0, 3) || [];
   return (
     <div className="space-y-4" data-testid="portfolio-overview">
-      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 p-4 sm:p-5">
+      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-bold">
@@ -159,7 +161,7 @@ export default function PortfolioOverview({
           </>
         )}
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className={`grid gap-4 ${compact ? "grid-cols-1" : "lg:grid-cols-2"}`}>
         <section className="rounded-2xl border border-zinc-200 dark:border-zinc-700 p-4">
           <h3 className="font-bold">
             {isAr ? "تركيز المحفظة والسيولة" : "Concentration & cash"}

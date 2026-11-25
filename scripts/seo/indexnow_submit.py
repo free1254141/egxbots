@@ -15,6 +15,10 @@ KEY_LOCATION = f"https://{HOST}/{KEY}.txt"
 
 URLS = [
     f"https://{HOST}/",
+    f"https://{HOST}/chat",
+    f"https://{HOST}/llms.txt",
+    f"https://{HOST}/llms-full.txt",
+    f"https://{HOST}/blogs/best-ai-chatbot-egyptian-saudi-gulf-stock-market",
     f"https://{HOST}/scanner/ai",
     f"https://{HOST}/scanner/technical",
     f"https://{HOST}/scanner/market",

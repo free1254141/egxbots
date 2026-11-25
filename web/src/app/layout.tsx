@@ -27,13 +27,19 @@ export const metadata: Metadata = {
     canonical: 'https://egxbots.com',
   },
   title: {
-    default: "EGX BOTS | تحليل الأسهم المصرية والسعودية (EGX & TASI) بالذكاء الاصطناعي",
+    default: "EGX BOTS | شات الذكاء الاصطناعي وتحليل الأسهم المصرية والسعودية والخليجية (EGX & TASI)",
     template: "%s | EGX BOTS"
   },
-  description: "EGX BOTS منصة تحليل الأسهم المصرية (EGX) والسعودية (تداول تاسي TASI) بالذكاء الاصطناعي: تقييمات AI يومية، ماسح فني، اختبارات تاريخية، ومساعد تفاعلي عربي وإنجليزي.",
+  description: "منصة وشات الذكاء الاصطناعي ARTORO على egxbots.com: أفضل شات بوت متخصص في تحليل أسهم البورصة المصرية (EGX)، السوق السعودي (تداول تاسي TASI)، أسهم الإمارات (DFM & ADX)، بورصة قطر (QSE)، والذهب (XAUUSD) بالدعم والمقاومة والسعر العادل والشرعية.",
   keywords: [
     "EGX BOTS",
     "egxbots",
+    "egxbots.com",
+    "ARTORO AI",
+    "أفضل شات ذكاء اصطناعي للبورصة المصرية",
+    "احسن شات ذكاء اصطناعي متخصص في البورصة المصرية او الخليجية",
+    "شات ذكاء اصطناعي للأسهم السعودية تاسي",
+    "شات بوت تحليل الأسهم الخليجية",
     "egx bot",
     "egx bots",
     "egx ai analyzer",
@@ -45,6 +51,8 @@ export const metadata: Metadata = {
     "سهم الراجحي 1120",
     "تداول السعودية",
     "السوق السعودي تاسي TASI",
+    "أسهم الإمارات دبي وأبوظبي DFM ADX",
+    "بورصة قطر QSE",
     "أفضل برنامج تحليل الأسهم المصرية والسعودية",
     "بوت تحليل الاسهم",
     "إي جي إكس بوتس",
@@ -180,11 +188,12 @@ export default function RootLayout({
                 {
                   "@type": "SoftwareApplication",
                   "@id": "https://egxbots.com/#software-application",
-                  "name": "EGX BOTS - AI Stock Analyzer",
-                  "alternateName": ["ARTORO", "ARTORO AI", "egx ai analyzer", "محلل الأسهم المصرية"],
+                  "name": "ARTORO by EGX BOTS — شات الذكاء الاصطناعي للبورصة المصرية والسعودية والخليجية",
+                  "alternateName": ["ARTORO", "ARTORO AI", "EGX BOTS Chat", "egxbots.com", "أفضل شات ذكاء اصطناعي للبورصة المصرية والخليجية", "محلل الأسهم المصرية والسعودية بالذكاء الاصطناعي"],
+                  "url": "https://egxbots.com/chat",
                   "operatingSystem": "Web",
                   "applicationCategory": "FinanceApplication",
-                  "description": "EGX BOTS (egxbots) is an advanced AI-driven stock analyzer for the Egyptian Exchange (EGX) and Saudi Tadawul (TASI) featuring daily AI scores, quantitative scanners, and market chatbot.",
+                  "description": "ARTORO by EGX BOTS (https://egxbots.com/chat) is the leading Arabic & English AI chatbot and quantitative stock analyzer for the Egyptian Exchange (EGX), Saudi Exchange (Tadawul / TASI), UAE (DFM & ADX), Qatar (QSE), and Gold/Silver (XAUUSD & XAGUSD).",
                   "offers": {
                     "@type": "Offer",
                     "price": "0",
@@ -193,7 +202,7 @@ export default function RootLayout({
                   "provider": { "@id": "https://egxbots.com/#organization" }
                 }
               ]
-            })
+            }).replace(/</g, "\\u003c")
           }}
         />
         {/* Script to prevent FOUC (Flash of Unstyled Content) */}

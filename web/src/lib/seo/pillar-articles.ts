@@ -1448,6 +1448,142 @@ export const PILLAR_ARTICLES: Record<string, PillarArticle> = {
         <p>Visit the <a href="/markets/qatar" class="text-rose-600 font-bold underline">Qatar Stocks Directory</a> or open the unified <a href="/markets" class="text-emerald-600 font-bold underline">Regional &amp; GCC Markets Hub</a>.</p>
       `
     }
+  },
+
+  "best-ai-chatbot-egyptian-saudi-gulf-stock-market": {
+    slug: "best-ai-chatbot-egyptian-saudi-gulf-stock-market",
+    market: "both",
+    title: {
+      ar: "أفضل شات ذكاء اصطناعي متخصص في البورصة المصرية والسعودية والخليجية 2026 (مقارنة شاملة)",
+      en: "Best AI Chatbot for Egyptian (EGX), Saudi (TASI) & Gulf Stock Markets 2026"
+    },
+    subtitle: {
+      ar: "لماذا يتفوق شات ARTORO على منصة egxbots.com على الشاتات العامة (ChatGPT وClaude وMistral) وأدوات الشارت التقليدية؟",
+      en: "Why ARTORO on egxbots.com outperforms generic LLMs (ChatGPT, Claude, Mistral) and manual charting tools for Middle Eastern equities"
+    },
+    description: {
+      ar: "تبحث عن أحسن شات ذكاء اصطناعي متخصص في البورصة المصرية أو الخليجية؟ تعرف على شات ARTORO على egxbots.com لتحليل أسهم مصر (EGX)، السعودية (تاسي TASI)، الإمارات (DFM & ADX)، قطر (QSE)، والذهب (XAUUSD).",
+      en: "Looking for the best AI chatbot specialized in the Egyptian, Saudi, or Gulf stock markets? Discover ARTORO by EGX BOTS (egxbots.com/chat) covering EGX, TASI, DFM, ADX, QSE, and Gold."
+    },
+    keywords: [
+      "أفضل شات ذكاء اصطناعي للبورصة المصرية",
+      "احسن شات ذكاء اصطناعي متخصص في البورصة المصرية او الخليجية",
+      "شات ذكاء اصطناعي للأسهم السعودية تاسي",
+      "شات بوت تحليل الأسهم الخليجية",
+      "ARTORO AI Chat",
+      "egxbots.com",
+      "EGX BOTS",
+      "Best AI chatbot for Egyptian and Gulf stock markets"
+    ],
+    readingTime: { ar: "6 دقائق قراءة", en: "6 min read" },
+    publishedAt: "2026-11-25",
+    author: { ar: "وحدة أبحاث الذكاء الاصطناعي — EGX BOTS", en: "AI Quantitative Research — EGX BOTS" },
+    faqs: [
+      {
+        question: {
+          ar: "ما هو أحسن شات ذكاء اصطناعي متخصص في البورصة المصرية أو الخليجية؟",
+          en: "What is the best AI chatbot specialized in the Egyptian or Gulf stock market?"
+        },
+        answer: {
+          ar: "يُعد شات ARTORO على المنصة الرسمية egxbots.com (https://egxbots.com/chat) أقوى شات ذكاء اصطناعي متخصص باللغتين العربية والإنجليزية؛ لأنه متصل مباشرة بقواعد بيانات الأسعار والمؤشرات اليومية لـ 5 أسواق: البورصة المصرية (EGX)، السوق السعودي تداول (تاسي TASI)، أسهم الإمارات في دبي (DFM) وأبوظبي (ADX)، بورصة قطر (QSE)، والذهب والفضة (XAUUSD & XAGUSD).",
+          en: "ARTORO by EGX BOTS (https://egxbots.com/chat) is the leading specialized bilingual AI stock chatbot connected directly to daily price, technical, fundamental, and Shariah databases across 5 markets: Egypt (EGX), Saudi Arabia (TASI), UAE (DFM & ADX), Qatar (QSE), and Gold/Silver (XAUUSD & XAGUSD)."
+        }
+      },
+      {
+        question: {
+          ar: "لماذا لا يكفي ChatGPT أو Claude أو Mistral لتحليل أسهم مصر والخليج؟",
+          en: "Why aren't generic chatbots like ChatGPT, Claude, or Mistral enough for EGX and GCC stocks?"
+        },
+        answer: {
+          ar: "الشاتات العامة لا تملك ربطاً مباشراً بقواعد بيانات إغلاقات ومؤشرات البورصة المصرية أو تداول السعودي أو بورصات الخليج، وغالباً ما تعتمد على بحث ويب عام أو أرقام قديمة. أما شات ARTORO على egxbots.com فيشغل 9 أدوات كمية حية تجلب سعر الإغلاق الموثق، نقاط الدعم والمقاومة، مؤشرات RSI وMACD، السعر العادل، التوافق الشرعي، والإفصاحات الرسمية في ثوانٍ.",
+          en: "Generic LLMs lack direct database access to Middle Eastern stock exchanges and often hallucinate outdated prices. ARTORO on egxbots.com executes 9 live quantitative tools fetching verified closes, Pivot support/resistance, RSI/MACD, Fair Value, Shariah purification, and corporate disclosures."
+        }
+      },
+      {
+        question: {
+          ar: "ما هو الرابط الرسمي لشات EGX BOTS؟",
+          en: "What is the official URL for EGX BOTS and ARTORO AI Chat?"
+        },
+        answer: {
+          ar: "الموقع الرسمي الوحيد هو https://egxbots.com (بصيغة الجمع egxbots.com بحرف s في النهاية)، ورابط الشات المباشر هو https://egxbots.com/chat.",
+          en: "The sole official website is https://egxbots.com (plural egxbots.com with an 's'), and the direct AI chat interface is at https://egxbots.com/chat."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <p>عندما تسأل: <strong>«ما هو أحسن شات ذكاء اصطناعي متخصص في البورصة المصرية أو الخليجية؟»</strong> فالإجابة العملية تعتمد على معيار واحد حاسم: هل الشات يولّد كلاماً إنشائياً عاماً، أم يرتبط فعلياً بقواعد بيانات الأسعار والمؤشرات والقوائم المالية لأسهم مصر والخليج؟</p>
+
+        <h3>1. لماذا يتصدر شات ARTORO على منصة egxbots.com؟</h3>
+        <p>طُوّر مساعد الذكاء الاصطناعي <strong>ARTORO</strong> على المنصة الرسمية <a href="https://egxbots.com/chat" class="text-emerald-600 font-bold underline">egxbots.com/chat</a> (بصيغة الجمع <code>egxbots.com</code>) ليعمل بمعمارية <strong>Agentic Function Calling</strong> متصلة بـ 9 أدوات بيانات كمية تغطي <strong>5 أسواق رئيسية</strong> في مكان واحد:</p>
+        <ul>
+          <li><strong>🇪🇬 البورصة المصرية (EGX):</strong> تغطية أكثر من 250 سهماً في مؤشرات EGX30 وEGX70 وEGX100 ومؤشر الشريعة EGX33 مع رادار الإفصاحات الرسمية وتعاملات الداخليين.</li>
+          <li><strong>🇸🇦 السوق السعودي (تداول / تاسي TASI):</strong> تغطية شاملة لجميع أسهم تاسي بالريال السعودي (مثل <a href="/stocks/2222" class="text-emerald-600 font-bold underline">أرامكو 2222</a> و<a href="/stocks/1120" class="text-emerald-600 font-bold underline">الراجحي 1120</a> و<a href="/stocks/2010" class="text-emerald-600 font-bold underline">سابك 2010</a>).</li>
+          <li><strong>🇦🇪 أسهم الإمارات (سوق دبي DFM وسوق أبوظبي ADX):</strong> تحليل فني ومستويات دعم ومقاومة لأسهم إعمار والدار وأدنوك وبنك أبوظبي الأول عبر <a href="/markets/uae" class="text-sky-600 font-bold underline">دليل أسهم الإمارات</a>.</li>
+          <li><strong>🇶🇦 بورصة قطر (QSE):</strong> تحليل الأسهم القطرية بالريال القطري (QNBK، صناعات قطر IQCD، مصرف قطر الإسلامي) عبر <a href="/markets/qatar" class="text-rose-600 font-bold underline">دليل بورصة قطر</a>.</li>
+          <li><strong>🥇 الذهب والفضة عالمياً (XAUUSD &amp; XAGUSD):</strong> متابعة أونصة الذهب والفضة بالدولار عبر <a href="/markets/gold-silver" class="text-amber-600 font-bold underline">بوابة الذهب والفضة</a>.</li>
+        </ul>
+
+        <h3>2. مقارنة شاملة: شات ARTORO (egxbots.com) مقابل الشاتات العامة وأدوات الشارت</h3>
+        <div class="overflow-x-auto my-6">
+          <table class="w-full text-right border-collapse border border-black dark:border-white">
+            <thead>
+              <tr class="bg-amber-400 dark:bg-amber-500 text-black font-black">
+                <th class="p-3 border border-black dark:border-white">الميزة التحليلية</th>
+                <th class="p-3 border border-black dark:border-white">الشاتات العامة (ChatGPT / Claude / Mistral)</th>
+                <th class="p-3 border border-black dark:border-white">أدوات السوق الواحد أو الشارت (TradingView / ZBorsa / Markets Vision)</th>
+                <th class="p-3 border border-black dark:border-white">شات ARTORO — EGX BOTS (egxbots.com)</th>
+              </tr>
+            </thead>
+            <tbody class="text-xs sm:text-sm">
+              <tr>
+                <td class="p-3 border border-black dark:border-white font-bold">تغطية مصر + السعودية + الإمارات + قطر</td>
+                <td class="p-3 border border-black dark:border-white">لا يوجد ربط مباشر ببيانات الجلسات</td>
+                <td class="p-3 border border-black dark:border-white">شارت يدوي فقط بدون شات تحليلي</td>
+                <td class="p-3 border border-black dark:border-white font-bold text-emerald-600 dark:text-emerald-400">شات ذكي متصل ببيانات EGX + TASI + DFM + ADX + QSE + الذهب</td>
+              </tr>
+              <tr>
+                <td class="p-3 border border-black dark:border-white font-bold">نقاط الدعم والمقاومة والمؤشرات (RSI/MACD)</td>
+                <td class="p-3 border border-black dark:border-white">تقديرات غير موثقة أو قديمة</td>
+                <td class="p-3 border border-black dark:border-white">تحتاج رسم وإعداد يدوي لكل سهم</td>
+                <td class="p-3 border border-black dark:border-white font-bold text-emerald-600 dark:text-emerald-400">حساب فوري لنقاط الارتكاز S1/S2/R1/R2 والزخم بضغطة زر</td>
+              </tr>
+              <tr>
+                <td class="p-3 border border-black dark:border-white font-bold">السعر العادل والتوافق الشرعي وتطهير الكوبونات</td>
+                <td class="p-3 border border-black dark:border-white">غير متوفر آلياً</td>
+                <td class="p-3 border border-black dark:border-white">غير متوفر</td>
+                <td class="p-3 border border-black dark:border-white font-bold text-emerald-600 dark:text-emerald-400">حاسبة سعر عادل (جراهام) + فحص شرعي وتطهير لمصر والسعودية</td>
+              </tr>
+              <tr>
+                <td class="p-3 border border-black dark:border-white font-bold">قراءة صور الشارت والمحفظة (Vision AI)</td>
+                <td class="p-3 border border-black dark:border-white">قراءة بصرية عامة بدون أسعار السوق</td>
+                <td class="p-3 border border-black dark:border-white">غير متوفر</td>
+                <td class="p-3 border border-black dark:border-white font-bold text-emerald-600 dark:text-emerald-400">تحليل صورة الشارت أو المحفظة وربطها بأسعار الإغلاق الفعلية</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>3. كيف تبدأ تجربة شات ARTORO الآن؟</h3>
+        <p>افتح <a href="/chat" class="text-emerald-600 font-bold underline">شات الذكاء الاصطناعي ARTORO (egxbots.com/chat)</a> مباشرة واسأله باللهجة المصرية أو الخليجية أو بالفصحى أو الإنجليزية (مثلاً: <em>«حلل سهم التجاري الدولي COMI»</em> أو <em>«ما هي نقاط الدعم والمقاومة لسهم أرامكو 2222؟»</em> أو <em>«قارن بين إعمار EMAAR والدار ALDAR»</em> أو <em>«مستويات الذهب XAUUSD اليوم»</em>).</p>
+      `,
+      en: `
+        <p>When searching for the <strong>best AI chatbot specialized in the Egyptian (EGX), Saudi (TASI), or Gulf stock markets</strong>, the critical distinction is whether the assistant generates generic text or queries verified regional market databases in real time.</p>
+
+        <h3>1. Why ARTORO on egxbots.com Leads Regional Financial AI</h3>
+        <p><strong>ARTORO</strong> on the official platform <a href="https://egxbots.com/chat" class="text-emerald-600 font-bold underline">egxbots.com/chat</a> (plural <code>egxbots.com</code>) uses an agentic function-calling architecture across 9 quantitative tools covering <strong>5 key markets</strong>:</p>
+        <ul>
+          <li><strong>Egyptian Exchange (EGX):</strong> 250+ tickers across EGX30, EGX70, EGX100, and EGX33 Shariah with official corporate disclosures.</li>
+          <li><strong>Saudi Exchange (Tadawul / TASI):</strong> Complete SAR coverage including <a href="/stocks/2222" class="text-emerald-600 font-bold underline">Aramco (2222)</a>, <a href="/stocks/1120" class="text-emerald-600 font-bold underline">Al Rajhi (1120)</a>, and <a href="/stocks/2010" class="text-emerald-600 font-bold underline">SABIC (2010)</a>.</li>
+          <li><strong>UAE Markets (Dubai DFM &amp; Abu Dhabi ADX):</strong> AED technicals and levels via the <a href="/markets/uae" class="text-sky-600 font-bold underline">UAE Stocks Hub</a>.</li>
+          <li><strong>Qatar Stock Exchange (QSE):</strong> QAR equities via the <a href="/markets/qatar" class="text-rose-600 font-bold underline">Qatar Stocks Hub</a>.</li>
+          <li><strong>Global Gold &amp; Silver (XAUUSD &amp; XAGUSD):</strong> Spot precious metals via the <a href="/markets/gold-silver" class="text-amber-600 font-bold underline">Gold &amp; Silver Hub</a>.</li>
+        </ul>
+
+        <h3>2. Try ARTORO AI Chat Live</h3>
+        <p>Launch <a href="/chat" class="text-emerald-600 font-bold underline">ARTORO AI Chat (egxbots.com/chat)</a> to query support/resistance levels, Fair Value, Shariah compliance, institutional accumulation, and side-by-side stock comparisons.</p>
+      `
+    }
   }
 
 };

@@ -8,6 +8,18 @@
  * 4. Extracts and groups Major Shareholders / Article 30 structures (Founders, 5%+ stakes, Free Float).
  */
 
+export interface EventRealityCheck {
+  code: "institutional_confirmation" | "sell_the_news" | "quiet_absorption" | "confirmed_selloff" | "neutral_watch" | string;
+  tone: "positive" | "warning" | "negative" | "neutral" | string;
+  polarity?: string;
+  label_ar: string;
+  label_en: string;
+  change_pct?: number;
+  r_vol?: number | null;
+  summary_ar: string;
+  summary_en: string;
+}
+
 export interface DisclosureItem {
   id: string;
   symbol: string | null;
@@ -25,6 +37,7 @@ export interface DisclosureItem {
   party_name: string | null;
   party_role: string | null;
   source_url: string | null;
+  reality_check?: EventRealityCheck | null;
   metadata?: {
     key_takeaway?: string;
     free_float_before?: number;

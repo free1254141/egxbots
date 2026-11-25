@@ -662,9 +662,11 @@ def test_optimizer_relaxation_preserves_excluded_zero_caps_and_prompt_param() ->
         AssetInput(symbol="TH3", price=10.0, sector="D", max_weight_override=0.15, expected_score=0.5),
     ]
     cov, _, _ = estimate_covariance_matrix(assets)
-    w, _, _, _ = solve_optimal_weights(assets, cov, max_weight=0.45, max_sector_weight=0.60, min_cash_weight=0.0)
+    w, _, _, notes = solve_optimal_weights(assets, cov, max_weight=0.45, max_sector_weight=0.60, min_cash_weight=0.0)
     assert w[0] == pytest.approx(0.0, abs=1e-6)
-    assert sum(w[1:]) == pytest.approx(1.0, abs=1e-4)
+    # Explicit max_weight_override caps (0.15 each) are preserved; remaining 55% absorbed into Cash Reserve
+    assert sum(w[1:]) == pytest.approx(0.45, abs=1e-4)
+    assert any("كاش احتياطي" in n for n in notes)
 
     captured: dict[str, object] = {}
 
@@ -974,6 +976,7 @@ def test_optimize_portfolio_overweight_watch_and_thin_liquidity_never_wipes_caps
         res = _sync_optimize_portfolio(user_id="u-thin-watch", use_my_portfolio=True, objective="balanced")
 
     alloc_map = {row["symbol"]: row for row in res["optimization"]["allocations"]}
-    # Thin-liquidity ABUK must keep its 15% cap intact (never wiped back to 25% by solver relaxation)
+    # Thin-liquidity ABUK must keep its 15% cap intact, and full-downtrend ACTF must NEVER be auto-bought
     assert alloc_map["ABUK"]["targetWeightPct"] <= 15.1
-    assert res["optimization"]["constraints"]["relaxationNotes"] == []
+    assert alloc_map["ACTF"]["action"] != "BUY"
+    assert any("كاش احتياطي" in n for n in res["optimization"]["constraints"]["relaxationNotes"])
