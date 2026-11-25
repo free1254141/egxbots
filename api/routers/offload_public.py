@@ -920,19 +920,16 @@ async def api_public_stock_page_data(
 
 # ── Fair Value Report ────────────────────────────────────────────────────────
 
+from api.fair_value_engine import (
+    compute_unified_fair_value,
+    default_sector_multiples as _default_sector_multiples,
+    normalize_fundamentals_for_valuation as _normalize_fv_fundamentals,
+    resolve_sector_ar as _resolve_sector_ar_unified,
+)
+
+
 def _resolve_sector_ar(symbol: str, raw_sector: Any, raw_industry: Any) -> str:
-    canonical = CANONICAL_EGX_STOCK_NAMES.get(symbol, {}).get("sector")
-    if canonical:
-        return canonical
-    ind_k = str(raw_industry or "").strip().lower()
-    if ind_k and ind_k in _SECTOR_AR_MAP:
-        return _SECTOR_AR_MAP[ind_k]
-    sec_k = str(raw_sector or "").strip().lower()
-    if sec_k and sec_k in _SECTOR_AR_MAP:
-        return _SECTOR_AR_MAP[sec_k]
-    if raw_sector and re.search(r"[\u0600-\u06FF]", str(raw_sector)):
-        return str(raw_sector)
-    return "قطاعات متنوعة"
+    return _resolve_sector_ar_unified(symbol, raw_sector, raw_industry)
 
 
 def _median(values: List[float], fallback: float) -> float:
@@ -963,223 +960,15 @@ def _compute_single_fair_value(
     sector_median_pb: float,
     market: str,
 ) -> Dict[str, Any]:
-    sym = symbol.strip().upper()
-    is_saudi = market == "tasi" or is_saudi_symbol(sym)
-    is_uae = market == "uae"
-    is_qatar = market == "qatar"
-    resolved_market = "uae" if is_uae else ("qatar" if is_qatar else ("tasi" if is_saudi else "egx"))
-    currency_ar = "د.إ" if is_uae else ("ر.ق" if is_qatar else ("ر.س" if is_saudi else "ج.م"))
-    currency_short = "د.إ" if is_uae else ("ر.ق" if is_qatar else ("ر" if is_saudi else "ج"))
-    market_title = "الإماراتي" if is_uae else ("القطري" if is_qatar else ("السعودي" if is_saudi else "المصري"))
-    market_graham = "لسوق الإمارات" if is_uae else ("لبورصة قطر" if is_qatar else ("للسوق السعودي" if is_saudi else "للبورصة المصرية"))
-    row = fund_row or {}
-    data = row.get("data") if isinstance(row.get("data"), dict) else {}
-    tech = ind or {}
-
-    canonical = CANONICAL_EGX_STOCK_NAMES.get(sym, {})
-    saudi_ar = SAUDI_STOCK_NAMES_AR.get(sym) if is_saudi else None
-    name_ar = canonical.get("name_ar") or row.get("name_ar") or data.get("name_ar") or saudi_ar or row.get("name") or data.get("name") or sym
-    name_en = canonical.get("name_en") or row.get("name") or data.get("name") or sym
-    sector_ar = _resolve_sector_ar(sym, data.get("sector"), data.get("industry"))
-
-    sec_pe = round(sector_median_pe, 2)
-    sec_pb = round(sector_median_pb, 2)
-    raw_pe = _finite(data.get("peRatio") if data.get("peRatio") is not None else data.get("pe_ratio"))
-    raw_fwd_pe = _finite(data.get("forwardPe") if data.get("forwardPe") is not None else data.get("forward_pe"))
-    raw_pb = _finite(data.get("pbRatio") if data.get("pbRatio") is not None else data.get("pb_ratio"))
-
-    eps = _finite(data.get("eps"))
-    if (eps is None or eps == 0) and raw_pe and raw_pe > 0 and close > 0:
-        eps = round(close / raw_pe, 4)
-    bvps = _finite(
-        data.get("bookValuePerShare")
-        or data.get("book_value_per_share")
-        or data.get("book_value")
-        or data.get("bvps")
+    return compute_unified_fair_value(
+        symbol=symbol,
+        close=close,
+        fund_row=fund_row,
+        ind=ind,
+        sector_median_pe=sector_median_pe,
+        sector_median_pb=sector_median_pb,
+        market=market,
     )
-    if (bvps is None or bvps == 0) and raw_pb and raw_pb > 0 and close > 0:
-        bvps = round(close / raw_pb, 4)
-
-    # Guard against unadjusted pre-split EPS/BVPS in Yahoo fundamentals (e.g. POUL 4:1 split)
-    sp_adj: Optional[float] = None
-    if bvps is not None and bvps > 0 and raw_pb is not None and raw_pb > 0 and close > 0:
-        implied_pre_px = bvps * raw_pb
-        if (implied_pre_px / close) > 1.85:
-            sp_adj = close / implied_pre_px
-    elif eps is not None and eps > 0 and raw_pe is not None and raw_pe > 0 and close > 0:
-        implied_pre_px = eps * raw_pe
-        if (implied_pre_px / close) > 1.85:
-            sp_adj = close / implied_pre_px
-    if sp_adj is not None and 0.05 < sp_adj < 0.55:
-        if eps is not None:
-            eps = round(eps * sp_adj, 4)
-        if bvps is not None:
-            bvps = round(bvps * sp_adj, 4)
-
-    eff_eps = eps if (eps is not None and eps > 0) else None
-    if raw_fwd_pe is not None and 2.0 <= raw_fwd_pe <= 60.0 and close > 0:
-        fwd_eps = close / raw_fwd_pe
-        if eff_eps is not None and eff_eps > 0:
-            fwd_eps_clamped = _clamp(fwd_eps, eff_eps * 0.4, eff_eps * 3.0)
-            eff_eps = round(0.50 * eff_eps + 0.50 * fwd_eps_clamped, 4)
-        else:
-            eff_eps = round(fwd_eps, 4)
-
-    pe_ratio = round(close / eps, 2) if (eps and eps > 0) else (round(raw_pe, 2) if raw_pe else None)
-    pb_ratio = round(close / bvps, 2) if (bvps and bvps > 0) else (round(raw_pb, 2) if raw_pb else None)
-    net_inc = _finite(data.get("netIncome") if data.get("netIncome") is not None else data.get("net_income"))
-    roe_chk = _finite(data.get("roe"))
-    is_loss_making = bool((eps is not None and eps <= 0) or (net_inc is not None and net_inc < 0) or (roe_chk is not None and roe_chk < 0))
-
-    ema200_val = _finite(tech.get("ema_200")) or _finite(tech.get("sma_200"))
-    vwap20_val = _finite(tech.get("vwap_20")) or _finite(tech.get("ema_50"))
-
-    fair_value = close
-    graham_value: Optional[float] = None
-    model_type = "quant_vwap"
-    model_label_ar = "التوازن الكمي (VWAP + EMA200)"
-    eq_ar = ""
-    sub_ar = ""
-    steps_ar: List[str] = []
-
-    is_financial = ("بنوك" in sector_ar) or ("خدمات مالية" in sector_ar) or ("استثمار" in sector_ar)
-    is_tech = ("تكنولوجيا" in sector_ar) or ("مدفوعات" in sector_ar) or ("اتصالات" in sector_ar)
-
-    if eff_eps is not None and eff_eps > 0 and bvps is not None and bvps > 0:
-        eps_r = round(eff_eps, 2)
-        bvps_r = round(bvps, 2)
-        pe_fair = round(eff_eps * sec_pe, 2)
-        pb_fair = round(bvps * sec_pb, 2)
-        if is_financial:
-            fair_value = round(_clamp(0.55 * pe_fair + 0.45 * pb_fair, close * 0.55, close * 1.65), 2)
-            model_type = "graham_fundamental"
-            model_label_ar = "مضاعفات القطاع المالي (P/E + P/B)"
-            eq_ar = "السعر العادل = (55% × هدف مكرر ربحية القطاع) + (45% × هدف القيمة الدفترية للقطاع)"
-            sub_ar = f"(0.55 × {pe_fair}) + (0.45 × {pb_fair}) = {fair_value} {currency_ar}"
-            steps_ar = [
-                f"1️⃣ تقييم مضاعف ربحية القطاع ({sector_ar}): ربحية السهم ({eps_r} {currency_short}) × وسيط مكرر القطاع ({sec_pe}x) = {pe_fair} {currency_ar} (وزن 55%)",
-                f"2️⃣ تقييم مضاعف القيمة الدفترية للقطاع: القيمة الدفترية ({bvps_r} {currency_short}) × وسيط مضاعف القطاع ({sec_pb}x) = {pb_fair} {currency_ar} (وزن 45%)",
-                f"✅ السعر العادل المعتمد = {fair_value} {currency_ar} (تقييم مؤسسي متوازن للقطاع المالي بدون تضخيم).",
-            ]
-        elif is_tech:
-            fair_value = round(_clamp(0.70 * pe_fair + 0.30 * pb_fair, close * 0.55, close * 1.65), 2)
-            model_type = "graham_fundamental"
-            model_label_ar = "مضاعفات قطاع التكنولوجيا والنمو الرقمي (P/E + P/B)"
-            eq_ar = "السعر العادل = (70% × هدف مكرر ربحية قطاع التكنولوجيا) + (30% × هدف مضاعف القيمة الدفترية)"
-            sub_ar = f"(0.70 × {pe_fair}) + (0.30 × {pb_fair}) = {fair_value} {currency_ar}"
-            steps_ar = [
-                f"1️⃣ تقييم مضاعف ربحية قطاع التكنولوجيا ({sector_ar}): ربحية السهم ({eps_r} {currency_short}) × وسيط مكرر القطاع ({sec_pe}x) = {pe_fair} {currency_ar} (وزن 70% للنمو الرقمي)",
-                f"2️⃣ تقييم مضاعف القيمة الدفترية: القيمة الدفترية ({bvps_r} {currency_short}) × وسيط مضاعف القطاع ({sec_pb}x) = {pb_fair} {currency_ar} (وزن 30%)",
-                f"✅ السعر العادل المعتمد = {fair_value} {currency_ar} (تقييم متزن لشركات التكنولوجيا والنمو بدون خفضها ظلماً بنماذج الأصول المادية).",
-            ]
-        else:
-            mult = round(_clamp(sec_pe * sec_pb, 8.0, 14.0), 2)
-            raw_graham = math.sqrt(mult * eff_eps * bvps)
-            graham_value = round(raw_graham, 2)
-            fair_value = round(_clamp(0.40 * raw_graham + 0.35 * pe_fair + 0.25 * pb_fair, close * 0.55, close * 1.65), 2)
-            model_type = "graham_fundamental"
-            model_label_ar = f"نموذج جراهام {market_title} + مضاعف القطاع"
-            eq_ar = "السعر العادل = (40% × قيمة جراهام المعدلة) + (35% × هدف مكرر ربحية القطاع) + (25% × هدف القيمة الدفترية للقطاع)"
-            sub_ar = f"(0.40 × {graham_value}) + (0.35 × {pe_fair}) + (0.25 × {pb_fair}) = {fair_value} {currency_ar}"
-            steps_ar = [
-                f"1️⃣ معادلة بنجامين جراهام المعدلة {market_graham}: √(مضاعف السوق {mult} × ربحية السهم {eps_r} × القيمة الدفترية {bvps_r}) = {graham_value} {currency_ar} (وزن 40%)",
-                f"2️⃣ تقييم مضاعف ربحية القطاع ({sector_ar}): ربحية السهم ({eps_r}) × وسيط مكرر القطاع ({sec_pe}x) = {pe_fair} {currency_ar} (وزن 35%)",
-                f"3️⃣ تقييم مضاعف القيمة الدفترية للقطاع: القيمة الدفترية ({bvps_r}) × وسيط مضاعف القطاع ({sec_pb}x) = {pb_fair} {currency_ar} (وزن 25%)",
-                f"✅ السعر العادل المرجح للسهم = {fair_value} {currency_ar} (مع صمام أمان سعري للمحافظة على واقعية ومصداقية التقييم).",
-            ]
-    elif eff_eps is not None and eff_eps > 0:
-        eps_r = round(eff_eps, 2)
-        pe_fair = round(eff_eps * sec_pe, 2)
-        fair_value = round(_clamp(eff_eps * sec_pe, close * 0.50, close * 1.65), 2)
-        model_type = "pe_multiple"
-        model_label_ar = "مضاعف الربحية القطاعي (P/E)"
-        eq_ar = "السعر العادل = ربحية السهم (EPS) × وسيط مضاعف ربحية القطاع (Sector P/E)"
-        sub_ar = f"{eps_r} × {sec_pe} = {fair_value} {currency_ar}"
-        steps_ar = [
-            f"1️⃣ ربحية السهم السنوية المحققة (EPS) = {eps_r} {currency_ar}",
-            f"2️⃣ وسيط مضاعف الربحية لقطاع ({sector_ar}) = {sec_pe} مرة",
-            f"✅ السعر العادل = {eps_r} × {sec_pe} = {pe_fair} {currency_ar} -> المعتمد {fair_value} {currency_ar}.",
-        ]
-    elif bvps is not None and bvps > 0:
-        bvps_r = round(bvps, 2)
-        if is_loss_making:
-            distress_pb = round(min(1.0, max(0.55, sec_pb * 0.45)), 2)
-            pb_fair = round(bvps * distress_pb, 2)
-            fair_value = round(_clamp(pb_fair, close * 0.45, close * 0.98), 2)
-            model_type = "pb_distressed"
-            model_label_ar = "قيمة دفترية مخفضة (شركة خاسرة)"
-            eq_ar = "السعر العادل التحفظي = القيمة الدفترية (BVPS) × مضاعف خصم الخسائر (بحد أقصى 98% من السعر الحالي)"
-            sub_ar = f"{bvps_r} × {distress_pb} = {fair_value} {currency_ar}"
-            steps_ar = [
-                f"1️⃣ الشركة تسجّل خسائر حالياً: القيمة الدفترية للسهم (BVPS) = {bvps_r} {currency_ar}",
-                f"2️⃣ تطبيق معامل خصم الخسائر المتحفظ = {distress_pb}x بدلاً من مضاعف القطاع غير المربح ({sec_pb}x)",
-                f"✅ السعر العادل التحفظي = {pb_fair} {currency_ar} -> المعتمد {fair_value} {currency_ar}.",
-            ]
-        else:
-            pb_fair = round(bvps * sec_pb, 2)
-            fair_value = round(_clamp(bvps * sec_pb, close * 0.50, close * 1.65), 2)
-            model_type = "pb_multiple"
-            model_label_ar = "مضاعف القيمة الدفترية (P/B)"
-            eq_ar = "السعر العادل = القيمة الدفترية للسهم (BVPS) × وسيط مضاعف القيمة الدفترية للقطاع (Sector P/B)"
-            sub_ar = f"{bvps_r} × {sec_pb} = {fair_value} {currency_ar}"
-            steps_ar = [
-                f"1️⃣ القيمة الدفترية للسهم من حقوق الملكية (BVPS) = {bvps_r} {currency_ar}",
-                f"2️⃣ وسيط مضاعف القيمة الدفترية لقطاع ({sector_ar}) = {sec_pb} مرة",
-                f"✅ السعر العادل = {bvps_r} × {sec_pb} = {pb_fair} {currency_ar} -> المعتمد {fair_value} {currency_ar}.",
-            ]
-    else:
-        ema200_v = round(ema200_val if ema200_val is not None else close, 2)
-        vwap20_v = round(vwap20_val if vwap20_val is not None else close, 2)
-        fair_value = round(_clamp(0.6 * ema200_v + 0.4 * vwap20_v, close * 0.60, close * 1.50), 2)
-        model_type = "quant_vwap"
-        model_label_ar = "التوازن الكمي (VWAP + EMA200)"
-        eq_ar = "السعر العادل الكمي = (60% × المتوسط الأسي EMA200) + (40% × متوسط التكلفة المرجح بالسيولة VWAP20)"
-        sub_ar = f"(0.60 × {ema200_v}) + (0.40 × {vwap20_v}) = {fair_value} {currency_ar}"
-        steps_ar = [
-            f"1️⃣ متوسط التوازن السعري طويل الأجل (EMA 200) = {ema200_v} {currency_ar} (وزن 60%)",
-            f"2️⃣ متوسط سعر التكلفة المرجح بالسيولة لآخر 20 جلسة (VWAP 20) = {vwap20_v} {currency_ar} (وزن 40%)",
-            f"✅ السعر العادل التوازني = (0.60 × {ema200_v}) + (0.40 × {vwap20_v}) = {fair_value} {currency_ar}.",
-        ]
-
-    upside = round(((fair_value - close) / close) * 100.0, 2) if close > 0 else 0.0
-    status = "undervalued" if upside >= 15 else ("overvalued" if upside <= -12 else "fair")
-    chg = _finite(tech.get("change_pct"))
-    dy = _finite(data.get("dividendYield"))
-    roe = _finite(data.get("roe"))
-    rsi14 = _finite(tech.get("rsi_14"))
-
-    return {
-        "symbol": sym,
-        "nameAr": name_ar,
-        "nameEn": name_en,
-        "sectorAr": sector_ar,
-        "logoUrl": data.get("logoUrl") if isinstance(data.get("logoUrl"), str) else None,
-        "currentPrice": round(close, 2),
-        "changePct": round(chg, 2) if chg is not None else None,
-        "fairValue": fair_value,
-        "grahamValue": graham_value,
-        "upsidePct": upside,
-        "status": status,
-        "modelType": model_type,
-        "modelLabelAr": model_label_ar,
-        "formulaEquationAr": eq_ar,
-        "formulaSubstitutionAr": sub_ar,
-        "formulaStepsAr": steps_ar,
-        "eps": round(eps, 2) if eps is not None else None,
-        "bvps": round(bvps, 2) if bvps is not None else None,
-        "peRatio": pe_ratio,
-        "pbRatio": pb_ratio,
-        "sectorMedianPe": sec_pe,
-        "sectorMedianPb": sec_pb,
-        "dividendYield": round(dy, 2) if dy is not None else None,
-        "roe": round(roe, 2) if roe is not None else None,
-        "marketCap": _finite(data.get("marketCap")),
-        "rsi14": round(rsi14, 1) if rsi14 is not None else None,
-        "ema200": round(ema200_val, 2) if ema200_val is not None else None,
-        "vwap20": round(vwap20_val, 2) if vwap20_val is not None else None,
-        "isSharia": is_sharia_compliant(sym, resolved_market),
-        "date": str(tech.get("date"))[:10] if tech.get("date") else None,
-    }
 
 
 _MARKET_CURRENCY_MAP = {
@@ -1221,7 +1010,7 @@ def _build_fair_value_report(market: str) -> Dict[str, Any]:
             .select("symbol,date,close,volume,ema_50,ema_200,sma_200,vwap_20,change_pct,rsi_14")
             .in_("exchange", exchanges)
             .order("date", desc=True)
-            .limit(400)
+            .limit(600)
             .execute()
         )
 
@@ -1265,30 +1054,38 @@ def _build_fair_value_report(market: str) -> Dict[str, Any]:
     sector_pbs: Dict[str, List[float]] = {}
     all_pes: List[float] = []
     all_pbs: List[float] = []
+    seen_for_medians: set[str] = set()
 
     for ind in ind_rows:
         sym = str(ind.get("symbol") or "").strip().upper()
         close = _finite(ind.get("close"))
-        if not sym or not close or close <= 0:
+        if not sym or not close or close <= 0 or sym in seen_for_medians:
             continue
+        seen_for_medians.add(sym)
         f_row = fund_map.get(sym) or {}
-        data = f_row.get("data") if isinstance(f_row.get("data"), dict) else {}
-        if data.get("isListed") is False:
+        raw_data = f_row.get("data") if isinstance(f_row.get("data"), dict) else {}
+        if raw_data.get("isListed") is False:
             continue
-        sec_ar = _resolve_sector_ar(sym, data.get("sector"), data.get("industry"))
-        eps = _finite(data.get("eps"))
-        bvps = _finite(data.get("bookValuePerShare"))
-        pe = (close / eps) if (eps and eps > 0) else _finite(data.get("peRatio"))
-        pb = (close / bvps) if (bvps and bvps > 0) else _finite(data.get("pbRatio"))
-        if pe is not None and 1.5 < pe <= 45:
+        norm_data, _ = _normalize_fv_fundamentals(raw_data, close, symbol=sym, market=norm_market)
+        sec_ar = _resolve_sector_ar(sym, norm_data.get("sector"), norm_data.get("industry"))
+        eps = _finite(norm_data.get("eps"))
+        bvps = _finite(norm_data.get("bookValuePerShare"))
+        net_inc = _finite(norm_data.get("netIncome"))
+        roe_v = _finite(norm_data.get("roe"))
+        loss_mk = bool((eps is not None and eps <= 0) or (net_inc is not None and net_inc < 0) or (roe_v is not None and roe_v < 0))
+        pe = (close / eps) if (not loss_mk and eps and eps > 0) else (_finite(norm_data.get("peRatio")) if not loss_mk else None)
+        pb = (close / bvps) if (bvps and bvps > 0) else _finite(norm_data.get("pbRatio"))
+        if pe is not None and 2.0 < pe <= 35.0:
             sector_pes.setdefault(sec_ar, []).append(pe)
             all_pes.append(pe)
-        if pb is not None and 0.25 < pb <= 12:
+        if not loss_mk and pb is not None and 0.30 < pb <= 8.0:
             sector_pbs.setdefault(sec_ar, []).append(pb)
             all_pbs.append(pb)
 
-    global_pe = _clamp(_median(all_pes, 9.0), 7.5, 14.0) if len(all_pes) >= 5 else 9.0
-    global_pb = _clamp(_median(all_pbs, 1.75), 1.45, 3.0) if len(all_pbs) >= 5 else 1.75
+    max_pe_cap = 18.0 if norm_market == "tasi" else 13.5
+    max_pb_cap = 3.0 if norm_market == "tasi" else 2.6
+    global_pe = _clamp(_median(all_pes, 9.5), 7.0, max_pe_cap) if len(all_pes) >= 5 else (13.0 if norm_market == "tasi" else 9.5)
+    global_pb = _clamp(_median(all_pbs, 1.75), 1.35, max_pb_cap) if len(all_pbs) >= 5 else (2.1 if norm_market == "tasi" else 1.75)
 
     items: List[Dict[str, Any]] = []
     latest_session: Optional[str] = None
@@ -1307,10 +1104,12 @@ def _build_fair_value_report(market: str) -> Dict[str, Any]:
         if rdate and (not latest_session or rdate > latest_session):
             latest_session = rdate
         sec_ar = _resolve_sector_ar(sym, data.get("sector"), data.get("industry"))
+        def_pe, def_pb = _default_sector_multiples(sec_ar, norm_market)
         p_pes = sector_pes.get(sec_ar) or []
         p_pbs = sector_pbs.get(sec_ar) or []
-        s_pe = round(_clamp(_median(p_pes, global_pe) if len(p_pes) >= 2 else global_pe, 6.0, 15.0), 2)
-        s_pb = round(_clamp(_median(p_pbs, global_pb) if len(p_pbs) >= 2 else global_pb, 1.0, 3.2), 2)
+        min_pe_floor = 8.5 if ("بنوك" in sec_ar and "غير مصرفية" not in sec_ar) else 7.0
+        s_pe = round(_clamp(_median(p_pes, def_pe) if len(p_pes) >= 3 else def_pe, min_pe_floor, max_pe_cap), 2)
+        s_pb = round(_clamp(_median(p_pbs, def_pb) if len(p_pbs) >= 3 else def_pb, 1.15, max_pb_cap), 2)
         items.append(
             _compute_single_fair_value(
                 symbol=sym,

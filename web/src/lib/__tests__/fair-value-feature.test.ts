@@ -64,28 +64,74 @@ describe("3-Tier Fair Value Engine & Feature Tools", () => {
             expect(result.formulaEquationAr).toContain("P/E");
         });
 
-        test("Tier 2: P/B Sector Multiple when EPS <= 0 but BV > 0", () => {
+        test("Tier 2: P/B Distressed Discount when EPS <= 0 (loss-making) and BV > 0", () => {
             const result = computeSingleStockFairValue({
-                symbol: "TEST2",
-                close: 5.0,
+                symbol: "COSG",
+                close: 1.33,
                 fundRow: {
-                    name_ar: "شركة أصول",
+                    name_ar: "القاهرة للزيوت والصابون",
                     data: {
-                        eps: -0.5,
-                        bookValuePerShare: 8.0,
-                        sector: "عقارات",
+                        eps: -0.0638,
+                        roe: -9.02,
+                        bookValuePerShare: 0.7317,
+                        sector: "Consumer Non-Durables",
+                        industry: "Household/Personal Care",
                     },
                 },
                 fundData: {
-                    eps: -0.5,
-                    bookValuePerShare: 8.0,
-                    sector: "عقارات",
+                    eps: -0.0638,
+                    roe: -9.02,
+                    bookValuePerShare: 0.7317,
+                    sector: "Consumer Non-Durables",
+                    industry: "Household/Personal Care",
                 },
             });
 
-            expect(result.modelType).toBe("pb_multiple");
-            expect(result.fairValue).toBeGreaterThan(0);
+            expect(result.modelType).toBe("pb_distressed");
+            expect(result.status).toBe("overvalued");
+            expect(result.fairValue).toBeCloseTo(0.55, 2);
             expect(result.formulaEquationAr).toContain("P/B");
+            expect(result.sectorAr).toBe("أغذية وسلع استهلاكية");
+        });
+
+        test("Overvalued speculative stock (ZEOT) is NOT artificially propped up to 0.55*close and formula sum matches", () => {
+            const result = computeSingleStockFairValue({
+                symbol: "ZEOT",
+                close: 12.59,
+                fundData: {
+                    eps: 0.33,
+                    bookValuePerShare: 1.28,
+                    roe: 25.44,
+                    sector: "Process Industries",
+                    industry: "Agricultural Commodities/Milling",
+                },
+            });
+
+            expect(result.modelType).toBe("graham_fundamental");
+            expect(result.sectorAr).toBe("أغذية ومطاحن وزيوت");
+            expect(result.fairValue).toBeLessThan(4.5);
+            expect(result.formulaSubstitutionAr).toContain(`= ${result.fairValue} ج.م`);
+        });
+
+        test("USD-traded EGX stock with EGP fundamentals (NDRL) converts EPS and BVPS cleanly into USD", () => {
+            const result = computeSingleStockFairValue({
+                symbol: "NDRL",
+                close: 4.69,
+                fundData: {
+                    currency: "EGP",
+                    eps: 99.84,
+                    bookValuePerShare: 607.6506,
+                    peRatio: 2.53,
+                    pbRatio: 0.39,
+                    roe: 18.3,
+                    sector: "Industrial Services",
+                },
+            });
+
+            expect(result.currencySymbol).toBe("$");
+            expect(result.eps).toBeCloseTo(1.85, 1);
+            expect(result.bvps).toBeLessThan(15.0);
+            expect(result.grahamValue).toBeLessThan(25.0);
         });
 
         test("Tier 3: Quantitative VWAP + EMA200 when no fundamentals", () => {

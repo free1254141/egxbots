@@ -792,7 +792,7 @@ export default function FairValueClient({
                       {isAr ? "سعر الإغلاق الحالي" : "Current Price"}
                     </div>
                     <div className="text-xl font-black font-mono text-zinc-950 dark:text-white mt-0.5">
-                      {selectedChartStock?.currentPrice.toFixed(2)} {curr}
+                      {selectedChartStock?.currentPrice.toFixed(2)} {selectedChartStock?.currencySymbol || curr}
                     </div>
                   </div>
 
@@ -801,7 +801,7 @@ export default function FairValueClient({
                       {isAr ? "السعر العادل المحسوب" : "Calculated Fair Value"}
                     </div>
                     <div className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
-                      {selectedChartStock?.fairValue.toFixed(2)} {curr}
+                      {selectedChartStock?.fairValue.toFixed(2)} {selectedChartStock?.currencySymbol || curr}
                     </div>
                   </div>
                 </div>
@@ -900,9 +900,9 @@ export default function FairValueClient({
                           </div>
 
                           <div className="flex items-center justify-between text-[10px] text-zinc-500 dark:text-zinc-400 mt-1.5 font-mono">
-                            <span>{isAr ? "الحالي:" : "Cur:"} {s.currentPrice.toFixed(2)} {curr}</span>
+                            <span>{isAr ? "الحالي:" : "Cur:"} {s.currentPrice.toFixed(2)} {s.currencySymbol || curr}</span>
                             <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                              {isAr ? "العادل:" : "Fair:"} {s.fairValue.toFixed(2)} {curr}
+                              {isAr ? "العادل:" : "Fair:"} {s.fairValue.toFixed(2)} {s.currencySymbol || curr}
                             </span>
                           </div>
                         </div>
@@ -960,9 +960,9 @@ export default function FairValueClient({
                           </div>
 
                           <div className="flex items-center justify-between text-[10px] text-zinc-500 dark:text-zinc-400 mt-1.5 font-mono">
-                            <span>{isAr ? "الحالي:" : "Cur:"} {s.currentPrice.toFixed(2)} {curr}</span>
+                            <span>{isAr ? "الحالي:" : "Cur:"} {s.currentPrice.toFixed(2)} {s.currencySymbol || curr}</span>
                             <span className="text-rose-600 dark:text-rose-400 font-bold">
-                              {isAr ? "العادل:" : "Fair:"} {s.fairValue.toFixed(2)} {curr}
+                              {isAr ? "العادل:" : "Fair:"} {s.fairValue.toFixed(2)} {s.currencySymbol || curr}
                             </span>
                           </div>
                         </div>
@@ -1397,7 +1397,7 @@ function StockValuationCard({
             {isAr ? "السعر الحالي" : "Current Price"}
           </div>
           <div className="text-lg font-black font-mono text-zinc-900 dark:text-white mt-0.5">
-            {stock.currentPrice.toFixed(2)} {curr}
+            {stock.currentPrice.toFixed(2)} {stock.currencySymbol || curr}
           </div>
         </div>
 
@@ -1406,7 +1406,7 @@ function StockValuationCard({
             {isAr ? "السعر العادل" : "Fair Value Target"}
           </div>
           <div className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
-            {stock.fairValue.toFixed(2)} {curr}
+            {stock.fairValue.toFixed(2)} {stock.currencySymbol || curr}
           </div>
         </div>
       </div>
@@ -1416,7 +1416,9 @@ function StockValuationCard({
         <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
           <span>{isAr ? "تقييم السعر:" : "Valuation Meter:"}</span>
           <span className="font-bold">
-            {stock.status === "undervalued"
+            {stock.modelType === "pb_distressed" || stock.isLossMaking
+              ? isAr ? "شركة خاسرة (دفتري مخفّض) ⚠️" : "Loss-Making (Discounted BV) ⚠️"
+              : stock.status === "undervalued"
               ? isAr ? "أقل من العادل (رخيص) 🟢" : "Undervalued 🟢"
               : stock.status === "overvalued"
               ? isAr ? "متضخم سعرياً 🔴" : "Overvalued 🔴"

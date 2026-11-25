@@ -1642,71 +1642,19 @@ def _normalize_split_adjusted_fundamentals(
     fd: Any,
     close_price: Optional[float],
     split_factor: Optional[float] = None,
+    *,
+    symbol: str = "",
+    market: str = "EGX",
 ) -> Tuple[Dict[str, Any], bool]:
-    """Scale pre-split EPS/BVPS in Yahoo fundamentals so post-split P/E and Graham stay realistic."""
-    if not isinstance(fd, dict):
-        return {}, False
-    out = dict(fd)
-    if not close_price or close_price <= 0:
-        return out, False
-
-    eps = _safe_float(out.get("eps") if out.get("eps") is not None else out.get("trailing_eps"), 4)
-    bvps = _safe_float(
-        out.get("bookValuePerShare")
-        if out.get("bookValuePerShare") is not None
-        else (out.get("book_value_per_share") if out.get("book_value_per_share") is not None else out.get("bvps")),
-        4,
+    """Normalize EGP->USD currency on USD-traded EGX symbols and scale pre-split EPS/BVPS cleanly."""
+    from api.fair_value_engine import normalize_fundamentals_for_valuation
+    return normalize_fundamentals_for_valuation(
+        fd,
+        close_price,
+        symbol=symbol,
+        market=market,
+        split_factor=split_factor,
     )
-    pe = _safe_float(out.get("peRatio") if out.get("peRatio") is not None else out.get("pe_ratio"))
-    pb = _safe_float(out.get("pbRatio") if out.get("pbRatio") is not None else out.get("pb_ratio"))
-
-    adj: Optional[float] = None
-    bvps_ratio = ((bvps * pb) / close_price) if (bvps is not None and bvps > 0 and pb is not None and pb > 0) else None
-    eps_ratio = ((eps * pe) / close_price) if (eps is not None and eps > 0 and pe is not None and pe > 0) else None
-    if bvps_ratio is not None and bvps_ratio > 1.85:
-        adj = close_price / (bvps * pb)  # type: ignore[operator]
-    if adj is None and eps_ratio is not None and eps_ratio > 1.85:
-        adj = close_price / (eps * pe)  # type: ignore[operator]
-    if (
-        adj is None
-        and split_factor is not None
-        and 0.05 < split_factor < 0.45
-        and eps is not None
-        and eps > 0
-        and (close_price / eps) < 2.5
-    ):
-        adj = split_factor
-
-    if adj is None or not (0.05 < adj < 0.55):
-        return out, False
-
-    eps_already_post = bool(eps_ratio is not None and 0.55 <= eps_ratio <= 1.85)
-    bvps_already_post = bool(bvps_ratio is not None and 0.55 <= bvps_ratio <= 1.85)
-
-    if eps is not None and not eps_already_post:
-        new_eps = round(eps * adj, 4)
-        out["eps"] = new_eps
-        if "trailing_eps" in out:
-            out["trailing_eps"] = new_eps
-        if new_eps > 0:
-            out["peRatio"] = round(close_price / new_eps, 2)
-            if "pe_ratio" in out:
-                out["pe_ratio"] = out["peRatio"]
-    if bvps is not None and not bvps_already_post:
-        new_bvps = round(bvps * adj, 4)
-        out["bookValuePerShare"] = new_bvps
-        for k in ("book_value_per_share", "bvps"):
-            if k in out:
-                out[k] = new_bvps
-        if new_bvps > 0:
-            out["pbRatio"] = round(close_price / new_bvps, 2)
-            if "pb_ratio" in out:
-                out["pb_ratio"] = out["pbRatio"]
-    dps = _safe_float(out.get("dividendPerShare") if out.get("dividendPerShare") is not None else out.get("dividend_per_share"), 4)
-    if dps is not None and dps > close_price * 0.25:
-        out["dividendPerShare"] = round(dps * adj, 4)
-    out["fundamentals_split_adjusted"] = True
-    return out, True
 
 
 def _compute_stock_context_metrics(
@@ -2165,11 +2113,21 @@ def _extract_rich_fundamentals(
     name: Optional[str] = None,
     trade_currency: Optional[str] = None,
     split_factor: Optional[float] = None,
+    symbol: str = "",
+    market: str = "EGX",
 ) -> Dict[str, Any]:
     """Extract normalized financial & fundamental ratios (camelCase + snake_case) plus deterministic diagnosis."""
     if not isinstance(fd, dict):
         fd = {}
-    fd, fund_split_adjusted = _normalize_split_adjusted_fundamentals(fd, close_price, split_factor=split_factor)
+    eff_sym = str(symbol or fd.get("symbol") or "").strip().upper()
+    raw_fin_curr = str(fd.get("financialCurrency") or fd.get("currency") or "").strip().upper()
+    fd, fund_split_adjusted = _normalize_split_adjusted_fundamentals(
+        fd,
+        close_price,
+        split_factor=split_factor,
+        symbol=eff_sym,
+        market=market,
+    )
     pick = lambda *ks: next((fd.get(k) for k in ks if fd.get(k) is not None and fd.get(k) != ""), None)
     raw = {
         "pe_ratio": _safe_float(pick("peRatio", "pe_ratio", "trailing_pe")),
@@ -2223,19 +2181,52 @@ def _extract_rich_fundamentals(
                 f"ملاحظة محاسبية: ROE المعلن ({float(roe_v):.1f}%) محسوب على متوسط حقوق الملكية للفترة، "
                 f"بينما قسمة P/B على P/E تعطي ~{implied_roe_end:.1f}% على حقوق الملكية الختامية."
             )
-    raw_fin_curr = str(pick("financialCurrency", "currency") or "").strip().upper()
     if trade_currency == "$" and raw_fin_curr == "EGP":
         clean["financials_currency"] = "ج.م"
-        clean["financials_currency_note_ar"] = (
-            "تنبيه عملة القوائم: سعر تداول السهم بالدولار ($) لكن أرقام القوائم المالية والتدفق النقدي "
-            "والكوبون المسجل بالجنيه المصري (ج.م) — اكتبها بـ ج.م ولا تضع علامة $ بجانبها."
-        )
+        if fd.get("fx_adjusted_from_egp"):
+            clean["financials_currency_note_ar"] = (
+                "تنبيه عملة القوائم: سعر السهم وربحية السهم (EPS) والقيمة الدفترية للسهم محوّلة بالدولار ($)، "
+                "بينما إجماليات القوائم المالية (الإيرادات وصافي الربح والتدفق النقدي والديون) مسجلة بالجنيه المصري (ج.م) — اكتب الإجماليات بـ ج.م."
+            )
+        else:
+            clean["financials_currency_note_ar"] = (
+                "تنبيه عملة القوائم: سعر تداول السهم بالدولار ($) لكن أرقام القوائم المالية والتدفق النقدي "
+                "والكوبون المسجل بالجنيه المصري (ج.م) — اكتبها بـ ج.م ولا تضع علامة $ بجانبها."
+            )
     if fund_split_adjusted:
         clean["fundamentals_split_adjusted"] = True
     diag = _build_fundamental_diagnosis(clean, close_price=close_price, name=name or pick("name", "name_ar"))
     if diag:
         clean["fundamental_diagnosis"] = diag
     return clean
+
+
+def _resolve_cached_sector_multiples(symbol: str, market: str = "EGX") -> Tuple[Optional[float], Optional[float]]:
+    """Lookup live sector median (P/E, P/B) from shared `/fair-value` RAM cache so Chat & Page match 100%."""
+    sym_u = str(symbol or "").strip().upper()
+    if not sym_u:
+        return None, None
+    mkt_u = str(market or "EGX").strip().upper()
+    norm_mkt = (
+        "tasi" if mkt_u in ("TADAWUL", "TASI", "SA", "SAUDI")
+        else ("qatar" if mkt_u in ("QSE", "QATAR", "QE")
+        else ("uae" if mkt_u in ("DFM", "ADX", "UAE") else "egx"))
+    )
+    try:
+        from api.routers.offload_public import _FAIR_VALUE_CACHE, _get_fair_value
+        found, cached_rep = _FAIR_VALUE_CACHE.get(norm_mkt)
+        if not found:
+            sb_chk = _get_sb() if norm_mkt == "egx" else _get_sb_for_market(mkt_u)
+            sb_url = getattr(sb_chk, "supabase_url", None)
+            if sb_chk is None or not isinstance(sb_url, str) or not sb_url.startswith("http"):
+                return None, None
+            cached_rep = _get_fair_value(norm_mkt)
+        for st_row in ((cached_rep or {}).get("stocks") or []):
+            if str(st_row.get("symbol") or "").upper() == sym_u:
+                return _safe_float(st_row.get("sectorMedianPe")), _safe_float(st_row.get("sectorMedianPb"))
+    except Exception:
+        pass
+    return None, None
 
 
 def _compute_fundamental_fair_value(
@@ -2245,157 +2236,73 @@ def _compute_fundamental_fair_value(
     fd: Optional[Dict[str, Any]],
     market: str = "EGX",
     split_factor: Optional[float] = None,
+    *,
+    symbol: str = "",
+    ema_200: Optional[float] = None,
+    sector_median_pe: Optional[float] = None,
+    sector_median_pb: Optional[float] = None,
 ) -> Tuple[float, str, Dict[str, Any]]:
     """
-    Compute realistic blended institutional fair value across all 4 markets (EGX, TADAWUL, QSE, UAE):
-    - Blends market- & sector/ROE-calibrated P/E + P/B + Graham (with Forward P/E awareness)
-    - Applies institutional safety clamp (0.55x–1.65x close) so outliers never distort valuation
-    - Always preserves classic Graham Number separately in `extra["graham_value"]` as defensive floor
-    - Falls back cleanly to P/E -> P/B -> VWAP/EMA quant equilibrium when fundamentals are missing.
+    Single-source Fair Value delegating directly to `api.fair_value_engine.compute_unified_fair_value`
+    so AI Chat (`get_fair_value` & `get_stock`) matches `/fair-value` to the exact penny.
     """
-    f, _fv_split_adj = _normalize_split_adjusted_fundamentals(fd, close, split_factor=split_factor)
-    eps = _safe_float(f.get("eps") if f.get("eps") is not None else f.get("trailing_eps"), 4)
-    bvps = _safe_float(
-        f.get("bookValuePerShare")
-        if f.get("bookValuePerShare") is not None
-        else (f.get("book_value_per_share") if f.get("book_value_per_share") is not None else f.get("bvps")),
-        4,
+    from api.fair_value_engine import compute_unified_fair_value
+
+    eff_sym = str(symbol or (fd.get("symbol") if isinstance(fd, dict) else "") or "").strip().upper()
+    if (sector_median_pe is None or sector_median_pb is None) and eff_sym:
+        c_pe, c_pb = _resolve_cached_sector_multiples(eff_sym, market)
+        if sector_median_pe is None and c_pe is not None:
+            sector_median_pe = c_pe
+        if sector_median_pb is None and c_pb is not None:
+            sector_median_pb = c_pb
+
+    res = compute_unified_fair_value(
+        symbol=eff_sym,
+        close=close,
+        fund_data=fd if isinstance(fd, dict) else None,
+        ind={
+            "ema_200": ema_200 if ema_200 is not None else ema,
+            "ema_50": ema,
+            "vwap_20": vwap,
+        },
+        sector_median_pe=sector_median_pe,
+        sector_median_pb=sector_median_pb,
+        market=market,
+        split_factor=split_factor,
     )
-    pe = _safe_float(f.get("peRatio") if f.get("peRatio") is not None else f.get("pe_ratio"))
-    forward_pe = _safe_float(f.get("forwardPe") if f.get("forwardPe") is not None else f.get("forward_pe"))
-    pb = _safe_float(f.get("pbRatio") if f.get("pbRatio") is not None else f.get("pb_ratio"))
-    roe = _safe_float(f.get("roe"))
-    net_inc = _safe_float(f.get("netIncome") if f.get("netIncome") is not None else f.get("net_income"), 2)
-    is_loss_making = bool((eps is not None and eps <= 0) or (net_inc is not None and net_inc < 0) or (roe is not None and roe < 0))
-    if eps is None and not is_loss_making and pe and pe > 0 and close > 0:
-        eps = round(close / pe, 4)
-    if bvps is None and pb and pb > 0 and close > 0:
-        bvps = round(close / pb, 4)
-    dy = _safe_float(f.get("dividendYield"))
-    sector = f.get("sector")
-    industry = f.get("industry")
 
     extra: Dict[str, Any] = {}
-    if is_loss_making:
+    if res.get("isLossMaking"):
         extra["is_loss_making"] = True
-    if pe is not None:
-        extra["pe_ratio"] = pe
-    if forward_pe is not None and forward_pe > 0:
-        extra["forward_pe"] = forward_pe
-    if pb is not None:
-        extra["pb_ratio"] = pb
-    if eps is not None:
-        extra["eps"] = eps
-    if bvps is not None:
-        extra["book_value_per_share"] = bvps
-    if roe is not None:
-        extra["roe_pct"] = roe
-    if dy is not None:
-        extra["dividend_yield_pct"] = dy
-    if sector:
-        extra["sector"] = sector
-
-    def _clamp_fv(val: float) -> float:
-        if close and close > 0:
-            return max(close * 0.55, min(close * 1.65, val))
-        return val
-
-    # Classic Graham Number (always preserved as conservative defensive floor for profitable firms)
-    graham_classic: Optional[float] = None
-    if not is_loss_making and eps and eps > 0 and bvps and bvps > 0:
-        g = round((22.5 * eps * bvps) ** 0.5, 2)
-        if g > 0:
-            graham_classic = g
-            extra["graham_value"] = g
-
-    # Incorporate Forward EPS when reasonable Forward P/E is present (only for non-loss-making stocks)
-    eff_eps: Optional[float] = eps if (not is_loss_making and eps and eps > 0) else None
-    if not is_loss_making and forward_pe is not None and 2.0 <= forward_pe <= 60.0 and close and close > 0:
-        fwd_eps = close / forward_pe
-        if eff_eps is not None and eff_eps > 0:
-            fwd_eps_clamped = max(eff_eps * 0.4, min(eff_eps * 3.0, fwd_eps))
-            eff_eps = round(0.50 * eff_eps + 0.50 * fwd_eps_clamped, 4)
-        else:
-            eff_eps = round(fwd_eps, 4)
-
-    is_fin = _is_financial_sector(sector, industry)
-    is_tech = _is_tech_growth_sector(sector, industry)
-    mkt_upper = str(market or "EGX").strip().upper()
-
-    if mkt_upper in ("TADAWUL", "TASI", "SA", "SAUDI"):
-        if is_fin:
-            target_pe = 13.0
-            target_pb = min(2.8, max(1.6, roe / 9.0)) if (roe is not None and roe >= 14.0) else 1.9
-        elif is_tech:
-            target_pe = 19.0
-            target_pb = 3.5
-        else:
-            target_pe = 15.0 if (roe is not None and roe >= 15.0) else 13.0
-            target_pb = min(3.2, max(2.0, roe / 7.0)) if (roe is not None and roe >= 12.0) else 2.0
-    elif mkt_upper in ("QSE", "QATAR", "QE", "DFM", "ADX", "UAE"):
-        if is_fin:
-            target_pe = 11.5
-            target_pb = min(2.5, max(1.5, roe / 9.5)) if (roe is not None and roe >= 14.0) else 1.75
-        elif is_tech:
-            target_pe = 17.5
-            target_pb = 3.2
-        else:
-            target_pe = 13.5 if (roe is not None and roe >= 15.0) else 12.0
-            target_pb = min(3.0, max(1.9, roe / 7.2)) if (roe is not None and roe >= 12.0) else 1.9
-    else:
-        if is_fin:
-            target_pe = 9.5
-            target_pb = min(2.4, max(1.4, roe / 10.0)) if (roe is not None and roe >= 14.0) else 1.65
-        elif is_tech:
-            target_pe = 16.0
-            target_pb = 3.0
-        else:
-            target_pe = 12.0 if (roe is not None and roe >= 15.0) else 10.5
-            target_pb = min(2.8, max(1.75, roe / 7.5)) if (roe is not None and roe >= 12.0) else 1.75
-
-    if eff_eps and eff_eps > 0 and bvps and bvps > 0:
-        pe_fair = round(eff_eps * target_pe, 2)
-        pb_fair = round(bvps * target_pb, 2)
-        extra["pe_fair_value"] = pe_fair
-        extra["pb_fair_value"] = pb_fair
-        if is_fin:
-            raw_fv = 0.55 * pe_fair + 0.45 * pb_fair
-            model = "التقييم الأساسي للقطاع المالي (مضاعفات P/E + P/B)"
-        elif is_tech:
-            raw_fv = 0.70 * pe_fair + 0.30 * pb_fair
-            model = "التقييم الأساسي لقطاع التكنولوجيا والنمو (P/E + P/B)"
-        else:
-            graham_eff = (22.5 * eff_eps * bvps) ** 0.5
-            raw_fv = 0.50 * pe_fair + 0.25 * pb_fair + 0.25 * graham_eff
-            model = "التقييم الأساسي المرجّح (مضاعفات P/E وP/B + جراهام)"
-        fv = round(_clamp_fv(raw_fv), 2)
-        if fv > 0:
-            return fv, model, extra
-
-    if eff_eps and eff_eps > 0:
-        fv_pe = round(_clamp_fv(eff_eps * target_pe), 2)
-        extra["pe_fair_value"] = round(eff_eps * target_pe, 2)
-        return fv_pe, "مضاعف الربحية الأساسي (P/E Multiple)", extra
-
-    if bvps and bvps > 0:
-        if is_loss_making:
-            distress_pb = round(min(1.0, max(0.55, target_pb * 0.45)), 2)
-            raw_pb_fv = round(bvps * distress_pb, 2)
-            upper_cap = close * 0.90 if (roe is not None and roe <= -5.0) else close * 0.98
-            fv_pb = round(max(close * 0.45, min(upper_cap, raw_pb_fv)), 2) if close > 0 else raw_pb_fv
-            extra["pb_fair_value"] = raw_pb_fv
-            extra["loss_making_discount_applied"] = True
-            return fv_pb, "قيمة دفترية مخفضة (شركة خاسرة)", extra
-        fv_pb = round(_clamp_fv(bvps * target_pb), 2)
-        extra["pb_fair_value"] = round(bvps * target_pb, 2)
-        return fv_pb, "مضاعف القيمة الدفترية (P/B Multiple)", extra
-
-    fv_q = _safe_price((vwap * 0.6) + (ema * 0.4))
-    if is_loss_making and close and close > 0 and fv_q:
-        fv_q = round(max(close * 0.45, min(close * 0.85, fv_q)), 2)
+    if res.get("lossMakingDiscountApplied"):
         extra["loss_making_discount_applied"] = True
-        return fv_q, "توازن كمي مخفض (شركة خاسرة)", extra
-    return fv_q, "التوازن الكمي (VWAP & EMA)", extra
+    if res.get("peRatio") is not None:
+        extra["pe_ratio"] = res["peRatio"]
+    if res.get("forwardPe") is not None:
+        extra["forward_pe"] = res["forwardPe"]
+    if res.get("pbRatio") is not None:
+        extra["pb_ratio"] = res["pbRatio"]
+    if res.get("eps") is not None:
+        extra["eps"] = res["eps"]
+    if res.get("bvps") is not None:
+        extra["book_value_per_share"] = res["bvps"]
+    if res.get("roe") is not None:
+        extra["roe_pct"] = res["roe"]
+    if res.get("dividendYield") is not None:
+        extra["dividend_yield_pct"] = res["dividendYield"]
+    if res.get("sectorAr"):
+        extra["sector"] = res["sectorAr"]
+    if res.get("peFairValue") is not None:
+        extra["pe_fair_value"] = res["peFairValue"]
+    if res.get("pbFairValue") is not None:
+        extra["pb_fair_value"] = res["pbFairValue"]
+    if res.get("grahamValue") is not None:
+        extra["graham_value"] = res["grahamValue"]
+    elif res.get("classicGrahamValue") is not None:
+        extra["graham_value"] = res["classicGrahamValue"]
+    if res.get("formulaSubstitutionAr"):
+        extra["formula_substitution_ar"] = res["formulaSubstitutionAr"]
+    return float(res["fairValue"]), str(res["modelLabelAr"]), extra
 
 
 _CATALOG_CACHE: Dict[str, Tuple[float, List[Dict[str, str]]]] = {}
@@ -3027,6 +2934,8 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         fd if isinstance(fd, dict) else None,
                         market="EGX",
                         split_factor=split_factor,
+                        symbol=sym,
+                        ema_200=ema_200,
                     )
                     eps_val = _safe_float(fundamentals.get("eps"), 4)
                     ni_val = _safe_float(fundamentals.get("net_income"), 2)
@@ -3461,7 +3370,13 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                         try:
                             from api.agentic_chat.quant_engine import build_quant_intelligence_for_stock
                             fv_sa, fv_model_sa, fv_extra_sa = _compute_fundamental_fair_value(
-                                close_price, vwap_20 or close_price, ema_50 or close_price, fd if isinstance(fd, dict) else None, market=exch_code
+                                close_price,
+                                vwap_20 or close_price,
+                                ema_50 or close_price,
+                                fd if isinstance(fd, dict) else None,
+                                market=exch_code,
+                                symbol=sym,
+                                ema_200=ema_200,
                             )
                             eps_sa = _safe_float(sa_item.get("eps"), 4)
                             ni_sa = _safe_float(sa_item.get("net_income"), 2)
@@ -5396,8 +5311,15 @@ def _sync_get_fair_value(
 
             vwap = _safe_price(r.get("vwap_20")) or close
             ema = _safe_price(r.get("ema_50")) or close
+            ema200_sa = _safe_price(r.get("ema_200"))
             fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
-                close, vwap, ema, fv_fund_sa.get(str(sym).upper()), market=eff_mkt
+                close,
+                vwap,
+                ema,
+                fv_fund_sa.get(str(sym).upper()),
+                market=eff_mkt,
+                symbol=str(sym),
+                ema_200=ema200_sa,
             )
             loss_making_sa = bool(fv_extra.get("is_loss_making") or fv_extra.get("loss_making_discount_applied"))
             gap_info = _build_fair_value_gap(close, fair_value, is_loss_making=loss_making_sa)
@@ -5408,8 +5330,8 @@ def _sync_get_fair_value(
                 st_code = "overvalued"
                 st_ar = "شركة خاسرة — تقييم دفتري مخفّض ⚠️"
             else:
-                st_code = "undervalued" if upside > 5 else ("overvalued" if upside < -5 else "fair")
-                st_ar = "أقل من السعر العادل (رخيص) 🟢" if upside > 5 else ("أعلى من السعر العادل (متضخم) 🔴" if upside < -5 else "في النطاق العادل ⚖️")
+                st_code = "undervalued" if upside >= 15 else ("overvalued" if upside <= -12 else "fair")
+                st_ar = "أقل من السعر العادل (رخيص) 🟢" if upside >= 15 else ("أعلى من السعر العادل (متضخم) 🔴" if upside <= -12 else "في النطاق العادل ⚖️")
 
             items.append({
                 "symbol": sym,
@@ -5500,8 +5422,15 @@ def _sync_get_fair_value(
 
         vwap = _safe_price(r.get("vwap_20")) or close
         ema = _safe_price(r.get("ema_50")) or close
+        ema200_egx = _safe_price(r.get("ema_200"))
         fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
-            close, vwap, ema, fv_fund_egx.get(str(sym).upper()), market="EGX"
+            close,
+            vwap,
+            ema,
+            fv_fund_egx.get(str(sym).upper()),
+            market="EGX",
+            symbol=str(sym),
+            ema_200=ema200_egx,
         )
         loss_making_egx = bool(fv_extra.get("is_loss_making") or fv_extra.get("loss_making_discount_applied"))
         gap_info = _build_fair_value_gap(close, fair_value, is_loss_making=loss_making_egx)
@@ -5511,8 +5440,8 @@ def _sync_get_fair_value(
             st_code_egx = "overvalued"
             st_ar_egx = "شركة خاسرة — تقييم دفتري مخفّض ⚠️"
         else:
-            st_code_egx = "undervalued" if upside > 5 else ("overvalued" if upside < -5 else "fair")
-            st_ar_egx = "أقل من السعر العادل (رخيص) 🟢" if upside > 5 else ("أعلى من السعر العادل (متضخم) 🔴" if upside < -5 else "في النطاق العادل ⚖️")
+            st_code_egx = "undervalued" if upside >= 15 else ("overvalued" if upside <= -12 else "fair")
+            st_ar_egx = "أقل من السعر العادل (رخيص) 🟢" if upside >= 15 else ("أعلى من السعر العادل (متضخم) 🔴" if upside <= -12 else "في النطاق العادل ⚖️")
 
         items.append({
             "symbol": sym,

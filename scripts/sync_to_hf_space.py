@@ -103,6 +103,7 @@ FILES_TO_SYNC = [
     "api/macro_correlation.py",
     "api/payment_common.py",
     "api/portfolio_or_optimizer.py",
+    "api/fair_value_engine.py",
     "Dockerfile",
     "daily_job_config.json",
     "api/stock_aliases.py",

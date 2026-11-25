@@ -1274,4 +1274,110 @@ def test_fair_value_audit_fixes_poul_split_roe_note_and_svce_loss_making():
     assert "شركة خاسرة" in gap_svce["valuation_gap_ar"]
 
 
+def test_unified_fair_value_engine_parity_oils_soap_and_usd_egx():
+    """Verify 0.00 difference between /fair-value page and Chat on COSG, MOSC, ZEOT, and USD-traded NDRL."""
+    from api.routers.offload_public import _compute_single_fair_value
+    from api.agentic_chat.tools_execution import _compute_fundamental_fair_value
+    from api.fair_value_engine import default_sector_multiples, resolve_sector_ar
+
+    # 1. COSG (Cairo Oils & Soap — loss-making ROE=-9.02%, BVPS=0.7317, close=1.33)
+    cosg_fd = {
+        "symbol": "COSG",
+        "eps": -0.0638,
+        "netIncome": -75_412_763,
+        "roe": -9.02,
+        "bookValuePerShare": 0.7317,
+        "pbRatio": 1.93,
+        "sector": "Consumer Non-Durables",
+        "industry": "Household/Personal Care",
+    }
+    sec_cosg = resolve_sector_ar("COSG", cosg_fd["sector"], cosg_fd["industry"])
+    assert sec_cosg == "أغذية وسلع استهلاكية"
+    pe_c, pb_c = default_sector_multiples(sec_cosg, "egx")
+    web_cosg = _compute_single_fair_value(
+        symbol="COSG", close=1.33, fund_row={"symbol": "COSG", "data": cosg_fd},
+        ind={"ema_200": 1.53, "vwap_20": 1.35}, sector_median_pe=pe_c, sector_median_pb=pb_c, market="egx",
+    )
+    chat_cosg, _, _ = _compute_fundamental_fair_value(
+        1.33, 1.35, 1.44, cosg_fd, market="EGX", symbol="COSG", ema_200=1.53,
+        sector_median_pe=pe_c, sector_median_pb=pb_c,
+    )
+    assert web_cosg["fairValue"] == 0.55
+    assert chat_cosg == web_cosg["fairValue"]
+    assert web_cosg["status"] == "overvalued"
+    assert web_cosg["formulaSubstitutionAr"] == "0.73 × 0.75 = 0.55 ج.م"
+
+    # 2. MOSC (Misr Oils & Soap — profitable EPS=12.2, BVPS=24.55, close=285 -> NO 0.55*close=156.75 distortion!)
+    mosc_fd = {
+        "symbol": "MOSC",
+        "eps": 12.20,
+        "bookValuePerShare": 24.5487,
+        "peRatio": 24.24,
+        "pbRatio": 12.05,
+        "roe": 83.49,
+        "sector": "Process Industries",
+    }
+    sec_mosc = resolve_sector_ar("MOSC", mosc_fd["sector"], None)
+    assert sec_mosc != "سوق الأسهم المصرية"
+    pe_m, pb_m = default_sector_multiples(sec_mosc, "egx")
+    web_mosc = _compute_single_fair_value(
+        symbol="MOSC", close=285.0, fund_row={"symbol": "MOSC", "data": mosc_fd},
+        ind={"ema_200": 257.48, "vwap_20": 277.56}, sector_median_pe=pe_m, sector_median_pb=pb_m, market="egx",
+    )
+    chat_mosc, _, _ = _compute_fundamental_fair_value(
+        285.0, 277.56, 280.0, mosc_fd, market="EGX", symbol="MOSC", ema_200=257.48,
+        sector_median_pe=pe_m, sector_median_pb=pb_m,
+    )
+    assert web_mosc["fairValue"] == chat_mosc
+    assert web_mosc["fairValue"] < 120.0  # true fundamental value (~84), NOT artificially clamped to 156.75!
+    assert f"= {web_mosc['fairValue']} ج.م" in web_mosc["formulaSubstitutionAr"]
+
+    # 3. ZEOT (Extracted Oils — profitable EPS=0.33, BVPS=1.28, close=12.59 -> NO 0.55*close=6.92 distortion!)
+    zeot_fd = {
+        "symbol": "ZEOT",
+        "eps": 0.33,
+        "bookValuePerShare": 1.28,
+        "peRatio": 39.72,
+        "pbRatio": 8.57,
+        "roe": 25.44,
+        "sector": "Process Industries",
+        "industry": "Agricultural Commodities/Milling",
+    }
+    sec_zeot = resolve_sector_ar("ZEOT", zeot_fd["sector"], zeot_fd["industry"])
+    assert sec_zeot == "أغذية ومطاحن وزيوت"
+    pe_z, pb_z = default_sector_multiples(sec_zeot, "egx")
+    web_zeot = _compute_single_fair_value(
+        symbol="ZEOT", close=12.59, fund_row={"symbol": "ZEOT", "data": zeot_fd},
+        ind={"ema_200": 10.53, "vwap_20": 12.11}, sector_median_pe=pe_z, sector_median_pb=pb_z, market="egx",
+    )
+    chat_zeot, _, _ = _compute_fundamental_fair_value(
+        12.59, 12.11, 11.73, zeot_fd, market="EGX", symbol="ZEOT", ema_200=10.53,
+        sector_median_pe=pe_z, sector_median_pb=pb_z,
+    )
+    assert web_zeot["fairValue"] == chat_zeot
+    assert web_zeot["fairValue"] < 4.0  # true fundamental value (~2.84), NOT artificially clamped to 6.92!
+    assert f"= {web_zeot['fairValue']} ج.م" in web_zeot["formulaSubstitutionAr"]
+
+    # 4. NDRL (USD-traded EGX stock with EGP fundamentals -> converts EPS/BVPS cleanly to USD)
+    ndrl_fd = {
+        "symbol": "NDRL",
+        "currency": "EGP",
+        "eps": 99.84,
+        "bookValuePerShare": 607.6506,
+        "peRatio": 2.53,
+        "pbRatio": 0.39,
+        "roe": 18.3,
+        "sector": "Industrial Services",
+    }
+    web_ndrl = _compute_single_fair_value(
+        symbol="NDRL", close=4.69, fund_row={"symbol": "NDRL", "data": ndrl_fd},
+        ind={"ema_200": 4.0, "vwap_20": 4.69}, sector_median_pe=10.0, sector_median_pb=1.8, market="egx",
+    )
+    assert web_ndrl["currencySymbol"] == "$"
+    assert abs(web_ndrl["eps"] - 1.85) < 0.05
+    assert web_ndrl["bvps"] < 15.0
+    assert web_ndrl["grahamValue"] < 25.0
+
+
+
 

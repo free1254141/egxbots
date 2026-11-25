@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 CRITICAL_MODULES = [
     *sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "api" / "agentic_chat").glob("*.py")),
+    "api/fair_value_engine.py",
     "api/portfolio_or_optimizer.py",
     "api/scheduled_automations_worker.py",
     "api/saudi_stock_aliases.py",
