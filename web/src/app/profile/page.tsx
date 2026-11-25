@@ -358,9 +358,6 @@ export default function ProfilePage() {
                   <span className="border-2 border-black bg-black text-white px-2 py-0.5 text-[10px] font-black uppercase tracking-wider">
                     {isAr ? "خطوة هامة لتفعيل التنبيهات" : "Action Required"}
                   </span>
-                  <span className="border-2 border-black bg-emerald-400 text-black px-2 py-0.5 text-[10px] font-black uppercase tracking-wider animate-pulse">
-                    {isAr ? "🎁 هدية +10 رسائل ذكاء اصطناعي" : "🎁 +10 AI Messages Bonus"}
-                  </span>
                   <span className="text-xs font-black text-black uppercase tracking-wider">
                     {(telegramLinked || proInvite.telegram_chat_id)
                       ? (isAr ? "مسجل في القناة — مطلوب تفعيل شات البوت في الخاص" : "In Channel — Activate Bot DM")
@@ -373,8 +370,8 @@ export default function ProfilePage() {
                       ? "⚠️ البوت لا يستطيع إرسال إشارات الإسكانر أو تنبيهات الأهداف إليك حتى تبدأ المحادثة معه في الخاص. افتح البوت واضغط زر Start (بدء):"
                       : "⚠️ The bot cannot send scanner signals or target alerts until you start a private chat with it. Open the bot and press Start:")
                     : (isAr
-                      ? "🎁 احصل فورياً على +10 رسائل إضافية لشات الذكاء الاصطناعي مع إشارات الإسكانر اللحظية وتنبيهات الأهداف؛ فقط افتح البوت واضغط زر Start (بدء):"
-                      : "🎁 Receive +10 free bonus messages for AI Chat plus instant scanner alerts and targets; just open the bot and press Start:")}
+                      ? "🔔 اربط حسابك ببوت التليجرام لاستقبال إشارات الإسكانر اللحظية وتنبيهات الأهداف واستخدام المساعد الذكي من الموبايل؛ فقط افتح البوت واضغط زر Start (بدء):"
+                      : "🔔 Link your Telegram bot for instant scanner alerts, target notifications, and mobile AI Chat sync; just open the bot and press Start:")}
                 </p>
               </div>
             </div>
@@ -390,7 +387,7 @@ export default function ProfilePage() {
                 className="inline-flex h-11 px-4 items-center justify-center gap-2 border-3 border-black bg-black text-[#FFE600] font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer"
               >
                 <Smartphone className="w-4 h-4 shrink-0" />
-                <span>{isAr ? "تفعيل البوت (+10 رسائل 🎁)" : "Activate Bot (+10 msgs 🎁)"}</span>
+                <span>{isAr ? "تفعيل البوت (App)" : "Activate Bot (App)"}</span>
               </a>
               <a
                 href={botWebUrl}
@@ -402,7 +399,7 @@ export default function ProfilePage() {
                 className="inline-flex h-11 px-4 items-center justify-center gap-2 border-3 border-black bg-white text-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer"
               >
                 <Globe className="w-4 h-4 shrink-0" />
-                <span>{isAr ? "تفعيل الويب (+10 رسائل 🎁)" : "Activate Web (+10 msgs 🎁)"}</span>
+                <span>{isAr ? "تفعيل الويب (Web)" : "Activate Web"}</span>
               </a>
               {userId && (
                 <button
@@ -563,7 +560,7 @@ export default function ProfilePage() {
                   ) : (
                     <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-black">
                       <X className="w-4 h-4" />
-                      {isAr ? "غير مفعل ❌ (+10 رسائل عند التفعيل 🎁)" : "Not Linked ❌ (+10 msgs bonus 🎁)"}
+                      {isAr ? "غير مفعل ❌" : "Not Linked ❌"}
                     </span>
                   )}
                 </div>
@@ -732,7 +729,7 @@ export default function ProfilePage() {
                       <Smartphone className="w-4 h-4 shrink-0" />
                       {proInvite.bot_active
                         ? (isAr ? "فتح البوت (App)" : "Open Bot (App)")
-                        : (isAr ? "تفعيل البوت (+10 رسائل 🎁)" : "Activate Bot (+10 msgs 🎁)")}
+                        : (isAr ? "تفعيل البوت (App)" : "Activate Bot (App)")}
                     </a>
                     <a
                       href={botWebUrl}
@@ -743,7 +740,7 @@ export default function ProfilePage() {
                       <Globe className="w-4 h-4 shrink-0" />
                       {proInvite.bot_active
                         ? (isAr ? "فتح البوت (Web)" : "Open Bot (Web)")
-                        : (isAr ? "تفعيل الويب (+10 رسائل 🎁)" : "Activate Web (+10 msgs 🎁)")}
+                        : (isAr ? "تفعيل الويب (Web)" : "Activate Web")}
                     </a>
                     {proInvite.is_pro && (
                       <a
@@ -777,7 +774,7 @@ export default function ProfilePage() {
                     <Smartphone className="w-4 h-4 shrink-0" />
                     {proInvite.bot_active
                       ? (isAr ? "فتح البوت (App)" : "Open Bot (App)")
-                      : (isAr ? "تفعيل البوت (+10 رسائل 🎁)" : "Activate Bot (+10 msgs 🎁)")}
+                      : (isAr ? "تفعيل البوت (App)" : "Activate Bot (App)")}
                   </a>
                   <a
                     href={botWebUrl}
@@ -788,7 +785,7 @@ export default function ProfilePage() {
                     <Globe className="w-4 h-4 shrink-0" />
                     {proInvite.bot_active
                       ? (isAr ? "فتح البوت (Web)" : "Open Bot (Web)")
-                      : (isAr ? "تفعيل الويب (+10 رسائل 🎁)" : "Activate Web (+10 msgs 🎁)")}
+                      : (isAr ? "تفعيل الويب (Web)" : "Activate Web")}
                   </a>
                   <a
                     href={telegramWebUrl}

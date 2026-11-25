@@ -594,8 +594,8 @@ export default function PaymentWelcomeModal({
                       </div>
                       <p className="text-xs text-amber-900 dark:text-amber-200/90 font-bold mt-1 leading-relaxed">
                         {isAr
-                          ? "لم تقم بربط حسابك بالبوت بعد! فعّل البوت الآن لتصلك تنبيهات الأسهم الفورية وإشارات وقف الخسارة ورسالة الترحيب، واحصل على +10 رسائل هدية 🎁"
-                          : "Connect your Telegram bot to receive live trade notifications, stop-loss alerts, and +10 bonus AI messages 🎁"}
+                          ? "لم تقم بربط حسابك بالبوت بعد! فعّل البوت الآن لتصلك تنبيهات الأسهم الفورية وإشارات وقف الخسارة ورسالة الترحيب مباشرة على تليجرام."
+                          : "Connect your Telegram bot to receive live trade notifications and stop-loss alerts directly on Telegram."}
                       </p>
 
                       <div className="mt-3">
@@ -606,7 +606,7 @@ export default function PaymentWelcomeModal({
                           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
                         >
                           <Bot className="w-4 h-4" />
-                          <span>{isAr ? "🤖 تفعيل بوت التليجرام الآن (+10 رسائل هدية)" : "🤖 Activate Telegram Bot (+10 Bonus)"}</span>
+                          <span>{isAr ? "🤖 تفعيل بوت التليجرام الآن" : "🤖 Activate Telegram Bot"}</span>
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       </div>

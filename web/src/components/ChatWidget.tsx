@@ -1732,18 +1732,6 @@ export default function ChatWidget() {
                                 </button>
                             )}
 
-                            {!telegramLinkedModal && (
-                                <a
-                                    href={user?.id ? `https://t.me/egxbots_bot?start=${user.id}` : "https://t.me/egxbots_bot"}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="w-full py-2.5 px-3 bg-[#0088cc] hover:bg-[#0077b5] text-white font-black text-xs border-2 border-black shadow-[3px_3px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                                >
-                                    <span>🎁 احصل على +10 رسائل فوراً عبر ربط تليجرام</span>
-                                    <ExternalLink className="w-3.5 h-3.5" />
-                                </a>
-                            )}
-
                             <button
                                 onClick={() => {
                                     setShowUpgradeModal(false);

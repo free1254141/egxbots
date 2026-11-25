@@ -875,37 +875,69 @@ class TelegramBot:
                     except Exception as e:
                         self._log(f"Could not record telegram_linked event: {e}")
 
-                    # Prevent multi-account bonus farming & post-trial bonus stacking:
-                    # 1 Telegram account = max one +10 bonus, and users who claimed a Pro trial
-                    # already received 3 days (350 msgs) so they do not keep an extra +10 telegram_link bonus.
-                    has_claimed_trial = False
-                    if not prior_tg_uid:
-                        try:
-                            tr_chk = (
-                                supabase.table("subscription_trials")
-                                .select("user_id")
-                                .eq("user_id", uid)
-                                .limit(1)
-                                .execute()
-                            )
-                            has_claimed_trial = bool(tr_chk and tr_chk.data)
-                            if not has_claimed_trial:
-                                sub_tr_chk = (
-                                    supabase.table("subscriptions")
-                                    .select("id")
-                                    .eq("user_id", uid)
-                                    .eq("provider", "trial")
-                                    .limit(1)
-                                    .execute()
-                                )
-                                has_claimed_trial = bool(sub_tr_chk and sub_tr_chk.data)
-                        except Exception:
-                            has_claimed_trial = False
-                    if prior_tg_uid or has_claimed_trial:
-                        try:
-                            supabase.table("chat_bonus_credits").delete().eq("user_id", uid).eq("source", "telegram_link").execute()
-                        except Exception as e:
-                            self._log(f"Could not revoke telegram_link bonus: {e}")
+                    # Strict 10-message unified lifetime cap across Website + Telegram:
+                    # 1. Never grant or retain telegram_link bonus credits.
+                    try:
+                        supabase.table("chat_bonus_credits").delete().eq("user_id", uid).eq("source", "telegram_link").execute()
+                    except Exception as e:
+                        self._log(f"Could not revoke telegram_link bonus: {e}")
+
+                    # 2. Carry over any prior unlinked Telegram chat usage into ai_chatbot_limits
+                    #    and bind telegram_vip_chat_state.linked_user_id = uid so unlinked + linked
+                    #    cannot double-dip (10 unlinked + 10 website).
+                    try:
+                        tg_uid_int = int(chat_id)
+                        st_res = (
+                            supabase.table("telegram_vip_chat_state")
+                            .select("linked_user_id, daily_count")
+                            .eq("telegram_user_id", tg_uid_int)
+                            .limit(1)
+                            .execute()
+                        )
+                        st_rows = getattr(st_res, "data", None) or []
+                        if st_rows:
+                            st_row = st_rows[0]
+                            prior_unlinked = int(st_row.get("daily_count") or 0)
+                            if not st_row.get("linked_user_id"):
+                                if prior_unlinked > 0:
+                                    from api.agentic_chat.auth_guard import get_cairo_date_string
+                                    today_cairo = get_cairo_date_string()
+                                    cur_lim = (
+                                        supabase.table("ai_chatbot_limits")
+                                        .select("chat_count")
+                                        .eq("user_id", uid)
+                                        .eq("date", today_cairo)
+                                        .limit(1)
+                                        .execute()
+                                    )
+                                    cur_rows = getattr(cur_lim, "data", None) or []
+                                    existing_today = int(cur_rows[0].get("chat_count") or 0) if cur_rows else 0
+                                    supabase.table("ai_chatbot_limits").upsert(
+                                        {
+                                            "user_id": uid,
+                                            "date": today_cairo,
+                                            "chat_count": existing_today + prior_unlinked,
+                                        },
+                                        on_conflict="user_id,date",
+                                    ).execute()
+                                supabase.table("telegram_vip_chat_state").update(
+                                    {"linked_user_id": uid}
+                                ).eq("telegram_user_id", tg_uid_int).execute()
+                    except Exception as e:
+                        self._log(f"Could not carry over unlinked telegram quota: {e}")
+
+                    # Invalidate in-memory user/quota caches so the unified limit applies immediately
+                    try:
+                        from api.native_telegram_vip_chat import _USER_RESOLVE_CACHE, _USER_RESOLVE_LOCK
+                        with _USER_RESOLVE_LOCK:
+                            _USER_RESOLVE_CACHE.pop(int(chat_id), None)
+                    except Exception:
+                        pass
+                    try:
+                        from api.routers.offload import _QUOTA_CACHE
+                        _QUOTA_CACHE.delete(uid)
+                    except Exception:
+                        pass
                     try:
                         supabase.table("bot_subscriptions").update(
                             {"telegram_chat_id": str(chat_id)}
@@ -1029,11 +1061,6 @@ class TelegramBot:
                                     f"🎉 *أهلاً وسهلاً، {display_name}\\!*\n\n"
                                     "✅ *تم ربط حسابك في تليجرام بنجاح\\!*\n"
                                     f"⭐ *باقة {plan_label} مفعّلة ونشطة الآن* 🚀\n\n"
-                                    + (
-                                        "🎁 *هدية ربط الحساب:* تمت إضافة *\\+10 رسائل إضافية* لرصيدك في مساعد الذكاء الاصطناعي\\!\n\n"
-                                        if not has_chat
-                                        else ""
-                                    )
                                     + vip_hint
                                     + "https://egxbots\\.com/profile",
                                 )
@@ -1045,7 +1072,6 @@ class TelegramBot:
                             chat_id,
                             f"🎉 *أهلاً وسهلاً، {display_name}\\!*\n\n"
                             "✅ *تم ربط حساب تليجرام بنجاح\\!*\n\n"
-                            "🎁 *هدية ربط الحساب:* تمت إضافة *\\+10 رسائل إضافية* لرصيدك في مساعد الذكاء الاصطناعي على المنصة\\!\n\n"
                             "━━━━━━━━━━━━━━━━━━━━\n"
                             "🤖 *EGX Bots* جاهز لإرسال إشارات التداول إليك فور حدوثها\\!\n\n"
                             "📊 *ستتلقى تنبيهات عن:*\n"

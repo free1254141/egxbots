@@ -128,7 +128,9 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
     is_admin = tg_id_str in ADMIN_TG_IDS
     today = get_cairo_date_str()
 
-    state_rows = _supabase_request(f"telegram_vip_chat_state?telegram_user_id=eq.{telegram_user_id}&select=*") or []
+    raw_state_rows = _supabase_request(f"telegram_vip_chat_state?telegram_user_id=eq.{telegram_user_id}&select=*")
+    state_fetch_failed = raw_state_rows is None
+    state_rows = raw_state_rows or []
     state_row = state_rows[0] if state_rows else None
 
     profile_rows = _supabase_request(f"profiles?telegram_chat_id=eq.{tg_id_str}&select=id,display_name,username,custom_ai_rules&limit=10") or []
@@ -234,6 +236,7 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
         "remaining": remaining,
         "period": period,
         "state_row": state_row,
+        "quota_fetch_failed": bool(state_fetch_failed and not linked_user_id),
     }
 
     if not _is_pytest():
@@ -372,6 +375,19 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     new_remaining = int(user_info["remaining"])
 
     if not bypass_quota:
+        if not user_info["is_admin"] and not user_info["is_pro"] and user_info.get("quota_fetch_failed"):
+            return {
+                "ok": False,
+                "error_code": "QUOTA_CHECK_FAILED",
+                "linked": bool(user_info["linked_user_id"]),
+                "display_name": user_info["display_name"],
+                "is_pro": False,
+                "used": new_used,
+                "limit": new_limit,
+                "remaining": 0,
+                "period": user_info["period"],
+                "detail": "تعذر التحقق من رصيد الرسائل حالياً، يرجى المحاولة مرة أخرى بعد لحظات.",
+            }
         if not user_info["is_admin"] and user_info["remaining"] <= 0:
             return {
                 "ok": False,
@@ -413,6 +429,19 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
             except Exception as e:
                 logger.warning(f"[NATIVE_VIP_CHAT] Quota check warning: {e}")
+                if not user_info["is_admin"] and not user_info["is_pro"]:
+                    return {
+                        "ok": False,
+                        "error_code": "QUOTA_CHECK_FAILED",
+                        "linked": True,
+                        "display_name": user_info["display_name"],
+                        "is_pro": False,
+                        "used": new_used,
+                        "limit": new_limit,
+                        "remaining": 0,
+                        "period": user_info["period"],
+                        "detail": "تعذر التحقق من رصيد الرسائل حالياً، يرجى المحاولة مرة أخرى بعد لحظات.",
+                    }
         else:
             # Unlinked Telegram user: deduct synchronously in telegram_vip_chat_state so rapid turns cannot double-spend
             fresh_used = int(user_info["used"])
@@ -432,7 +461,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
             new_used = fresh_used + 1
             new_remaining = max(0, new_limit - new_used)
             now_sync_iso = datetime.now(timezone.utc).isoformat()
-            _supabase_request(
+            write_res = _supabase_request(
                 "telegram_vip_chat_state?on_conflict=telegram_user_id",
                 method="POST",
                 payload={
@@ -444,6 +473,19 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     "updated_at": now_sync_iso,
                 },
             )
+            if write_res is None and not user_info["is_admin"] and not user_info["is_pro"]:
+                return {
+                    "ok": False,
+                    "error_code": "QUOTA_CHECK_FAILED",
+                    "linked": False,
+                    "display_name": user_info["display_name"],
+                    "is_pro": False,
+                    "used": fresh_used,
+                    "limit": new_limit,
+                    "remaining": 0,
+                    "period": user_info["period"],
+                    "detail": "تعذر التحقق من رصيد الرسائل حالياً، يرجى المحاولة مرة أخرى بعد لحظات.",
+                }
 
         with _USER_RESOLVE_LOCK:
             _USER_RESOLVE_CACHE.pop(int(tg_user_id), None)

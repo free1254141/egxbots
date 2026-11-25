@@ -338,5 +338,123 @@ def test_telegram_vip_chat_renders_lifetime_period_and_200_egp_when_founders_clo
         assert len(tvc._pricing_features_alert_text()) <= 199
 
 
+def test_free_quota_fails_closed_on_db_error_and_missing_client(monkeypatch):
+    class _BrokenSupabase:
+        def from_(self, _name):
+            raise RuntimeError("db timeout")
+
+    monkeypatch.setattr(auth_guard, "supabase", _BrokenSupabase())
+    monkeypatch.setattr(auth_guard, "_init_supabase", lambda: None)
+    monkeypatch.setattr(auth_guard, "is_payments_enabled", lambda: True)
+    monkeypatch.setattr(auth_guard, "get_cairo_date_string", lambda: "2026-11-25")
+
+    allowed_free, rem_free, lim_free, err_free = auth_guard.check_and_consume_quota("u-free", is_pro=False)
+    assert allowed_free is False
+    assert rem_free == 0
+    assert lim_free == 10
+    assert "تعذر التحقق" in err_free
+
+    allowed_pro, rem_pro, lim_pro, err_pro = auth_guard.check_and_consume_quota("u-pro", is_pro=True)
+    assert allowed_pro is True
+    assert rem_pro == 350
+    assert lim_pro == 350
+    assert err_pro == ""
+
+    import api.stock_ai as stock_ai_mod
+    monkeypatch.setattr(auth_guard, "supabase", None)
+    monkeypatch.setattr(stock_ai_mod, "supabase", None)
+    allowed_none, rem_none, _lim_none, err_none = auth_guard.check_and_consume_quota("u-free", is_pro=False)
+    assert allowed_none is False
+    assert rem_none == 0
+    assert "تعذر التحقق" in err_none
+
+
+def test_native_telegram_vip_chat_fails_closed_on_quota_errors(monkeypatch):
+    from api import native_telegram_vip_chat as ntvc
+
+    # 1. Linked Free user: exception inside check_and_consume_quota must block (never fall through to LLM)
+    monkeypatch.setattr(
+        ntvc,
+        "_resolve_telegram_user",
+        lambda _uid, _uname: {
+            "telegram_user_id": 777001,
+            "telegram_username": "tester",
+            "linked_user_id": "u-linked-free",
+            "display_name": "Tester",
+            "is_pro": False,
+            "is_admin": False,
+            "has_user_rules": False,
+            "used": 3,
+            "limit": 10,
+            "remaining": 7,
+            "period": "lifetime",
+            "state_row": None,
+        },
+    )
+    monkeypatch.setattr(
+        auth_guard,
+        "check_and_consume_quota",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("quota rpc exploded")),
+    )
+    res_linked = ntvc.handle_native_vip_chat(
+        {"telegram_user_id": 777001, "telegram_username": "tester", "message": "حلل سهم COMI"}
+    )
+    assert res_linked["ok"] is False
+    assert res_linked["error_code"] == "QUOTA_CHECK_FAILED"
+
+    # 2. Unlinked Free user: failed Supabase state upsert (None) must block (never grant unlimited unlinked turns)
+    monkeypatch.setattr(
+        ntvc,
+        "_resolve_telegram_user",
+        lambda _uid, _uname: {
+            "telegram_user_id": 777002,
+            "telegram_username": "tester2",
+            "linked_user_id": None,
+            "display_name": "Tester2",
+            "is_pro": False,
+            "is_admin": False,
+            "has_user_rules": False,
+            "used": 2,
+            "limit": 10,
+            "remaining": 8,
+            "period": "lifetime",
+            "state_row": None,
+        },
+    )
+    monkeypatch.setattr(ntvc, "_supabase_request", lambda *_a, **_k: None)
+    res_unlinked = ntvc.handle_native_vip_chat(
+        {"telegram_user_id": 777002, "telegram_username": "tester2", "message": "حلل سهم FWRY"}
+    )
+    assert res_unlinked["ok"] is False
+    assert res_unlinked["error_code"] == "QUOTA_CHECK_FAILED"
+
+    # 3. Unlinked Free user: failed initial GET of telegram_vip_chat_state must fail closed (never reset daily_count to 1)
+    monkeypatch.setattr(
+        ntvc,
+        "_resolve_telegram_user",
+        lambda _uid, _uname: {
+            "telegram_user_id": 777003,
+            "telegram_username": "tester3",
+            "linked_user_id": None,
+            "display_name": "Tester3",
+            "is_pro": False,
+            "is_admin": False,
+            "has_user_rules": False,
+            "used": 0,
+            "limit": 10,
+            "remaining": 10,
+            "period": "lifetime",
+            "state_row": None,
+            "quota_fetch_failed": True,
+        },
+    )
+    res_fetch_fail = ntvc.handle_native_vip_chat(
+        {"telegram_user_id": 777003, "telegram_username": "tester3", "message": "حلل سهم TMGH"}
+    )
+    assert res_fetch_fail["ok"] is False
+    assert res_fetch_fail["error_code"] == "QUOTA_CHECK_FAILED"
+
+
+
 
 

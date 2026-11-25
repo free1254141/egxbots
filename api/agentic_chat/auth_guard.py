@@ -31,6 +31,21 @@ BLOCKED_OUTPUT_REGEX = re.compile(
 )
 
 
+def _get_sb():
+    """Return active Supabase client while preserving monkeypatched `auth_guard.supabase` in tests."""
+    global supabase
+    if supabase is not None:
+        return supabase
+    _init_supabase()
+    try:
+        import api.stock_ai as _stock_ai
+        if getattr(_stock_ai, "supabase", None) is not None:
+            supabase = _stock_ai.supabase
+    except Exception:
+        pass
+    return supabase
+
+
 def get_cairo_date_string() -> str:
     """Return current date in Cairo timezone as YYYY-MM-DD."""
     return datetime.now(CAIRO_TZ).strftime("%Y-%m-%d")
@@ -138,8 +153,10 @@ def get_authenticated_user(request: Request) -> Optional[Dict[str, Any]]:
         return None
 
     try:
-        _init_supabase()
-        res = supabase.auth.get_user(token)
+        sb = _get_sb()
+        if not sb:
+            return None
+        res = sb.auth.get_user(token)
         if res and hasattr(res, "user") and res.user:
             return {
                 "id": str(res.user.id),
@@ -161,13 +178,14 @@ def _monthly_quota_start(user_id: Optional[str], is_pro: bool, today: str) -> st
     if not is_pro:
         return "1970-01-01"
     cal_month_start = f"{today[:7]}-01"
-    if not user_id or not supabase:
+    sb = _get_sb()
+    if not user_id or not sb:
         return cal_month_start
     try:
         from api.perf_utils import resolve_subscription_quota_window
 
         sub_res = (
-            supabase.table("subscriptions")
+            sb.table("subscriptions")
             .select("plan_id, status, current_period_start, current_period_end")
             .eq("user_id", user_id)
             .in_("status", ["active", "trialing"])
@@ -182,11 +200,12 @@ def _monthly_quota_start(user_id: Optional[str], is_pro: bool, today: str) -> st
 
 
 def _fetch_bonus_balance(user_id: Optional[str]) -> int:
-    """Return remaining telegram/referral bonus chat credits for the user."""
-    if not user_id or not supabase:
+    """Return remaining admin/referral bonus chat credits for the user."""
+    sb = _get_sb()
+    if not user_id or not sb:
         return 0
     try:
-        res = supabase.rpc("get_chat_bonus_balance", {"p_user_id": user_id}).execute()
+        res = sb.rpc("get_chat_bonus_balance", {"p_user_id": user_id}).execute()
         return max(0, int(getattr(res, "data", 0) or 0))
     except Exception:
         return 0
@@ -222,12 +241,17 @@ def check_and_consume_quota(
         return False, 0, quota_limit, "يلزم تسجيل الدخول لاستخدام المساعد الذكي."
 
     today = get_cairo_date_string()
-    _init_supabase()
+    sb = _get_sb()
+    if sb is None:
+        if not is_pro:
+            return False, 0, quota_limit, "تعذر التحقق من رصيد الرسائل حالياً، يرجى المحاولة مرة أخرى بعد لحظات."
+        return True, quota_limit, quota_limit, ""
+
     month_start = _monthly_quota_start(user_id, is_pro, today)
 
     try:
         prior_res = (
-            supabase.from_("ai_chatbot_limits")
+            sb.from_("ai_chatbot_limits")
             .select("date, chat_count")
             .eq("user_id", user_id)
             .gte("date", month_start)
@@ -241,7 +265,7 @@ def check_and_consume_quota(
         total_used = prior_used
 
         if today_cap > 0:
-            res = supabase.rpc(
+            res = sb.rpc(
                 "consume_ai_chat_quota",
                 {
                     "p_user_id": user_id,
@@ -258,7 +282,7 @@ def check_and_consume_quota(
 
         if not allowed and not is_pro:
             try:
-                bonus_res = supabase.rpc("consume_chat_bonus", {"p_user_id": user_id}).execute()
+                bonus_res = sb.rpc("consume_chat_bonus", {"p_user_id": user_id}).execute()
                 bonus_data = getattr(bonus_res, "data", None)
                 if isinstance(bonus_data, list) and bonus_data:
                     bonus_data = bonus_data[0]
@@ -292,7 +316,9 @@ def check_and_consume_quota(
         return True, base_remaining + bonus_left, quota_limit, ""
 
     except Exception:
-        # If DB check fails, default to allowing to avoid breaking active UX on transient DB hiccups
+        # Fail-closed for Free accounts so DB hiccups can NEVER leak extra unpaid LLM turns
+        if not is_pro:
+            return False, 0, quota_limit, "تعذر التحقق من رصيد الرسائل حالياً، يرجى المحاولة مرة أخرى بعد لحظات."
         return True, quota_limit, quota_limit, ""
 
 
@@ -328,10 +354,12 @@ def get_user_chat_quota(user_id: Optional[str], is_pro: bool) -> Tuple[int, int,
 
     today = get_cairo_date_string()
     try:
-        _init_supabase()
+        sb = _get_sb()
+        if sb is None:
+            return (limit, 0, limit) if not is_pro else (0, limit, limit)
         month_start = _monthly_quota_start(user_id, is_pro, today)
         res = (
-            supabase.from_("ai_chatbot_limits")
+            sb.from_("ai_chatbot_limits")
             .select("date, chat_count")
             .eq("user_id", user_id)
             .gte("date", month_start)
@@ -342,7 +370,7 @@ def get_user_chat_quota(user_id: Optional[str], is_pro: bool) -> Tuple[int, int,
         bonus_left = 0 if is_pro else _fetch_bonus_balance(user_id)
         return used, base_remaining + bonus_left, limit
     except Exception:
-        return 0, limit, limit
+        return (limit, 0, limit) if not is_pro else (0, limit, limit)
 
 
 def strip_dsml(text: str) -> str:
