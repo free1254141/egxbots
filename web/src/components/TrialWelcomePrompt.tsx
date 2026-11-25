@@ -267,7 +267,13 @@ export default function TrialWelcomePrompt() {
                   href={user?.id ? `https://t.me/egxbots_bot?start=${user.id}` : "/profile#telegram"}
                   target={user?.id ? "_blank" : undefined}
                   rel={user?.id ? "noopener noreferrer" : undefined}
-                  onClick={() => setDismissed(true)}
+                  onClick={() => {
+                    try {
+                      sessionStorage.removeItem("egxbots_trial_status_v2");
+                    } catch { /* ignore */ }
+                    if (user?.id) invalidateUserQuotaCache(user.id);
+                    setDismissed(true);
+                  }}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-purple-600/30"
                 >
                   <BellRing className="w-3.5 h-3.5" />

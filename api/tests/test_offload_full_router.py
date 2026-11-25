@@ -626,6 +626,7 @@ def test_backtests_rejects_admin_spoof_and_payments_founders():
         },
         rpc_handlers={
             "founders_offer_status": lambda _: {"enabled": True, "is_open": True, "price_egp": 100, "regular_price_egp": 200, "ends_at": "2027-01-01T00:00:00Z"},
+            "start_pro_trial": lambda _: {"success": True, "expires_at": "2026-12-01T00:00:00Z"},
         },
     )
     client = _build_client()
@@ -638,10 +639,19 @@ def test_backtests_rejects_admin_spoof_and_payments_founders():
         assert bt.status_code == 200
         assert [row["id"] for row in bt.json()] == ["pub-1"]
 
-        # Disposable email trial rejected & missing telegram rejected
-        tr_missing_tg = client.post("/api/subscription/trial", json={})
-        assert tr_missing_tg.status_code == 400
-        assert tr_missing_tg.json()["error"] == "TELEGRAM_LINK_REQUIRED"
+        # Trial succeeds without mandatory telegram link when user is otherwise eligible
+        tr_no_tg = client.post("/api/subscription/trial", json={})
+        assert tr_no_tg.status_code == 200
+        assert tr_no_tg.json()["success"] is True
+
+        # Disposable email trial is still rejected (403)
+        with mock.patch(
+            "api.routers.offload_user.resolve_verified_viewer",
+            return_value={"authenticated": True, "pro": False, "user_id": "u_disp", "email": "test@mailinator.com"},
+        ):
+            tr_disp = client.post("/api/subscription/trial", json={})
+            assert tr_disp.status_code == 403
+            assert tr_disp.json()["error"] == "DISPOSABLE_EMAIL_NOT_ALLOWED"
 
         with mock.patch(
             "api.easykash_payments.payment_config",

@@ -3588,7 +3588,7 @@ def get_subscription_trial(request: Request):
             return JSONResponse({"ok": True, "eligible": False, "has_used_trial": True, "reason": abuse["message"]}, headers=_PRIVATE_NO_STORE)
 
         return JSONResponse(
-            {"ok": True, "eligible": True, "has_used_trial": False, "telegram_linked": bool(tg_id), "requires_telegram_link": not bool(tg_id)},
+            {"ok": True, "eligible": True, "has_used_trial": False, "telegram_linked": bool(tg_id), "requires_telegram_link": False},
             headers=_PRIVATE_NO_STORE,
         )
     except Exception as exc:
@@ -3618,17 +3618,6 @@ async def post_subscription_trial(request: Request):
         return JSONResponse({"ok": False, "error": "PREVIOUS_SUBSCRIBER", "message": "التجربة المجانية متاحة فقط للمشتركين الجدد الذين لم يسبق لهم الاشتراك"}, status_code=400, headers=_PRIVATE_NO_STORE)
 
     tg_id = str(prof_row.get("telegram_chat_id") or "").strip() or None
-    if not tg_id:
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": "TELEGRAM_LINK_REQUIRED",
-                "telegram_bot_url": f"https://t.me/egxbots_bot?start={uid}",
-                "message": "لتفعيل التجربة المجانية (3 أيام Pro)، اربط حسابك بتليجرام أولاً عبر البوت لحماية الحساب واستلام التنبيهات.",
-            },
-            status_code=400,
-            headers=_PRIVATE_NO_STORE,
-        )
 
     ip_h = _hash_trial_signal(_extract_client_ip(request))
     dev_h = _hash_trial_signal(raw_dev)

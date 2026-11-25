@@ -792,15 +792,16 @@ class TelegramBot:
             from api.stock_ai import supabase
 
             if supabase:
-                # Fetch user profile to get display name
+                # Fetch user profile to get display name (avoid .maybe_single() on postgrest 0.16.11)
                 profile_res = (
                     supabase.table("profiles")
                     .select("display_name, username")
                     .eq("id", uid)
-                    .maybe_single()
+                    .limit(1)
                     .execute()
                 )
-                profile = profile_res.data if (profile_res and profile_res.data) else {}
+                profile_rows = getattr(profile_res, "data", None) or []
+                profile = profile_rows[0] if profile_rows else {}
                 display_name = (
                     profile.get("display_name") or profile.get("username") or "المستثمر"
                 )
@@ -846,14 +847,23 @@ class TelegramBot:
                 except Exception as e:
                     self._log(f"Could not clear duplicate telegram_chat_id: {e}")
 
-                # Update profiles table with telegram_chat_id
+                # Update profiles table with telegram_chat_id (upsert fallback if profile row wasn't provisioned yet)
                 res = (
                     supabase.table("profiles")
                     .update({"telegram_chat_id": str(chat_id)})
                     .eq("id", uid)
                     .execute()
                 )
-                if res.data:
+                if not getattr(res, "data", None):
+                    try:
+                        res = (
+                            supabase.table("profiles")
+                            .upsert({"id": uid, "telegram_chat_id": str(chat_id)}, on_conflict="id")
+                            .execute()
+                        )
+                    except Exception as up_err:
+                        self._log(f"Could not upsert missing profile for {uid}: {up_err}")
+                if getattr(res, "data", None):
                     # Persist permanent link audit event so unlinking cannot bypass trial/bonus anti-abuse
                     try:
                         supabase.table("user_activity_events").insert({
@@ -918,21 +928,21 @@ class TelegramBot:
                             .in_("status", ["active", "trialing"])
                             .order("current_period_end", desc=True)
                             .limit(1)
-                            .maybe_single()
                             .execute()
                         )
-                        if sub_res and sub_res.data:
+                        sub_rows = getattr(sub_res, "data", None) or []
+                        if sub_rows:
                             from api.perf_utils import (
                                 has_active_chat_pro,
                                 has_active_pro_subscription,
                                 has_active_vip_telegram,
                             )
-                            if has_active_pro_subscription([sub_res.data]):
-                                sub_end = sub_res.data.get("current_period_end")
-                                active_plan_id = str(sub_res.data.get("plan_id") or "").lower()
+                            if has_active_pro_subscription([sub_rows[0]]):
+                                sub_end = sub_rows[0].get("current_period_end")
+                                active_plan_id = str(sub_rows[0].get("plan_id") or "").lower()
                                 is_pro = True
-                                has_vip = has_active_vip_telegram([sub_res.data])
-                                has_chat = has_active_chat_pro([sub_res.data])
+                                has_vip = has_active_vip_telegram([sub_rows[0]])
+                                has_chat = has_active_chat_pro([sub_rows[0]])
                     except Exception as e:
                         self._log(f"Error checking user subscription: {e}")
 
@@ -999,10 +1009,11 @@ class TelegramBot:
                             )
                             if sent and has_vip:
                                 try:
-                                    recent_order = supabase.table("local_payment_orders").select("id, customer_note").eq("user_id", uid).eq("status", "approved").order("created_at", desc=True).limit(1).maybe_single().execute()
-                                    if recent_order and recent_order.data:
-                                        ord_id = recent_order.data.get("id")
-                                        ord_note = str(recent_order.data.get("customer_note") or "")
+                                    recent_order = supabase.table("local_payment_orders").select("id, customer_note").eq("user_id", uid).eq("status", "approved").order("created_at", desc=True).limit(1).execute()
+                                    recent_rows = getattr(recent_order, "data", None) or []
+                                    if recent_rows:
+                                        ord_id = recent_rows[0].get("id")
+                                        ord_note = str(recent_rows[0].get("customer_note") or "")
                                         if "tg_welcomed" not in ord_note:
                                             supabase.table("local_payment_orders").update({"customer_note": f"{ord_note} | tg_welcomed".strip(" |")}).eq("id", ord_id).execute()
                                 except Exception as mark_err:

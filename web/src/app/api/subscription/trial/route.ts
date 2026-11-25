@@ -273,7 +273,7 @@ export async function GET(request: Request) {
         eligible: true,
         has_used_trial: false,
         telegram_linked: Boolean(telegramChatId),
-        requires_telegram_link: !telegramChatId,
+        requires_telegram_link: false,
       },
       { headers: TRIAL_CACHE_HEADERS }
     );
@@ -341,17 +341,6 @@ export async function POST(request: Request) {
     }
 
     const telegramChatId = profileRow?.telegram_chat_id ? String(profileRow.telegram_chat_id).trim() : null;
-    if (!telegramChatId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "TELEGRAM_LINK_REQUIRED",
-          telegram_bot_url: `https://t.me/egxbots_bot?start=${user.id}`,
-          message: "لتفعيل التجربة المجانية (3 أيام Pro)، اربط حسابك بتليجرام أولاً عبر البوت لحماية الحساب واستلام التنبيهات.",
-        },
-        { status: 400 }
-      );
-    }
 
     const ipHash = hashTrialSignal(extractClientIp(request));
     const deviceHash = hashTrialSignal(rawDeviceFp);

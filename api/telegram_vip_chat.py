@@ -493,6 +493,26 @@ def build_welcome_panel_html(is_private: bool = False, chat_id: Optional[Any] = 
     """Build the main ARTORO VIP Chat Hub message (for public topic or private @egxbots_bot DM)."""
     if is_private:
         chat_id_line = f"\n🆔 <b>معرف تليجرام الخاص بك (Chat ID):</b> <code>{chat_id}</code>" if chat_id else ""
+        unlinked_hint = ""
+        if chat_id:
+            try:
+                from api.perf_utils import get_primary_supabase
+                sb = get_primary_supabase()
+                if sb is not None:
+                    linked_rows = getattr(
+                        sb.table("profiles").select("id").eq("telegram_chat_id", str(chat_id)).limit(1).execute(),
+                        "data",
+                        None,
+                    ) or []
+                    if not linked_rows:
+                        unlinked_hint = (
+                            "\n\n🔗 <b>حسابك على تليجرام غير مربوط بحساب الموقع بعد:</b> "
+                            "لربط الحساب وتفعيل التنبيهات ومزامنة محفظتك، افتح "
+                            "<a href=\"https://egxbots.com/profile#telegram\">صفحة حسابك في الموقع</a> "
+                            "واضغط زر <b>تفعيل البوت</b> أو انسخ أمر <code>/start</code> الشخصي الخاص بك والصقه هنا."
+                        )
+            except Exception:
+                pass
         return (
             "🤖 <b>الشات الخاص مع أرتورو — @egxbots_bot</b> 👑\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -504,7 +524,7 @@ def build_welcome_panel_html(is_private: bool = False, chat_id: Optional[Any] = 
             "🎫 <b>نظام الباقات والرصيد:</b>\n"
             "• <b>الباقة المجانية:</b> <code>10 أسئلة مجانية</code> (مرة واحدة لكل إيميل — لا تتجدد شهرياً + 10 رسائل هدية عند ربط تليجرام).\n"
             "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية + متابعة 15 سهماً بمحفظتك."
-            f"{chat_id_line}\n\n"
+            f"{chat_id_line}{unlinked_hint}\n\n"
             "👇 <b>اكتب سؤالك الآن أو اختر الأداة المطلوبة من الأزرار بالأسفل:</b>"
         )
 

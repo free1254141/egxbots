@@ -52,7 +52,7 @@ export function notifyTrialActivationError(
     const tgUrl =
       data.telegram_bot_url ||
       (userId ? `https://t.me/egxbots_bot?start=${userId}` : "https://t.me/egxbots_bot");
-    toast.error(msg, {
+    toast.info(msg, {
       duration: 8000,
       action: {
         label: isAr ? "ربط تليجرام الآن" : "Link Telegram",

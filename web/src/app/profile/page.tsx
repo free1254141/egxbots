@@ -9,7 +9,8 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { useWatchlist, type SavedSymbol } from "@/contexts/WatchlistContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
-import { Loader2, Send, Globe, Star, Trash2, Edit3, X, Check, ExternalLink, User, Wallet, CheckCircle2, Smartphone, ChevronDown, ChevronUp, Bot } from "lucide-react";
+import { invalidateUserQuotaCache } from "@/lib/user-quota-client";
+import { Loader2, Send, Globe, Star, Trash2, Edit3, X, Check, ExternalLink, User, Wallet, CheckCircle2, Smartphone, ChevronDown, ChevronUp, Bot, Copy } from "lucide-react";
 import { toast } from "sonner";
 import MyPortfolioSection from "./components/MyPortfolioSection";
 import PlanQuotaCard from "./components/PlanQuotaCard";
@@ -28,6 +29,7 @@ export default function ProfilePage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const userId = user?.id ?? null;
   const lastProfileRefreshAtRef = useRef(0);
+  const pendingTelegramLinkRef = useRef(false);
 
   const [username, setUsername] = useState<string | null>(null);
   const [telegramLinked, setTelegramLinked] = useState(false);
@@ -149,8 +151,10 @@ export default function ProfilePage() {
       .eq("id", userId)
       .maybeSingle();
     if (profileRow) {
+      const linked = Boolean((profileRow as any).telegram_chat_id);
+      if (linked) pendingTelegramLinkRef.current = false;
       setUsername((profileRow as any).username || (profileRow as any).display_name || null);
-      setTelegramLinked(Boolean((profileRow as any).telegram_chat_id));
+      setTelegramLinked(linked);
       setWhatsappNumber((profileRow as any).whatsapp_number || null);
     }
   }, [supabase, userId]);
@@ -188,12 +192,17 @@ export default function ProfilePage() {
     if (!userId) return;
     const refreshWhenVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (Date.now() - lastProfileRefreshAtRef.current < 10 * 60_000) return;
+      const cooldownMs = pendingTelegramLinkRef.current ? 3_000 : 10 * 60_000;
+      if (Date.now() - lastProfileRefreshAtRef.current < cooldownMs) return;
+      if (pendingTelegramLinkRef.current) {
+        invalidateUserQuotaCache(userId);
+        void refreshProInvite();
+      }
       void reloadProfile();
     };
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
-  }, [reloadProfile, userId]);
+  }, [reloadProfile, refreshProInvite, userId]);
 
   // Auto-scroll smoothly to portfolio section if hash is #portfolio
   useEffect(() => {
@@ -370,11 +379,14 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5 shrink-0">
               <a
                 href={botAppUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => {
+                  pendingTelegramLinkRef.current = true;
+                }}
                 className="inline-flex h-11 px-4 items-center justify-center gap-2 border-3 border-black bg-black text-[#FFE600] font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer"
               >
                 <Smartphone className="w-4 h-4 shrink-0" />
@@ -384,14 +396,40 @@ export default function ProfilePage() {
                 href={botWebUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => {
+                  pendingTelegramLinkRef.current = true;
+                }}
                 className="inline-flex h-11 px-4 items-center justify-center gap-2 border-3 border-black bg-white text-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer"
               >
                 <Globe className="w-4 h-4 shrink-0" />
                 <span>{isAr ? "تفعيل الويب (+10 رسائل 🎁)" : "Activate Web (+10 msgs 🎁)"}</span>
               </a>
+              {userId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    pendingTelegramLinkRef.current = true;
+                    const cmd = `/start ${userId}`;
+                    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+                      void navigator.clipboard.writeText(cmd);
+                    }
+                    toast.success(
+                      isAr
+                        ? "تم نسخ كود الربط! الصقه وأرسله داخل محادثة @egxbots_bot على تليجرام"
+                        : "Link command copied! Paste and send it to @egxbots_bot on Telegram"
+                    );
+                  }}
+                  className="inline-flex h-11 px-3 items-center justify-center gap-1.5 border-3 border-black bg-emerald-300 text-black font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] hover:bg-emerald-200 transition-all cursor-pointer"
+                  title={isAr ? "نسخ كود الربط اليدوي إذا تعذر فتح الرابط" : "Copy manual /start link command"}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{isAr ? "نسخ كود الربط" : "Copy Code"}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
+                  if (userId) invalidateUserQuotaCache(userId);
                   void refreshProInvite();
                   void reloadProfile();
                   toast.info(isAr ? "جاري التحقق من تفعيل البوت..." : "Checking bot status...");
