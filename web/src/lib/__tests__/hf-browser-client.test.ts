@@ -13,6 +13,7 @@ import {
   hfAuthFetch,
   hfPublicFetch,
   resetHfBrowserClientForTests,
+  resolveHfAssetUrl,
   shouldUseDirectHf,
 } from "@/lib/hf-browser-client";
 
@@ -190,5 +191,18 @@ describe("hf-browser-client", () => {
     const res = await hfAuthFetch("/api/ai_bot/recommendations?limit=6", undefined, { requireToken: false });
     expect(await res.json()).toEqual({ ok: true });
     expect(shouldUseDirectHf()).toBe(false);
+  });
+
+  it("resolveHfAssetUrl resolves directly to HF only on production egxbots hosts", () => {
+    (global as any).window = { location: { hostname: "egxbots.com" } };
+    expect(resolveHfAssetUrl("/api/disclosures/pdf/abc-123")).toBe("/api/disclosures/pdf/abc-123");
+
+    delete process.env.JEST_WORKER_ID;
+    expect(resolveHfAssetUrl("/api/disclosures/pdf/abc-123")).toBe(
+      `${HF_DIRECT_ORIGIN}/api/disclosures/pdf/abc-123`
+    );
+
+    (global as any).window = { location: { hostname: "localhost" } };
+    expect(resolveHfAssetUrl("/api/disclosures/pdf/abc-123")).toBe("/api/disclosures/pdf/abc-123");
   });
 });

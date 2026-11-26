@@ -36,7 +36,7 @@ import {
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { useChat } from "@/contexts/ChatContext";
-import { hfPublicFetch } from "@/lib/hf-browser-client";
+import { hfPublicFetch, resolveHfAssetUrl } from "@/lib/hf-browser-client";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import StockLogo from "@/components/StockLogo";
 import {
@@ -107,6 +107,9 @@ export default function DisclosuresClient({
   const [disclosures, setDisclosures] = useState<DisclosureItem[]>(initialDisclosures);
   const [hydratedPool, setHydratedPool] = useState<DisclosureItem[]>(initialPool || []);
   const [hydratedPriceMap, setHydratedPriceMap] = useState<Record<string, SymbolPriceInfo>>(priceMap || {});
+  const [poolFetchDone, setPoolFetchDone] = useState<boolean>(
+    Boolean(initialAnalytics) || (initialPool?.length ?? 0) > 30
+  );
   const [totalCount, setTotalCount] = useState<number>(initialStats.total || initialDisclosures.length);
   const [hasMore, setHasMore] = useState<boolean>(
     (initialStats.total || initialDisclosures.length) > initialDisclosures.length
@@ -115,7 +118,10 @@ export default function DisclosuresClient({
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
 
   useEffect(() => {
-    if (isNonEgx || hydratedPool.length > 30) return;
+    if (isNonEgx || hydratedPool.length > 30) {
+      setPoolFetchDone(true);
+      return;
+    }
     let active = true;
     const controller = new AbortController();
     hfPublicFetch("/api/public/disclosures-page-data", { signal: controller.signal }, { cacheTtlMs: 300_000 })
@@ -129,12 +135,18 @@ export default function DisclosuresClient({
           setHydratedPriceMap(payload.priceMap);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (active) setPoolFetchDone(true);
+      });
     return () => {
       active = false;
       controller.abort();
     };
   }, [isNonEgx, hydratedPool.length]);
+
+  const isWaitingFullEgxAnalytics =
+    !isNonEgx && !initialAnalytics && hydratedPool.length <= 30 && !poolFetchDone;
 
   const [search, setSearch] = useState<string>("");
   const [debouncedSearch, setDebouncedSearch] = useState<string>("");
@@ -507,8 +519,8 @@ export default function DisclosuresClient({
 
   // Group disclosures by stock into unified cards (one consolidated card per stock per timeframe!)
   const groupedDisclosures = useMemo(() => {
-    return groupDisclosuresByStock(displayedDisclosures, priceMap || {});
-  }, [displayedDisclosures, priceMap]);
+    return groupDisclosuresByStock(displayedDisclosures, activePriceMap);
+  }, [displayedDisclosures, activePriceMap]);
 
   return (
     <div className="w-full pt-5 sm:pt-7 pb-16" dir={isAr ? "rtl" : "ltr"}>
@@ -698,12 +710,16 @@ export default function DisclosuresClient({
                 <TrendingUp className="w-4 h-4 text-emerald-700 dark:text-[#00FF66]" />
               </div>
               <div className="text-xl sm:text-2xl font-black text-emerald-800 dark:text-[#00FF66] truncate">
-                {activeAnalytics
+                {isWaitingFullEgxAnalytics
+                  ? (isAr ? `${initialStats.buys} شراء` : `${initialStats.buys} buys`)
+                  : activeAnalytics
                   ? `${activeAnalytics.flowDistribution.net_value_egp >= 0 ? "+" : ""}${formatEgp(activeAnalytics.flowDistribution.net_value_egp)}`
-                  : `${initialStats.buys} شراء`}
+                  : (isAr ? `${initialStats.buys} شراء` : `${initialStats.buys} buys`)}
               </div>
               <span className="text-[11px] font-bold text-emerald-800/80 dark:text-emerald-300/80">
-                {activeAnalytics.flowDistribution.net_value_egp >= 0
+                {isWaitingFullEgxAnalytics
+                  ? (isAr ? "جاري حساب صافي السيولة..." : "Calculating net flow...")
+                  : activeAnalytics.flowDistribution.net_value_egp >= 0
                   ? isAr ? "شراء تجميعي يفوق التخارج" : "Accumulation exceeds exits"
                   : isAr ? "تخارج يفوق الشراء" : "Selling exceeds buys"}
               </span>
@@ -726,9 +742,17 @@ export default function DisclosuresClient({
                 <Target className="w-4 h-4 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform" />
               </div>
               <div className="text-2xl sm:text-3xl font-black text-amber-950 dark:text-amber-300 flex items-baseline gap-2">
-                <span>{cumulativeAnalytics ? cumulativeAnalytics.executiveStats.symbols_below_cost_count : 0}</span>
+                <span>
+                  {isWaitingFullEgxAnalytics
+                    ? "..."
+                    : cumulativeAnalytics
+                    ? cumulativeAnalytics.executiveStats.symbols_below_cost_count
+                    : 0}
+                </span>
                 <span className="text-xs font-bold text-amber-800 dark:text-amber-400">
-                  {isAr
+                  {isWaitingFullEgxAnalytics
+                    ? (isAr ? "جاري التحميل..." : "Loading...")
+                    : isAr
                     ? `/ ${cumulativeAnalytics ? cumulativeAnalytics.costDiscountTop.length : 0} سهم محتفظ به`
                     : `/ ${cumulativeAnalytics ? cumulativeAnalytics.costDiscountTop.length : 0} held`}
                 </span>
@@ -747,7 +771,9 @@ export default function DisclosuresClient({
                 <Users className="w-4 h-4 text-black dark:text-[#FFE600]" />
               </div>
               <div className="text-2xl sm:text-3xl font-black text-black dark:text-[#FFE600]">
-                {activeAnalytics ? activeAnalytics.majorShareholders.length : initialStats.shareholding}
+                {!isNonEgx && hydratedPool.length <= 30 && !initialAnalytics
+                  ? initialStats.shareholding
+                  : activeAnalytics.majorShareholders.length}
               </div>
               <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
                 {isAr ? "نماذج المادة 30 والتداول الحر" : "Article 30 & Free Float"}
@@ -920,8 +946,18 @@ export default function DisclosuresClient({
             </>
           )}
 
-          {/* Smart Money Liquidity Heatmap (requires share counts - EGX only) */}
-          {!isNonEgx && activeAnalytics && (
+          {/* Smart Money Liquidity Heatmap & Analytical Charts (requires share counts - EGX only) */}
+          {!isNonEgx && isWaitingFullEgxAnalytics && (
+            <div className="mb-6 p-6 border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center gap-3 text-xs sm:text-sm font-black text-zinc-700 dark:text-zinc-300">
+              <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+              <span>
+                {isAr
+                  ? "جاري تحميل خريطة السيولة ومقارنة تكلفة الداخليين الكاملة..."
+                  : "Loading full Insider Liquidity Heatmap & Cost Comparison..."}
+              </span>
+            </div>
+          )}
+          {!isNonEgx && !isWaitingFullEgxAnalytics && activeAnalytics && (
             <div className="mb-6">
               <InsiderHeatmap
                 items={activeAnalytics.heatmapItems}
@@ -933,7 +969,7 @@ export default function DisclosuresClient({
           )}
 
           {/* Simple Analytical Charts (requires share counts - EGX only) */}
-          {!isNonEgx && activeAnalytics && (
+          {!isNonEgx && !isWaitingFullEgxAnalytics && activeAnalytics && (
             <InsiderCharts
               costDiscounts={cumulativeAnalytics.costDiscountTop}
               flowDistribution={activeAnalytics.flowDistribution}
@@ -1321,7 +1357,17 @@ export default function DisclosuresClient({
       )}
 
       {/* TAB 2: Major Shareholders & Founders (Article 30 Registry) */}
-      {activeTab === "major_shareholders" && (
+      {activeTab === "major_shareholders" && isWaitingFullEgxAnalytics && (
+        <div className="p-8 border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center gap-3 text-xs sm:text-sm font-black text-zinc-700 dark:text-zinc-300">
+          <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
+          <span>
+            {isAr
+              ? "جاري تحميل سجل كبار المساهمين ونماذج المادة 30..."
+              : "Loading Major Shareholders & Article 30 registry..."}
+          </span>
+        </div>
+      )}
+      {activeTab === "major_shareholders" && !isWaitingFullEgxAnalytics && (
         <MajorShareholdersTab
           companies={activeAnalytics?.majorShareholders?.length ? activeAnalytics.majorShareholders : (initialAnalytics?.majorShareholders || [])}
           isAr={isAr}
@@ -1390,7 +1436,7 @@ export default function DisclosuresClient({
 
               <div className="flex items-center gap-2">
                 <a
-                  href={`/api/disclosures/pdf/${previewItem.id}`}
+                  href={resolveHfAssetUrl(`/api/disclosures/pdf/${previewItem.id}`)}
                   download={`egx_disclosure_${previewItem.symbol || 'official'}.pdf`}
                   className="px-3 py-1 text-xs font-black bg-[#FFE600] text-black border-2 border-white hover:bg-white transition-all flex items-center gap-1 cursor-pointer"
                 >
@@ -1437,7 +1483,7 @@ export default function DisclosuresClient({
             {/* Modal Body: Full Live PDF Iframe */}
             <div className="flex-1 w-full h-full bg-zinc-800 p-2 overflow-hidden">
               <iframe
-                src={`/api/disclosures/pdf/${previewItem.id}#view=FitH`}
+                src={`${resolveHfAssetUrl(`/api/disclosures/pdf/${previewItem.id}`)}#view=FitH`}
                 title={previewItem.title}
                 className="w-full h-full border-2 border-black bg-white shadow-2xl"
               />

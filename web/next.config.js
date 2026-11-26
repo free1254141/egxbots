@@ -398,7 +398,7 @@ compress: true,
         ],
       },
       {
-        source: '/(chart|chat|scanner/ai|scanner/market|stocks|markets/:path*|dividends/:path*)',
+        source: '/(chart|chat|scanner/ai|scanner/market|stocks|blogs|blogs/:path*|markets/:path*|dividends/:path*)',
         headers: [
           {
             key: 'Cache-Control',

@@ -6,7 +6,7 @@ import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, B
 import { toast } from "sonner";
 import StockCard, { StockData } from "./StockCard";
 import StockLogo from "@/components/StockLogo";
-import { hfAuthFetch } from "@/lib/hf-browser-client";
+import { hfAuthFetch, resolveHfAssetUrl } from "@/lib/hf-browser-client";
 import {
     ChatVisualsPayload,
     ComparisonMirrorCard,
@@ -1334,11 +1334,13 @@ export function FormattedChatMessage({
     const [copiedText, setCopiedText] = useState(false);
     const [savingToPortfolio, setSavingToPortfolio] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
-        const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+    const [isPlayingAudio, setIsPlayingAudio] = useState(false);
     const [loadingAudio, setLoadingAudio] = useState(false);
+    const [isHydrated, setIsHydrated] = useState(false);
     const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
+        setIsHydrated(true);
         return () => {
             if (audioPlayerRef.current) {
                 audioPlayerRef.current.pause();
@@ -1685,6 +1687,9 @@ export function FormattedChatMessage({
                             return null;
                         }
                         renderedDisclosureIds.add(discId);
+                        const pdfUrl = isHydrated
+                            ? resolveHfAssetUrl(`/api/disclosures/pdf/${discId}`)
+                            : `/api/disclosures/pdf/${discId}`;
                         return (
                             <div key={`disc-pdf-${discId}`} className="my-3 w-full block overflow-hidden border-3 border-black dark:border-white bg-zinc-100 dark:bg-zinc-950 shadow-[4px_4px_0_0_#000] dark:shadow-[4px_4px_0_0_#FFE600]">
                                 <div className="px-3 py-1.5 bg-black text-white text-[11px] font-black flex items-center justify-between border-b-2 border-black dark:border-white">
@@ -1705,7 +1710,7 @@ export function FormattedChatMessage({
                                     ) : (
                                         <iframe
                                             key={`iframe-pdf-${discId}`}
-                                            src={`/api/disclosures/pdf/${discId}#toolbar=0&navpanes=0&view=FitH`}
+                                            src={`${pdfUrl}#toolbar=0&navpanes=0&view=FitH`}
                                             title="مستند الإفصاح الأصلي"
                                             className="w-full h-full block border-0 bg-white"
                                         />
@@ -1714,7 +1719,7 @@ export function FormattedChatMessage({
                                 <div className="px-3 py-2 bg-[#FFE600] text-black text-xs font-black flex flex-wrap items-center justify-between gap-2">
                                     <div className="flex items-center gap-2">
                                         <a
-                                            href={`/api/disclosures/pdf/${discId}`}
+                                            href={pdfUrl}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="px-2.5 py-1 bg-black text-white hover:bg-white hover:text-black border border-black flex items-center gap-1 transition-all"
@@ -1722,7 +1727,7 @@ export function FormattedChatMessage({
                                             📄 فتح المستند بالحجم الكامل ↗
                                         </a>
                                         <a
-                                            href={`/api/disclosures/pdf/${discId}`}
+                                            href={pdfUrl}
                                             download={`egx_disclosure_${discId}.pdf`}
                                             className="px-2.5 py-1 bg-white text-black hover:bg-black hover:text-white border border-black flex items-center gap-1 transition-all"
                                         >

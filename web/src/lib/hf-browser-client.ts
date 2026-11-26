@@ -39,6 +39,14 @@ export function shouldUseDirectHf(): boolean {
   return PROD_HOSTNAMES.has(host);
 }
 
+export function resolveHfAssetUrl(pathAndQuery: string): string {
+  const path = normalizePath(pathAndQuery);
+  if (shouldUseDirectHf()) {
+    return `${HF_DIRECT_ORIGIN}${path}`;
+  }
+  return path;
+}
+
 function setCachedResponse(key: string, entry: CacheEntry): void {
   if (responseCache.has(key)) {
     responseCache.delete(key);

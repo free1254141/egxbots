@@ -989,8 +989,17 @@ class TelegramBot:
                             prev_trial = supabase.table("subscription_trials").select("user_id").eq("user_id", uid).limit(1).execute()
                             prev_tg_trial = None
                             try:
-                                prev_tg_trial = supabase.table("subscription_trials").select("user_id").eq("telegram_chat_id", str(chat_id)).limit(1).execute()
-                            except Exception:
+                                prev_tg_trial = (
+                                    supabase.table("user_activity_events")
+                                    .select("user_id")
+                                    .eq("event_name", "trial_started")
+                                    .contains("metadata", {"telegram_chat_id": str(chat_id)})
+                                    .neq("user_id", uid)
+                                    .limit(1)
+                                    .execute()
+                                )
+                            except Exception as e:
+                                self._log(f"Could not check prior telegram trial usage: {e}")
                                 prev_tg_trial = None
                             prev_ord = supabase.table("local_payment_orders").select("id").eq("user_id", uid).eq("status", "approved").limit(1).execute()
                             prev_fnd = supabase.table("founders_offer_members").select("user_id").eq("user_id", uid).limit(1).execute()

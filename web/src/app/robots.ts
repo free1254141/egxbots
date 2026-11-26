@@ -17,14 +17,11 @@ export default function robots(): MetadataRoute.Robots {
           'Perplexity-User',
           'ClaudeBot',
           'Claude-Web',
-          'anthropic-ai',
           'MistralAI-User',
           'Google-Extended',
           'Applebot-Extended',
-          'cohere-ai',
           'Bravebot',
           'DuckAssistBot',
-          'Meta-ExternalAgent',
           'YouBot'
         ],
         allow: [
@@ -53,8 +50,8 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ['/admin', '/api', '/profile'],
       },
       {
-        // SEO-tool / bulk scrapers: no search or AI-answer visibility, but each
-        // crawl of /stocks/* can trigger an on-demand render (Vercel CPU).
+        // SEO-tool / bulk AI-training & scraper crawlers: no search or AI-answer visibility,
+        // but heavy crawling across 600+ /stocks/* pages burns ISR Reads & Origin Transfer.
         userAgent: [
           'AhrefsBot',
           'SemrushBot',
@@ -63,7 +60,16 @@ export default function robots(): MetadataRoute.Robots {
           'PetalBot',
           'Bytespider',
           'DataForSeoBot',
-          'BLEXBot'
+          'BLEXBot',
+          'Meta-ExternalAgent',
+          'anthropic-ai',
+          'cohere-ai',
+          'CCBot',
+          'Amazonbot',
+          'FacebookBot',
+          'Diffbot',
+          'ImagesiftBot',
+          'Omgilibot'
         ],
         disallow: '/',
       },

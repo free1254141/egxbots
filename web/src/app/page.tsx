@@ -7,7 +7,7 @@ import LandingClient from "./LandingClient";
  * HTML from the Edge CDN, and the widgets below fetch their own daily-cached
  * endpoints.
  */
-export const revalidate = 604800;
+export const dynamic = "force-static";
 
 export default function HomePage() {
   return <LandingClient />;

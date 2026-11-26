@@ -3,7 +3,8 @@ import { Metadata } from "next";
 import { PILLAR_ARTICLES } from "@/lib/seo/pillar-articles";
 import PillarArticleClient from "./PillarArticleClient";
 
-export const revalidate = 604800;
+export const dynamic = "force-static";
+export const dynamicParams = false;
 
 export async function generateStaticParams() {
   return Object.keys(PILLAR_ARTICLES).map((slug) => ({ slug }));

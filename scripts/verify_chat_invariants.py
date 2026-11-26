@@ -37,6 +37,7 @@ CRITICAL_MODULES = [
 CRITICAL_MODULES = [m for m in CRITICAL_MODULES if m]
 
 OFFLINE_TEST_SUITES = [
+    "api/tests/test_chat_audit_2026_11_26_fixes.py",
     "api/tests/test_corporate_events_engine.py",
     "api/tests/test_intraday_and_cache_hardening.py",
     "api/tests/test_quant_intelligence_engine.py",

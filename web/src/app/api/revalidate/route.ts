@@ -95,11 +95,9 @@ async function handleRevalidate(req: NextRequest) {
         revalidated.push(path);
       }
     } else if (tags.length === 0) {
-      // Targeted purge: refresh main public entrypoints without forcing layout re-render
-      revalidatePath("/");
-      revalidatePath("/scanner/market");
+      // Targeted purge: refresh dynamic disclosures without touching pure-static pages
       revalidatePath("/disclosures");
-      revalidated.push("home", "market", "disclosures");
+      revalidated.push("disclosures");
       await invalidateByTag(DAILY_CACHE_TAG_VALUES);
       cdnInvalidated.push(...DAILY_CACHE_TAG_VALUES);
     }

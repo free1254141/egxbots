@@ -3,7 +3,6 @@ import TechnicalScannerGuide from "./TechnicalScannerGuide";
 import { Metadata } from "next";
 
 export const dynamic = "force-static";
-export const revalidate = 604800;
 
 export const metadata: Metadata = {
   title: "الماسح الفني للأسهم المصرية والسعودية (EGX & TASI) | Technical Stock Screener",

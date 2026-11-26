@@ -63,6 +63,89 @@ def extract_shares_from_title(title: str):
     return None
 
 
+def clean_rss_title(title: str) -> str:
+    """Strip trailing publisher attribution from RSS disclosure headlines."""
+    if not title:
+        return ""
+    cleaned = re.sub(
+        r"\s*[-–|]\s*(?:معلومات مباشر|Mubasher|اليوم السابع|جريدة المال|جريدة حابي|أموال الغد|اقتصاد الشرق|بوابة الأهرام|المصري اليوم|investing\.com).*$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip()
+
+
+def classify_disclosure_headline(clean_t: str):
+    """
+    Classify EGX disclosure headline into `(disclosure_type, action_type, shares_count)`.
+    Preserves `buy`/`sell` polarity for insider and major-shareholder stake changes even when reported by EGP value.
+    """
+    shares_cnt = extract_shares_from_title(clean_t)
+    t_str = clean_t or ""
+
+    if any(
+        k in t_str
+        for k in (
+            "تعاملات الداخليين",
+            "يرفع حصته",
+            "يخفض حصته",
+            "رفع حصته",
+            "خفض حصته",
+            "يبيع حصة",
+            "يشتري حصة",
+            "مساهم يبيع",
+            "مساهم يشتري",
+        )
+    ):
+        d_type = "insider_trading"
+    elif any(k in t_str for k in ("هيكل المساهمين", "كبار الملاك", "كبار المساهمين")):
+        d_type = "major_shareholders"
+    elif "مجلس إدارة" in t_str:
+        d_type = "board_resolution"
+    else:
+        d_type = "material_event"
+
+    is_stake_trade = (
+        d_type in ("insider_trading", "major_shareholders")
+        or (
+            shares_cnt is not None
+            and shares_cnt > 0
+            and any(k in t_str for k in ("خفض حصته", "رفع حصته", "شراء داخلي", "بيع داخلي"))
+        )
+    )
+    action_type = "general"
+    if is_stake_trade:
+        if any(
+            k in t_str
+            for k in (
+                "خفض حصته",
+                "يخفض حصته",
+                "يبيع حصة",
+                "مساهم يبيع",
+                "بيع",
+                "تقليص",
+                "تخارج",
+                "خروج من قائمة كبار الملاك",
+            )
+        ):
+            action_type = "sell"
+        elif any(
+            k in t_str
+            for k in (
+                "رفع حصته",
+                "يرفع حصته",
+                "يشتري حصة",
+                "مساهم يشتري",
+                "شراء",
+                "زيادة حصة",
+                "تجميع",
+            )
+        ):
+            action_type = "buy"
+    return d_type, action_type, shares_cnt
+
+
 def run_daily_sync():
     print("=" * 65)
     print("🕒 Starting Daily EGX Disclosures Incremental Sync...")
@@ -74,22 +157,27 @@ def run_daily_sync():
 
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    # 1. Get latest disclosure date in database
+    # 1. Get latest disclosure date in database (bounded back at least 7d so delayed insider filings aren't skipped)
     try:
         res = sb.table('egx_disclosures').select('disclosure_date').order('disclosure_date', desc=True).limit(1).execute()
         latest_date_str = res.data[0]['disclosure_date'] if res.data else '2026-01-01'
         latest_date = datetime.date.fromisoformat(latest_date_str)
         print(f"📅 Latest disclosure date in DB: {latest_date}")
     except Exception as e:
-        print(f"⚠️ Warning: Could not query latest date ({e}), defaulting to 3 days ago.")
-        latest_date = datetime.date.today() - datetime.timedelta(days=3)
+        print(f"⚠️ Warning: Could not query latest date ({e}), defaulting to 7 days ago.")
+        latest_date = datetime.date.today() - datetime.timedelta(days=7)
 
-    # 2. Fetch fresh items from RSS targeting recent filings
+    cutoff_date = min(latest_date, datetime.date.today() - datetime.timedelta(days=7))
+
+    # 2. Fetch fresh items from RSS targeting recent filings (Mubasher + Egyptian financial press)
     queries = [
-        'site:mubasher.info/news "تعاملات الداخليين والمساهمين الرئيسيين"',
-        'site:mubasher.info/news "إفصاح" "البورصة المصرية"',
-        'site:mubasher.info/news "هيكل المساهمين" "البورصة المصرية"',
-        'site:mubasher.info/news "مجلس إدارة" "البورصة المصرية"'
+        'site:mubasher.info/news "تعاملات الداخليين" when:14d',
+        'site:mubasher.info/news "إفصاح" "البورصة المصرية" when:14d',
+        'site:mubasher.info/news "هيكل المساهمين" "البورصة المصرية" when:14d',
+        'site:mubasher.info/news "مجلس إدارة" "البورصة المصرية" when:14d',
+        '("يرفع حصته" OR "يخفض حصته" OR "رفع حصته" OR "خفض حصته") "البورصة المصرية" when:14d',
+        '("تعاملات الداخليين" OR "كبار الملاك" OR "كبار المساهمين") "البورصة المصرية" when:14d',
+        '("مساهم يبيع" OR "مساهم يشتري" OR "يبيع حصة" OR "يشتري حصة") "البورصة المصرية" when:14d',
     ]
 
     # Preload latest prices for execution_price enrichment
@@ -122,9 +210,9 @@ def run_daily_sync():
                     except Exception:
                         dt_obj = datetime.date.today()
 
-                    # Only process items from latest_date onward
-                    if dt_obj >= latest_date and title not in seen_titles:
-                        clean_t = re.sub(r'\s*-\s*معلومات مباشر.*$', '', title).strip()
+                    # Process items from cutoff_date onward (dedup step filters already stored filings)
+                    if dt_obj >= cutoff_date and title not in seen_titles:
+                        clean_t = clean_rss_title(title)
                         if any(kw in clean_t for kw in EXCLUDE_KEYWORDS) or any(kw in clean_t for kw in EXTRA_NON_EGX_KEYWORDS):
                             continue
                         sym, official_name = match_stock(clean_t)
@@ -132,29 +220,7 @@ def run_daily_sync():
                             continue
 
                         seen_titles.add(title)
-                        d_type = 'material_event'
-                        if 'تعاملات الداخليين' in clean_t:
-                            d_type = 'insider_trading'
-                        elif 'هيكل المساهمين' in clean_t:
-                            d_type = 'major_shareholders'
-                        elif 'مجلس إدارة' in clean_t:
-                            d_type = 'board_resolution'
-
-                        shares_cnt = extract_shares_from_title(clean_t)
-                        is_stake_trade = (
-                            shares_cnt is not None
-                            and shares_cnt > 0
-                            and (
-                                d_type in ('insider_trading', 'major_shareholders')
-                                or any(k in clean_t for k in ('خفض حصته', 'رفع حصته', 'شراء داخلي', 'بيع داخلي'))
-                            )
-                        )
-                        action_type = 'general'
-                        if is_stake_trade:
-                            if any(k in clean_t for k in ('خفض حصته', 'بيع', 'تقليص', 'تخارج')):
-                                action_type = 'sell'
-                            elif any(k in clean_t for k in ('رفع حصته', 'شراء', 'زيادة حصة', 'تجميع')):
-                                action_type = 'buy'
+                        d_type, action_type, shares_cnt = classify_disclosure_headline(clean_t)
                         meta = {'raw_title': clean_t, 'pub_date': pub, 'synced_by': 'daily_job'}
                         if action_type in ('buy', 'sell') and sym in price_map:
                             meta['execution_price'] = price_map[sym]
@@ -214,7 +280,7 @@ def run_daily_sync():
                     and ev_key in existing_event_keys
                 ):
                     continue
-                if not it.get('shares_count'):
+                if not it.get('shares_count') and it.get('disclosure_type') not in ('insider_trading', 'major_shareholders'):
                     it['action_type'] = 'general'
                 existing_urls.add(it.get('source_url'))
                 existing_norm_titles.add(norm_t)

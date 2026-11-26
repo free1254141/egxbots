@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import DisclosuresClient, { DisclosuresInitialStats } from "./DisclosuresClient";
 import type { DisclosureItem } from "@/lib/disclosures-analytics";
-import { analyzeDisclosures, DisclosuresAnalyticsResult, SymbolPriceInfo } from "@/lib/disclosures-analytics";
+import type { SymbolPriceInfo } from "@/lib/disclosures-analytics";
 import { DAILY_CACHE_TAGS } from "@/lib/cache/daily";
 import { fetchHfPublicJson } from "@/lib/hf-public-read";
 
@@ -58,11 +58,24 @@ export const metadata: Metadata = {
 
 const INITIAL_PAGE_SIZE = 24;
 
+function pickPriceMapForItems(
+  items: DisclosureItem[],
+  fullPriceMap: Record<string, SymbolPriceInfo> | undefined
+): Record<string, SymbolPriceInfo> {
+  if (!fullPriceMap) return {};
+  const subset: Record<string, SymbolPriceInfo> = {};
+  for (const item of items) {
+    const sym = item.symbol?.trim().toUpperCase();
+    if (sym && fullPriceMap[sym]) {
+      subset[sym] = fullPriceMap[sym];
+    }
+  }
+  return subset;
+}
+
 async function getInitialDisclosuresData(): Promise<{
   items: DisclosureItem[];
-  allPool: DisclosureItem[];
   stats: DisclosuresInitialStats;
-  analytics: DisclosuresAnalyticsResult;
   priceMap: Record<string, SymbolPriceInfo>;
 }> {
   const hf = await fetchHfPublicJson<{
@@ -72,16 +85,20 @@ async function getInitialDisclosuresData(): Promise<{
     priceMap?: Record<string, SymbolPriceInfo>;
   }>("/api/public/disclosures-page-data", 604800, 5000, [DAILY_CACHE_TAGS.disclosures]);
   if (hf && Array.isArray(hf.allPool) && hf.allPool.length > 0) {
-    const priceMap = hf.priceMap || {};
-    const analytics = analyzeDisclosures(hf.allPool, priceMap);
-    const items = Array.isArray(hf.items) ? hf.items : hf.allPool.slice(0, INITIAL_PAGE_SIZE);
+    const items = Array.isArray(hf.items) && hf.items.length > 0
+      ? hf.items.slice(0, INITIAL_PAGE_SIZE)
+      : hf.allPool.slice(0, INITIAL_PAGE_SIZE);
     const stats = hf.stats || {
       total: hf.allPool.length,
       buys: hf.allPool.filter((d) => d.action_type === "buy" || d.sentiment === "bullish").length,
       sells: hf.allPool.filter((d) => d.action_type === "sell" || d.sentiment === "bearish").length,
       shareholding: hf.allPool.filter((d) => d.disclosure_type === "major_shareholders" || d.stake_after != null).length,
     };
-    return { items, allPool: hf.allPool, stats, analytics, priceMap };
+    return {
+      items,
+      stats,
+      priceMap: pickPriceMapForItems(items, hf.priceMap),
+    };
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -89,20 +106,17 @@ async function getInitialDisclosuresData(): Promise<{
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
-    const emptyAnalytics = analyzeDisclosures([], {});
     return {
       items: [],
-      allPool: [],
       stats: { total: 0, buys: 0, sells: 0, shareholding: 0 },
-      analytics: emptyAnalytics,
       priceMap: {},
     };
   }
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Fetch initial batch of disclosures, stats pool, latest prices, and company fundamentals in parallel
-  const [pageRes, statsRes, pricesRes, fundamentalsRes] = await Promise.all([
+  // Fetch initial 24 disclosures + compact status projection for summary counters (avoids serializing 2,000 rows in SSR HTML)
+  const [pageRes, statsRes] = await Promise.all([
     supabase
       .from("egx_disclosures")
       .select(
@@ -114,78 +128,51 @@ async function getInitialDisclosuresData(): Promise<{
       .limit(INITIAL_PAGE_SIZE),
     supabase
       .from("egx_disclosures")
-      .select(
-        "id, symbol, company_name, disclosure_type, disclosure_date, title, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata"
-      )
+      .select("disclosure_type, sentiment, action_type, stake_after")
       .order("disclosure_date", { ascending: false })
       .limit(2000),
-    supabase
-      .from("stock_technical_indicators")
-      .select("symbol, close, change_pct")
-      .limit(350),
-    supabase
-      .from("stock_fundamentals")
-      .select("symbol, data")
-      .limit(350),
   ]);
 
-  const allDisclosures = (statsRes.data || []) as DisclosureItem[];
+  const items = (pageRes.data || []) as DisclosureItem[];
+  const itemSymbols = Array.from(
+    new Set(items.map((d) => d.symbol?.trim().toUpperCase()).filter((s): s is string => Boolean(s)))
+  );
   const priceMap: Record<string, SymbolPriceInfo> = {};
-  if (pricesRes.data) {
-    for (const p of pricesRes.data) {
-      if (p.symbol && p.close != null) {
-        priceMap[p.symbol.toUpperCase()] = {
-          close: Number(p.close),
-          change_pct: p.change_pct != null ? Number(p.change_pct) : 0,
-        };
-      }
-    }
-  }
-
-  // Enrich priceMap with verified marketCap and totalShares from fundamentals
-  if (fundamentalsRes.data) {
-    for (const f of fundamentalsRes.data) {
-      if (f.symbol && f.data && typeof f.data === "object") {
-        const sym = f.symbol.toUpperCase();
-        const mc = (f.data as Record<string, unknown>).marketCap;
-        if (typeof mc === "number" && mc > 0) {
-          if (priceMap[sym]) {
-            priceMap[sym].market_cap = mc;
-            if (priceMap[sym].close > 0) {
-              priceMap[sym].total_shares = Math.round(mc / priceMap[sym].close);
-            }
-          } else {
-            priceMap[sym] = {
-              close: 0,
-              change_pct: 0,
-              market_cap: mc,
-            };
-          }
+  if (itemSymbols.length > 0) {
+    const pricesRes = await supabase
+      .from("stock_technical_indicators")
+      .select("symbol, close, change_pct")
+      .in("symbol", itemSymbols)
+      .limit(itemSymbols.length);
+    if (pricesRes.data) {
+      for (const p of pricesRes.data) {
+        if (p.symbol && p.close != null) {
+          priceMap[p.symbol.toUpperCase()] = {
+            close: Number(p.close),
+            change_pct: p.change_pct != null ? Number(p.change_pct) : 0,
+          };
         }
       }
     }
   }
 
-  const analytics = analyzeDisclosures(allDisclosures, priceMap);
-
-  const total = pageRes.count ?? allDisclosures.length;
-  const buys = allDisclosures.filter((d) => d.action_type === "buy" || d.sentiment === "bullish").length;
-  const sells = allDisclosures.filter((d) => d.action_type === "sell" || d.sentiment === "bearish").length;
-  const shareholding = allDisclosures.filter(
+  const statRows = (statsRes.data || []) as Array<Pick<DisclosureItem, "disclosure_type" | "sentiment" | "action_type" | "stake_after">>;
+  const total = pageRes.count ?? statRows.length;
+  const buys = statRows.filter((d) => d.action_type === "buy" || d.sentiment === "bullish").length;
+  const sells = statRows.filter((d) => d.action_type === "sell" || d.sentiment === "bearish").length;
+  const shareholding = statRows.filter(
     (d) => d.disclosure_type === "major_shareholders" || d.stake_after != null
   ).length;
 
   return {
-    items: (pageRes.data || []) as DisclosureItem[],
-    allPool: allDisclosures,
+    items,
     stats: { total, buys, sells, shareholding },
-    analytics,
     priceMap,
   };
 }
 
 export default async function DisclosuresPage() {
-  const { items, allPool, stats, analytics, priceMap } = await getInitialDisclosuresData();
+  const { items, stats, priceMap } = await getInitialDisclosuresData();
 
   const recentSymbols = Array.from(
     new Map(
@@ -263,7 +250,6 @@ export default async function DisclosuresPage() {
         initialDisclosures={items}
         initialPool={items}
         initialStats={stats}
-        initialAnalytics={analytics}
         priceMap={priceMap}
       />
       <section

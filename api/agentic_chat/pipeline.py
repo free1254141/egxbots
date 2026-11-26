@@ -935,6 +935,8 @@ _CANONICAL_BUTTON_INPUTS = frozenset({
     "أفضل أسهم السوق اليوم",
     "أقوى الأسهم النهارده وملخص السوق",
     "أقوى أسهم التجميع والسيولة الذكية اليوم",
+    "📈 ترشيح فرص بديلة",
+    "ترشيح فرص بديلة",
     "هات كل التوصيات المفتوحة حالياً",
     "التوصيات المفتوحة حالياً",
     "التوصيات المفتوحة حاليا",
@@ -951,6 +953,11 @@ _CANONICAL_BUTTON_INPUTS = frozenset({
 
 _CHART_SINGLE_STOCK_RE = re.compile(
     r"^حلل\s+سهم\s+([A-Za-z0-9]{2,12}(?:\.[A-Za-z]{2,8})?)\s+في\s+الشارت\s+panel-",
+    re.IGNORECASE,
+)
+
+_COMMODITY_FAST_RE = re.compile(
+    r"^حلل\s+سعر\s+(?:الذهب|الفضة|الدهب|الفضه)\s+العالمي\s*\((XAUUSD|XAGUSD)\)",
     re.IGNORECASE,
 )
 
@@ -1429,6 +1436,16 @@ async def _run_agentic_chat_stream_impl(
         )
         else None
     )
+    _commodity_fast_match = (
+        _COMMODITY_FAST_RE.match((message or "").strip())
+        if (
+            not has_user_rules
+            and not is_cross_market
+            and not vision_data
+            and (not images or len(images) == 0)
+        )
+        else None
+    )
     fast_stock_match = (
         re.fullmatch(r"vip_stock_([A-Z0-9]{2,12})(_financials)?", candidate_cache_key)
         if (
@@ -1441,17 +1458,25 @@ async def _run_agentic_chat_stream_impl(
         )
         else None
     )
-    if fast_stock_match or _chart_fast_match:
+    if fast_stock_match or _chart_fast_match or _commodity_fast_match:
         used_fast_track = True
         model_confirmed_standalone = True
         if fast_stock_match:
             fast_sym = fast_stock_match.group(1)
             is_financials_fast = bool(fast_stock_match.group(2))
-        else:
+        elif _chart_fast_match:
             fast_sym = _chart_fast_match.group(1).strip().upper().split(".")[0]  # type: ignore[union-attr]
             is_financials_fast = False
+        else:
+            fast_sym = _commodity_fast_match.group(1).strip().upper()  # type: ignore[union-attr]
+            effective_market = "COMMODITIES"
+            is_financials_fast = False
         fast_mkt_ui = ui_market_label(effective_market)
-        if is_financials_fast:
+        if effective_market == "COMMODITIES" or fast_sym in ("XAUUSD", "XAGUSD"):
+            fast_tool_specs = [
+                ("get_stock", {"symbols": [fast_sym], "market": "COMMODITIES"}),
+            ]
+        elif is_financials_fast:
             fast_tool_specs = [
                 ("get_stock", {"symbols": [fast_sym], "market": fast_mkt_ui}),
                 ("get_fair_value", {"symbols": [fast_sym], "mode": "specific_stocks", "market": fast_mkt_ui}),
@@ -1520,7 +1545,10 @@ async def _run_agentic_chat_stream_impl(
     elif (
         (
             candidate_cache_key in ("vip_accumulation", "vip_market_summary")
-            or (candidate_cache_key == "vip_market_pulse_and_recs" and allow_recommendations)
+            or (
+                candidate_cache_key in ("vip_market_pulse_and_recs", "vip_open_recommendations")
+                and allow_recommendations
+            )
         )
         and is_standalone_allowed
         and not has_user_rules
@@ -1533,6 +1561,12 @@ async def _run_agentic_chat_stream_impl(
         preset_mkt_ui = ui_market_label(effective_market)
         if candidate_cache_key == "vip_accumulation":
             preset_tool_specs = [
+                ("get_accumulation_stocks", {"market": preset_mkt_ui}),
+                ("get_technical_scan", {"preset": "momentum_and_volume", "market": preset_mkt_ui}),
+            ]
+        elif candidate_cache_key == "vip_open_recommendations":
+            preset_tool_specs = [
+                ("get_recommendations", {"status": "open", "market": preset_mkt_ui}),
                 ("get_accumulation_stocks", {"market": preset_mkt_ui}),
                 ("get_technical_scan", {"preset": "momentum_and_volume", "market": preset_mkt_ui}),
             ]

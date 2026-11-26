@@ -4,7 +4,7 @@ import { Metadata } from "next";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import Link from "next/link";
 
-export const revalidate = 604800;
+export const dynamic = "force-static";
 
 export const metadata: Metadata = {
   title: "تقييم الأسهم المصرية والسعودية (EGX & TASI) والاختبارات التاريخية",

@@ -2225,6 +2225,15 @@ def _extract_rich_fundamentals(
                 "تنبيه عملة القوائم: سعر تداول السهم بالدولار ($) لكن أرقام القوائم المالية والتدفق النقدي "
                 "والكوبون المسجل بالجنيه المصري (ج.م) — اكتبها بـ ج.م ولا تضع علامة $ بجانبها."
             )
+    pe_chk = clean.get("pe_ratio")
+    pb_chk = clean.get("pb_ratio")
+    if (isinstance(pe_chk, (int, float)) and 0 < float(pe_chk) < 0.5) or (
+        isinstance(pb_chk, (int, float)) and 0 < float(pb_chk) < 0.05
+    ):
+        clean["ratio_anomaly_note_ar"] = (
+            "تنبيه جودة بيانات: مكرر الربحية أو السعر للقيمة الدفترية منخفض بشكل غير معتاد "
+            "وقد يعكس اختلاف وحدة الأسهم أو قوائم قديمة — لا يُعتمد وحده كإشارة رخص."
+        )
     if fund_split_adjusted:
         clean["fundamentals_split_adjusted"] = True
     diag = _build_fundamental_diagnosis(clean, close_price=close_price, name=name or pick("name", "name_ar"))
@@ -3401,32 +3410,43 @@ def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[st
                     if total_requested_syms <= 4 and close_price and close_price > 0:
                         try:
                             from api.agentic_chat.quant_engine import build_quant_intelligence_for_stock
-                            fv_sa, fv_model_sa, fv_extra_sa = _compute_fundamental_fair_value(
-                                close_price,
-                                vwap_20 or close_price,
-                                ema_50 or close_price,
-                                fd if isinstance(fd, dict) else None,
-                                market=exch_code,
-                                symbol=sym,
-                                ema_200=ema_200,
-                            )
-                            eps_sa = _safe_float(sa_item.get("eps"), 4)
-                            ni_sa = _safe_float(sa_item.get("net_income"), 2)
-                            roe_sa = _safe_float(sa_item.get("roe_pct"))
-                            loss_sa = bool(
-                                (eps_sa is not None and eps_sa < 0)
-                                or (ni_sa is not None and ni_sa < 0)
-                                or (roe_sa is not None and roe_sa < 0)
-                                or fv_extra_sa.get("is_loss_making")
-                            )
-                            fv_gap_sa = _build_fair_value_gap(close_price, fv_sa, is_loss_making=loss_sa)
-                            sa_item["fair_value"] = fv_sa
-                            sa_item["fair_value_model"] = fv_model_sa
-                            sa_item["valuation_upside_pct"] = fv_gap_sa["upside_pct"]
-                            sa_item["valuation_gap_ar"] = fv_gap_sa["valuation_gap_ar"]
-                            if fv_extra_sa.get("graham_value"):
-                                sa_item["graham_value"] = fv_extra_sa["graham_value"]
-                                sa_item["graham_gap_ar"] = _build_graham_gap_ar(close_price, fv_extra_sa.get("graham_value"))
+                            is_commodity = (exch_code == "COMMODITIES")
+                            if is_commodity:
+                                fv_sa, fv_model_sa, fv_extra_sa = None, None, {}
+                                fv_gap_sa = {"upside_pct": None}
+                                sa_item["fair_value"] = None
+                                sa_item["fair_value_note_ar"] = (
+                                    "السلع والمعادن العالمية (مثل الذهب والفضة) لا تخضع لنماذج القيمة العادلة للأسهم — "
+                                    "يعتمد التحليل على السعر الفني والاتجاه والسيولة والذكاء الكمي."
+                                )
+                                loss_sa = False
+                            else:
+                                fv_sa, fv_model_sa, fv_extra_sa = _compute_fundamental_fair_value(
+                                    close_price,
+                                    vwap_20 or close_price,
+                                    ema_50 or close_price,
+                                    fd if isinstance(fd, dict) else None,
+                                    market=exch_code,
+                                    symbol=sym,
+                                    ema_200=ema_200,
+                                )
+                                eps_sa = _safe_float(sa_item.get("eps"), 4)
+                                ni_sa = _safe_float(sa_item.get("net_income"), 2)
+                                roe_sa = _safe_float(sa_item.get("roe_pct"))
+                                loss_sa = bool(
+                                    (eps_sa is not None and eps_sa < 0)
+                                    or (ni_sa is not None and ni_sa < 0)
+                                    or (roe_sa is not None and roe_sa < 0)
+                                    or fv_extra_sa.get("is_loss_making")
+                                )
+                                fv_gap_sa = _build_fair_value_gap(close_price, fv_sa, is_loss_making=loss_sa)
+                                sa_item["fair_value"] = fv_sa
+                                sa_item["fair_value_model"] = fv_model_sa
+                                sa_item["valuation_upside_pct"] = fv_gap_sa["upside_pct"]
+                                sa_item["valuation_gap_ar"] = fv_gap_sa["valuation_gap_ar"]
+                                if fv_extra_sa.get("graham_value"):
+                                    sa_item["graham_value"] = fv_extra_sa["graham_value"]
+                                    sa_item["graham_gap_ar"] = _build_graham_gap_ar(close_price, fv_extra_sa.get("graham_value"))
                             qi_sa = build_quant_intelligence_for_stock(
                                 symbol=sym,
                                 exchange=exch_code,
@@ -5302,6 +5322,20 @@ def _sync_get_fair_value(
     eff_mkt = _resolve_effective_market(market=market, symbols=symbols)
     ui_mkt = _ui_market_label(eff_mkt)
     currency = _currency_for_market(eff_mkt)
+
+    if eff_mkt == "COMMODITIES":
+        return {
+            "status": "not_applicable",
+            "market": ui_mkt,
+            "exchange": "COMMODITIES",
+            "currency": currency,
+            "count": 0,
+            "stocks": [],
+            "message": (
+                "لا يوجد نموذج «قيمة عادلة مالية» للسلع والمعادن العالمية (الذهب والفضة) "
+                "لأنها ليست شركات ذات أرباح أو قيمة دفترية — يعتمد تحليلها على الاتجاه الفني والمستويات ومونت كارلو."
+            ),
+        }
 
     if eff_mkt != "EGX":
         cfg = _reg_get_market_config(eff_mkt)
@@ -7513,10 +7547,12 @@ def _sync_manage_portfolio(
                     ),
                 }
 
+            old_qty_snap = _safe_float(existing.get("quantity"), 4) or 0.0 if existing else 0.0
+            old_entry_snap = _safe_float(existing.get("entry_price"), 4) if existing else None
             if existing:
-                old_qty = _safe_float(existing.get("quantity"), 4) or 0.0
+                old_qty = old_qty_snap
                 new_qty = round(old_qty + add_qty, 4)
-                old_entry = _safe_float(existing.get("entry_price"), 4)
+                old_entry = old_entry_snap
                 if old_entry and old_qty > 0 and new_qty > 0:
                     avg_entry = ((old_entry * old_qty) + (new_entry * add_qty)) / new_qty
                 else:
@@ -7528,6 +7564,8 @@ def _sync_manage_portfolio(
                 }).eq("id", existing["id"]).execute()
                 msg = f"تم بنجاح تحديث سهم {clean_sym}: إجمالي الرصيد الآن {new_qty} سهم بمتوسط سعر {_safe_price(avg_entry_stored)} {curr_lbl}."
             else:
+                new_qty = round(add_qty, 4)
+                avg_entry_stored = round(new_entry, 4)
                 stock_name = _resolve_stock_display_name(clean_sym, sym_mkt)
                 row = {
                     "user_id": user_id,
@@ -7548,6 +7586,7 @@ def _sync_manage_portfolio(
                         raise
                 msg = f"تم بنجاح إضافة {add_qty} سهم من {clean_sym} إلى محفظتك بسعر {_safe_price(new_entry)} {curr_lbl}."
 
+            trade_val = round(add_qty * new_entry, 2)
             return {
                 "status": "success",
                 "operation": op,
@@ -7555,6 +7594,22 @@ def _sync_manage_portfolio(
                 "market": _ui_market_label(sym_mkt),
                 "currency": curr_lbl,
                 "message": msg,
+                "skip_followup_view": True,
+                "note_ar": (
+                    "تم تحديث المركز وإجماليات المحفظة بالكامل في هذه الاستجابة — "
+                    "لا تستدعِ manage_portfolio(operation='view') مجدداً إلا إذا طلب المستخدم عرض كل أسهم المحفظة."
+                ),
+                "trade_summary": {
+                    "action": "buy",
+                    "symbol": clean_sym,
+                    "quantity": add_qty,
+                    "execution_price": new_entry,
+                    "trade_value": trade_val,
+                    "old_quantity": old_qty_snap,
+                    "new_quantity": new_qty,
+                    "old_avg_price": old_entry_snap,
+                    "new_avg_price": avg_entry_stored,
+                },
                 "updated_portfolio_totals": _fetch_compact_portfolio_summary(sb, user_id),
             }
 
@@ -7574,6 +7629,7 @@ def _sync_manage_portfolio(
                 "operation": op,
                 "symbol": clean_sym,
                 "message": f"تم تعديل مركز سهم {clean_sym} بنجاح.",
+                "skip_followup_view": True,
                 "updated_portfolio_totals": _fetch_compact_portfolio_summary(sb, user_id),
             }
 
@@ -7589,6 +7645,7 @@ def _sync_manage_portfolio(
                 "operation": op,
                 "symbol": clean_sym,
                 "message": f"تم حذف سهم {clean_sym} من محفظتك بنجاح.",
+                "skip_followup_view": True,
                 "updated_portfolio_totals": _fetch_compact_portfolio_summary(sb, user_id),
             }
 
@@ -7596,10 +7653,12 @@ def _sync_manage_portfolio(
             if not existing:
                 return {"status": "error", "message": f"سهم {clean_sym} غير موجود في محفظتك المفتوحة."}
             held = _safe_float(existing.get("quantity")) or 0.0
+            old_entry_sell = _safe_float(existing.get("entry_price"), 4)
             sell_qty = _safe_float(quantity) if quantity is not None else held
             if sell_qty <= 0:
                 return {"status": "error", "message": "كمية البيع يجب أن تكون أكبر من الصفر."}
             if sell_qty >= held:
+                remaining_qty = 0.0
                 update_data: Dict[str, Any] = {
                     "status": "closed_manual",
                     "status_at": datetime.now(timezone.utc).isoformat(),
@@ -7609,24 +7668,54 @@ def _sync_manage_portfolio(
                 sb.from_("positions").update(update_data).eq("id", existing["id"]).execute()
                 msg = f"تم تسجيل بيع كامل رصيد سهم {clean_sym} ({held} سهم)."
             else:
-                rem = held - sell_qty
+                rem = round(held - sell_qty, 4)
+                remaining_qty = rem
                 sb.from_("positions").update({"quantity": rem}).eq("id", existing["id"]).execute()
                 msg = f"تم تسجيل بيع {sell_qty} سهم من {clean_sym}، والمتبقي {rem} سهم."
 
-            if price and price > 0:
-                proceeds = sell_qty * price
+            cash_before: Optional[float] = None
+            cash_after: Optional[float] = None
+            proceeds = round(sell_qty * price, 2) if (price and price > 0) else None
+            if proceeds is not None:
                 try:
                     p_res = sb.from_("profiles").select("cash_balance").eq("id", user_id).limit(1).execute()
                     current_cash = _safe_float(p_res.data[0].get("cash_balance")) or 0.0 if p_res.data else 0.0
-                    sb.from_("profiles").update({"cash_balance": current_cash + proceeds}).eq("id", user_id).execute()
+                    cash_before = round(current_cash, 2)
+                    cash_after = round(current_cash + proceeds, 2)
+                    sb.from_("profiles").update({"cash_balance": cash_after}).eq("id", user_id).execute()
                 except Exception:
                     pass
 
+            realized_pnl = (
+                round((float(price) - float(old_entry_sell)) * sell_qty, 2)
+                if (price and price > 0 and old_entry_sell and old_entry_sell > 0)
+                else None
+            )
             return {
                 "status": "success",
                 "operation": op,
                 "symbol": clean_sym,
+                "market": _ui_market_label(sym_mkt),
+                "currency": curr_lbl,
                 "message": msg,
+                "skip_followup_view": True,
+                "note_ar": (
+                    "تم تحديث المركز وإجماليات المحفظة بالكامل في هذه الاستجابة — "
+                    "لا تستدعِ manage_portfolio(operation='view') مجدداً إلا إذا طلب المستخدم عرض كل أسهم المحفظة."
+                ),
+                "trade_summary": {
+                    "action": "sell",
+                    "symbol": clean_sym,
+                    "sold_quantity": sell_qty,
+                    "execution_price": price,
+                    "trade_value": proceeds,
+                    "old_quantity": held,
+                    "remaining_quantity": remaining_qty,
+                    "old_avg_price": old_entry_sell,
+                    "realized_pnl": realized_pnl,
+                    "cash_before": cash_before,
+                    "cash_after": cash_after,
+                },
                 "updated_portfolio_totals": _fetch_compact_portfolio_summary(sb, user_id),
             }
         else:

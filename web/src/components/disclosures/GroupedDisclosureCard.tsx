@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   FileText,
   Download,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import StockLogo from "@/components/StockLogo";
 import { useMarket } from "@/contexts/MarketContext";
+import { resolveHfAssetUrl } from "@/lib/hf-browser-client";
 import type {
   GroupedStockDisclosure,
   DisclosureItem,
@@ -47,8 +48,18 @@ export default function GroupedDisclosureCard({
   const fallbackSymbol = isSaudi ? "TASI" : "EGX";
   const [activeIdx, setActiveIdx] = useState<number>(0);
   const [showInlinePdf, setShowInlinePdf] = useState<boolean>(false);
+  const [isHydrated, setIsHydrated] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const activeItem = group.items[activeIdx] || group.items[0];
+  const pdfUrl = activeItem
+    ? isHydrated
+      ? resolveHfAssetUrl(`/api/disclosures/pdf/${activeItem.id}`)
+      : `/api/disclosures/pdf/${activeItem.id}`
+    : "";
   const shortCode = activeItem ? activeItem.id.slice(0, 8).toUpperCase() : "";
 
   const getTypeLabel = (type: string) => {
@@ -391,7 +402,7 @@ export default function GroupedDisclosureCard({
             </div>
             {showInlinePdf && (
               <iframe
-                src={`/api/disclosures/pdf/${activeItem.id}#view=FitH&toolbar=0&navpanes=0`}
+                src={`${pdfUrl}#view=FitH&toolbar=0&navpanes=0`}
                 title={activeItem.title}
                 loading="lazy"
                 className="w-full h-[220px] border-0 bg-white"
@@ -692,7 +703,7 @@ export default function GroupedDisclosureCard({
 
           {showInlinePdf ? (
             <iframe
-              src={`/api/disclosures/pdf/${activeItem.id}#view=FitH&toolbar=0&navpanes=0`}
+              src={`${pdfUrl}#view=FitH&toolbar=0&navpanes=0`}
               title={activeItem.title}
               loading="lazy"
               className="w-full h-[360px] border-0 bg-white"
@@ -736,7 +747,7 @@ export default function GroupedDisclosureCard({
             </span>
             <div className="flex items-center gap-1.5 shrink-0">
               <a
-                href={`/api/disclosures/pdf/${activeItem.id}`}
+                href={pdfUrl}
                 download={`egx_disclosure_${activeItem.symbol || 'official'}.pdf`}
                 className="px-2 py-1 bg-white dark:bg-zinc-800 text-black dark:text-white border border-black dark:border-white font-black text-[10px] hover:bg-[#FFE600] hover:text-black transition-all flex items-center gap-1"
               >

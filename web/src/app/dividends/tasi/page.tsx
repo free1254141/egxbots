@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import DividendCalendarClient from "@/components/dividends/DividendCalendarClient";
 import { getServerDividendsCalendar } from "@/lib/market/dividends-server";
 
-export const revalidate = 86400;
+export const revalidate = 604800;
 export const preferredRegion = "fra1";
 
 export const metadata: Metadata = {
