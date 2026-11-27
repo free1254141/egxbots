@@ -403,11 +403,16 @@ def _extract_single_stock_truth(
                         rec["upside"] = float(up_raw)
                     except (TypeError, ValueError):
                         pass
-                if node.get("fair_value") is not None and rec.get("fair_value") is None:
+                if node.get("fair_value") is not None:
                     try:
                         fv_v = float(node["fair_value"])
                         if fv_v > 0:
-                            rec["fair_value"] = fv_v
+                            fvs = rec.setdefault("valid_fair_values", [])
+                            if not any(abs(fv_v - ex) <= 1e-4 for ex in fvs):
+                                fvs.append(fv_v)
+                            # Prefer authoritative get_fair_value record (which carries `formula_substitution_ar` or `status_ar`)
+                            if rec.get("fair_value") is None or node.get("formula_substitution_ar") or node.get("status_ar"):
+                                rec["fair_value"] = fv_v
                     except (TypeError, ValueError):
                         pass
                 for sl_k in ("stop_loss", "tactical_stop_loss"):
@@ -485,6 +490,290 @@ _EXPENSIVE_VALUATION_CUE_RE = re.compile(
 _EXPENSIVE_NEGATION_RE = re.compile(
     r"(?:ليس|ليست|غير|مش|لا\s+يعد|لا\s+تعد|لا\s+يعتبر|لا\s+تعتبر|عكس|اقل\s+من|تحت\s+القيم|رخيص|بخصم|مقارنة\s+ب|تجاهل)"
 )
+_TABLE_TICKER_STOPWORDS = frozenset({
+    "RSI", "EMA", "SMA", "MACD", "EGX", "TASI", "QSE", "DFM", "ADX", "VWAP",
+    "ATR", "OBV", "CMF", "ROE", "ROA", "ROIC", "EPS", "EGP", "SAR", "USD",
+    "AED", "QAR", "KWD", "BUY", "SELL", "HOLD", "SKIP", "VIP", "PRO", "PDF",
+    "DCA", "HRP", "OTC", "TOP", "AVG", "MIN", "MAX", "ALL", "NEW", "PER",
+    "YOY", "QOQ", "TTM", "NAV", "FCF", "PEG", "BVPS", "CVAR", "API",
+    "STRONG", "WEAK", "HIGH", "LOW", "FAIR", "BULL", "BEAR", "EXIT", "TRIM",
+    "WAIT", "PASS", "FAIL", "GOOD", "SAFE", "RISK", "TRAP", "NONE", "TRUE",
+    "FALSE", "RVOL", "MFI", "CCI", "ROC", "VOL", "EBITDA", "SHARIA", "GOLD",
+    "CASH", "CORE", "WATCH", "OPEN", "LONG", "SHORT", "FLAT",
+})
+_TABLE_STOCK_ID_HDR_RE = re.compile(
+    r"(?:السهم|سهم|الرمز|رمز|الكود|كود|الشركه|شركه|symbol|ticker|stock|code)",
+    re.IGNORECASE,
+)
+_TABLE_DEDICATED_CODE_HDR_RE = re.compile(
+    r"(?:الرمز|رمز|الكود|كود|symbol|ticker|code)",
+    re.IGNORECASE,
+)
+_TABLE_NON_ID_HDR_RE = re.compile(
+    r"(?:كميه|عدد|مبلغ|حجم|وزن|نسب|اشاره|تقييم|تغير|اجراء|سعر|دعم|مقاوم|وقف|هدف|قيمه|ربح|خسار|عائد|الدفعه|دفعه)",
+    re.IGNORECASE,
+)
+_TABLE_EXPLICIT_CURRENT_PRICE_HDR_RE = re.compile(
+    r"(?:السعر\s+الحالي|اخر\s+سعر|سعر\s+الاغلاق|الاغلاق|current\s*price|last\s*close|last\s*price|close)",
+    re.IGNORECASE,
+)
+_TABLE_PRICE_HDR_RE = re.compile(
+    r"(?:السعر|الاغلاق|سعر\s+السهم|السعر\s+الحالي|اخر\s+سعر|price|close)",
+    re.IGNORECASE,
+)
+_TABLE_NON_MARKET_PRICE_HDR_RE = re.compile(
+    r"(?:شراء|متوسط|تكلف|هدف|وقف|مبلغ|قيم|عادل|ربح|خسار|عائد|توزيع|كوبون|دخول|"
+    r"entry|target|stop|fair|avg|average|buy|cost|purchase|dividend|coupon|yield|amount|value|profit|loss)",
+    re.IGNORECASE,
+)
+_TABLE_MARKET_DATA_HDR_RE = re.compile(
+    r"(?:rsi|القيمه\s+العادله|العادله|التغير|ema|الشرعيه|التقييم|السيوله|تجميع|الدعم|المقاومه|الجوده)",
+    re.IGNORECASE,
+)
+_TABLE_TICKER_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{3,6}|[1-9]\d{3})(?![A-Za-z0-9])")
+_TABLE_NUM_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)")
+
+
+def _collect_all_fetched_stock_grounding(
+    tool_payloads: List[Dict[str, Any]],
+) -> Tuple[Set[str], Dict[str, Tuple[float, str]]]:
+    """Collect every stock symbol and authoritative market price returned by any tool in the current turn."""
+    fetched_syms: Set[str] = set()
+    fetched_prices: Dict[str, Tuple[float, str]] = {}
+
+    def _visit(node: Any, depth: int) -> None:
+        if depth > 5:
+            return
+        if isinstance(node, list):
+            for item in node:
+                _visit(item, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+
+        sym_raw = node.get("symbol")
+        if isinstance(sym_raw, str) and sym_raw.strip():
+            full_s = sym_raw.strip().upper()
+            base_s = full_s.split(".")[0]
+            fetched_syms.add(full_s)
+            fetched_syms.add(base_s)
+            curr = str(node.get("currency") or "ج.م").strip() or "ج.م"
+            for pk in ("close", "current_price", "price", "last_close"):
+                pv = node.get(pk)
+                if pv is not None:
+                    try:
+                        pf = float(pv)
+                        if pf > 0:
+                            fetched_prices.setdefault(full_s, (pf, curr))
+                            fetched_prices.setdefault(base_s, (pf, curr))
+                            break
+                    except (TypeError, ValueError):
+                        pass
+
+        for v in node.values():
+            if isinstance(v, (dict, list)):
+                _visit(v, depth + 1)
+
+    for payload in tool_payloads or []:
+        _visit(payload, 0)
+
+    return fetched_syms, fetched_prices
+
+
+def _verify_markdown_stock_tables(
+    guarded: str,
+    tool_payloads: List[Dict[str, Any]],
+    market: str = "EGX",
+) -> Tuple[str, List[str], bool, bool]:
+    """
+    Check G (Multi-Stock Price Cross-Verification & Ungrounded History Table Circuit-Breaker):
+    1) Verifies every ticker price row in Markdown market tables against live tool_payloads (>5% mismatch flagged).
+    2) Quarantines/redacts fabricated numeric columns for stock rows that were NEVER fetched in this turn's tools
+       (e.g., LLM hallucinating GSSC = 8.42 instead of 225.25 from truncated chat history).
+    Restricts ticker extraction strictly to explicit stock/symbol/code columns so DCA, portfolio quantities,
+    entry prices, and English rating/signal labels never trigger false positives.
+    """
+    lines = guarded.splitlines()
+    if len(lines) < 3:
+        return guarded, [], False, False
+
+    fetched_syms, fetched_prices = _collect_all_fetched_stock_grounding(tool_payloads)
+    has_tool_payloads = bool(tool_payloads)
+    mkt_up = str(market or "EGX").strip().upper()
+
+    price_mismatches: List[Tuple[str, float, float, str]] = []
+    # (row_idx, sym, price_col, preserve_cols)
+    ungrounded_rows: List[Tuple[int, str, int, Set[int]]] = []
+    seen_mismatch_syms: Set[str] = set()
+
+    n_lines = len(lines)
+    i = 0
+    while i < n_lines:
+        ln_strip = lines[i].strip()
+        if not (ln_strip.startswith("|") and ln_strip.count("|") >= 3):
+            i += 1
+            continue
+        start_idx = i
+        while i < n_lines and lines[i].strip().startswith("|") and lines[i].strip().count("|") >= 3:
+            i += 1
+        end_idx = i
+        if end_idx - start_idx < 3:
+            continue
+        divider_ln = lines[start_idx + 1].strip()
+        if "---" not in divider_ln and ":--" not in divider_ln and "--:" not in divider_ln:
+            continue
+
+        hdr_cells = [
+            _norm_ar_guard(c.strip().replace("*", "").replace("`", "")).replace("ة", "ه").lower()
+            for c in lines[start_idx].strip().strip("|").split("|")
+        ]
+
+        # 1. Identify explicit stock/symbol/code identifier columns; skip tables with no stock identifier column
+        id_cols: List[int] = []
+        dedicated_code_cols: Set[int] = set()
+        for c_idx, h_txt in enumerate(hdr_cells):
+            if _TABLE_STOCK_ID_HDR_RE.search(h_txt) and not _TABLE_NON_ID_HDR_RE.search(h_txt):
+                id_cols.append(c_idx)
+                if _TABLE_DEDICATED_CODE_HDR_RE.search(h_txt):
+                    dedicated_code_cols.add(c_idx)
+        if not id_cols:
+            continue
+
+        # 2. Identify market close/current price column (prefer explicit current/close header over generic price)
+        price_col: Optional[int] = None
+        fallback_price_col: Optional[int] = None
+        for c_idx, h_txt in enumerate(hdr_cells):
+            if c_idx in id_cols:
+                continue
+            if _TABLE_NON_MARKET_PRICE_HDR_RE.search(h_txt):
+                continue
+            if _TABLE_EXPLICIT_CURRENT_PRICE_HDR_RE.search(h_txt):
+                price_col = c_idx
+                break
+            if fallback_price_col is None and _TABLE_PRICE_HDR_RE.search(h_txt):
+                fallback_price_col = c_idx
+        if price_col is None:
+            price_col = fallback_price_col
+        if price_col is None:
+            continue
+
+        has_mkt_cols = any(
+            _TABLE_MARKET_DATA_HDR_RE.search(h_txt)
+            for c_idx, h_txt in enumerate(hdr_cells)
+            if c_idx != price_col and c_idx not in id_cols
+        )
+        if not has_mkt_cols:
+            continue
+
+        # Columns to preserve intact if redacting an ungrounded row (index col '#'/'م' + stock/symbol id cols)
+        preserve_cols: Set[int] = set(id_cols)
+        if hdr_cells and hdr_cells[0].strip() in ("#", "م", "رقم", "no", "no."):
+            preserve_cols.add(0)
+
+        for r_idx in range(start_idx + 2, end_idx):
+            raw_cells = [c.strip() for c in lines[r_idx].strip().strip("|").split("|")]
+            if price_col >= len(raw_cells):
+                continue
+
+            # Extract ticker ONLY from explicit stock/symbol/code identifier columns
+            row_sym: Optional[str] = None
+            for id_col in id_cols:
+                if id_col >= len(raw_cells):
+                    continue
+                cleaned_cell = raw_cells[id_col].replace("*", "").replace("`", "")
+                for tok in _TABLE_TICKER_TOKEN_RE.findall(cleaned_cell):
+                    if tok in _TABLE_TICKER_STOPWORDS:
+                        continue
+                    if tok.isdigit():
+                        v_num = int(tok)
+                        if v_num < 1010 or (2015 <= v_num <= 2035) or v_num % 1000 == 0:
+                            continue
+                        # Treat 4-digit numeric token as a ticker only in Tadawul, dedicated code col, or fetched_syms
+                        is_saudi_ctx = (
+                            mkt_up in ("TADAWUL", "TASI", "SA", "SAUDI")
+                            or id_col in dedicated_code_cols
+                            or tok in fetched_syms
+                            or f"{tok}.SR" in cleaned_cell.upper()
+                            or f"{tok}.SA" in cleaned_cell.upper()
+                        )
+                        if not is_saudi_ctx:
+                            continue
+                    row_sym = tok
+                    break
+                if row_sym:
+                    break
+            if not row_sym:
+                continue
+
+            px_cell = raw_cells[price_col].replace("*", "").replace("`", "").strip()
+            if not px_cell or px_cell in ("—", "-", "–", "N/A"):
+                continue
+            m_px = _TABLE_NUM_RE.search(px_cell)
+            if not m_px:
+                continue
+            try:
+                stated_px = float(m_px.group(1).replace(",", ""))
+            except (TypeError, ValueError):
+                continue
+            if stated_px <= 0:
+                continue
+
+            if row_sym in fetched_prices:
+                actual_px, curr = fetched_prices[row_sym]
+                if actual_px > 0 and abs(stated_px - actual_px) / actual_px > 0.05:
+                    if row_sym not in seen_mismatch_syms:
+                        seen_mismatch_syms.add(row_sym)
+                        price_mismatches.append((row_sym, stated_px, actual_px, curr))
+            elif row_sym not in fetched_syms:
+                ungrounded_rows.append((r_idx, row_sym, price_col, preserve_cols))
+
+    out_warnings: List[str] = []
+    block_cache = False
+    prepended = False
+    banners: List[str] = []
+
+    if price_mismatches:
+        block_cache = True
+        prepended = True
+        parts = []
+        for sym, st_px, act_px, curr in price_mismatches:
+            out_warnings.append(f"multi_stock_price_mismatch:{sym}:stated={st_px}_actual={act_px}")
+            parts.append(f"**{sym}** = **{act_px} {curr}**")
+        if "تدقيق أسعار الجدول الحتمي" not in guarded:
+            banners.append(
+                f"> ⚠️ **تدقيق أسعار الجدول الحتمي:** الأسعار الموثّقة في قاعدة البيانات هي: {' | '.join(parts)} — تُعتمد هذه الأرقام على أي رقم مخالف في الجدول."
+            )
+
+    if ungrounded_rows and (len(ungrounded_rows) >= 2 or (has_tool_payloads and len(ungrounded_rows) >= 1)):
+        block_cache = True
+        prepended = True
+        ungrounded_syms: List[str] = []
+        for r_idx, sym, p_col, keep_cols in ungrounded_rows:
+            if sym not in ungrounded_syms:
+                ungrounded_syms.append(sym)
+            raw_cells = [c.strip() for c in lines[r_idx].strip().strip("|").split("|")]
+            redacted: List[str] = []
+            for c_pos, c_val in enumerate(raw_cells):
+                if c_pos in keep_cols:
+                    redacted.append(c_val)
+                elif c_pos == p_col:
+                    redacted.append("⚠️ غير مُحدّث في هذا الدور")
+                else:
+                    redacted.append("—")
+            lines[r_idx] = "| " + " | ".join(redacted) + " |"
+        out_warnings.append(f"ungrounded_stock_table:{','.join(ungrounded_syms[:8])}")
+        if "حماية دقة البيانات التلقائية" not in guarded:
+            banners.append(
+                f"> ⚠️ **حماية دقة البيانات التلقائية:** الأسهم التالية (**{', '.join(ungrounded_syms[:12])}**) لم تُجلب أسعارها أو مؤشراتها من قاعدة البيانات في هذا الدور، "
+                "لذلك تم إخفاء أرقامها غير الموثّقة لمنع أي خطأ من الذاكرة — اكتب كود السهم أو «حلل القائمة بالتفصيل» لجلب قراءاتها الحية الدقيقة."
+            )
+
+    out_text = "\n".join(lines)
+    if banners:
+        out_text = "\n".join(banners) + "\n\n" + out_text
+    return out_text, out_warnings, block_cache, prepended
+
+
 _PHANTOM_DIV_RE = re.compile(r"🎁\s*كوبون\s+قادم\s*:")
 _MC_PROB_INVERSION_RE = re.compile(
     r"احتمال\s+(?:الصعود|بلوغ\s+الهدف)[^\n]{0,40}(?:أعلى|أكبر)\s+من\s+(?:كسر\s+الوقف|الهبوط)"
@@ -720,19 +1009,21 @@ def verify_and_guard_reply(
                     guarded = f"{mc_banner}\n\n{guarded}"
 
         actual_fv = rec_f.get("fair_value")
-        if actual_fv and actual_fv > 0:
+        valid_fvs = rec_f.get("valid_fair_values") or ([actual_fv] if actual_fv and actual_fv > 0 else [])
+        if valid_fvs:
             m_fv = _STATED_FV_RE.search(guarded)
             if m_fv:
                 try:
                     stated_fv = float(m_fv.group(1).replace(",", ""))
-                    if abs(stated_fv - actual_fv) / actual_fv > 0.03:
-                        warnings.append(f"fair_value_hallucination:{sym_f}:stated={stated_fv}_actual={actual_fv}")
+                    if all(abs(stated_fv - fv_cand) / max(fv_cand, 1e-6) > 0.03 for fv_cand in valid_fvs):
+                        ref_fv = actual_fv if (actual_fv and actual_fv > 0) else valid_fvs[0]
+                        warnings.append(f"fair_value_hallucination:{sym_f}:stated={stated_fv}_actual={ref_fv}")
                         block_cache = True
                         prepended_warning = True
                         curr_f = rec_f.get("currency") or "ج.م"
                         fv_banner = (
                             f"> ⚠️ **تدقيق القيمة العادلة الحتمي ({sym_f}):** القيمة العادلة المحسوبة برمجياً هي "
-                            f"**{actual_fv} {curr_f}** — يُعتمد هذا الرقم على أي رقم مخالف في النص."
+                            f"**{ref_fv} {curr_f}** — يُعتمد هذا الرقم على أي رقم مخالف في النص."
                         )
                         if "تدقيق القيمة العادلة الحتمي" not in guarded:
                             guarded = f"{fv_banner}\n\n{guarded}"
@@ -780,6 +1071,17 @@ def verify_and_guard_reply(
             guarded,
             flags=re.MULTILINE,
         )
+
+    # Check G: Multi-Stock Markdown Table Price Cross-Verification & Ungrounded History Table Circuit-Breaker
+    guarded, tbl_warnings, tbl_block_cache, tbl_prepended = _verify_markdown_stock_tables(
+        guarded, tool_payloads, market=market
+    )
+    if tbl_warnings:
+        warnings.extend(tbl_warnings)
+    if tbl_block_cache:
+        block_cache = True
+    if tbl_prepended:
+        prepended_warning = True
 
     guarded = _dedupe_trailing_disclaimers(guarded)
 

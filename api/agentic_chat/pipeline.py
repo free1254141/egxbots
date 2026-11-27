@@ -854,6 +854,21 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
         seen_symbols.add(num)
         hints.append({"name": num, "symbols": [num], "market": "TASI"})
 
+    # 4. Final fallback: strict 1-edit-distance EGX Arabic typo rescue (e.g. 'بلم هيلز' -> PHDC)
+    # Runs strictly AFTER all exact EGX, Saudi, Latin, and 4-digit Tadawul matchers so exact Saudi aliases (e.g. 'جي آي جي') are never shadowed.
+    if not hints:
+        try:
+            from api.stock_aliases import fuzzy_resolve_arabic_alias_match, _normalize_arabic_text
+            fuzzy_hit = fuzzy_resolve_arabic_alias_match(_normalize_arabic_text(message))
+            if fuzzy_hit:
+                f_gram, f_sym = fuzzy_hit
+                s_upper = str(f_sym).upper()
+                if s_upper not in seen_symbols:
+                    seen_symbols.add(s_upper)
+                    hints.append({"name": f_gram, "symbols": [s_upper], "market": "EGX"})
+        except Exception:
+            pass
+
     return hints[:10]
 
 
@@ -1009,11 +1024,41 @@ _COMMODITY_FAST_RE = re.compile(
 )
 
 
+_EXACT_BARE_ARABIC_ALIASES_CACHE: Optional[frozenset] = None
+
+
+def _get_exact_bare_arabic_aliases() -> frozenset:
+    """Lazily build and cache normalized exact EGX + Saudi company aliases for O(1) bare-name lookup."""
+    global _EXACT_BARE_ARABIC_ALIASES_CACHE
+    if _EXACT_BARE_ARABIC_ALIASES_CACHE is not None:
+        return _EXACT_BARE_ARABIC_ALIASES_CACHE
+    try:
+        from api.stock_aliases import ARABIC_STOCK_MAPPINGS, _normalize_arabic_text
+        merged = set()
+        for k in ARABIC_STOCK_MAPPINGS:
+            nk = " ".join(_normalize_arabic_text(str(k)).split())
+            if nk:
+                merged.add(nk)
+        for k in _BUILTIN_SAUDI_ALIASES:
+            nk = " ".join(_normalize_arabic_text(str(k)).split())
+            if nk:
+                merged.add(nk)
+        for k in (_EXT_SAUDI_MAPPINGS or {}):
+            nk = " ".join(_normalize_arabic_text(str(k)).split())
+            if nk:
+                merged.add(nk)
+        _EXACT_BARE_ARABIC_ALIASES_CACHE = frozenset(merged)
+    except Exception:
+        _EXACT_BARE_ARABIC_ALIASES_CACHE = frozenset()
+    return _EXACT_BARE_ARABIC_ALIASES_CACHE
+
+
 def _is_unambiguous_standalone_input(msg: Optional[str], market: str = "EGX") -> bool:
     """
     Return True ONLY when user input is unmistakably self-contained:
     - a bare 1-token stock symbol (e.g. 'TYCN', 'crst', '2222', 'QNBK.QA') resolving to `vip_stock_*`, OR
-    - an exact canonical quick-action button string.
+    - an exact canonical quick-action button string, OR
+    - a bare Arabic company name / 1-edit typo with ZERO surrounding sentence words (e.g. 'جلاكسو', 'القاهرة للدواجن', 'بلم هيلز').
     Multi-word prompts like 'حلل سهم PHDC' return False to preserve explicit contextual-followup semantics.
     """
     clean = " ".join(str(msg or "").strip().split())
@@ -1025,6 +1070,25 @@ def _is_unambiguous_standalone_input(msg: Optional[str], market: str = "EGX") ->
         cand_key = build_analysis_cache_key(clean, market=market)
         if cand_key and cand_key.startswith("vip_stock_"):
             return True
+    # Bare Arabic company name with zero extra conversational words (unlocks 0-token Early Cache even in multi-turn sessions)
+    if 2 <= len(clean) <= 45 and len(clean.split()) <= 4 and re.search(r"[\u0600-\u06FF]", clean):
+        try:
+            from api.stock_aliases import _normalize_arabic_text, fuzzy_resolve_arabic_alias_match
+            norm_clean = _normalize_arabic_text(re.sub(r"[^\w\s]", " ", clean)).strip()
+            norm_clean = " ".join(norm_clean.split())
+            if norm_clean:
+                is_bare_exact = norm_clean in _get_exact_bare_arabic_aliases()
+                is_bare_fuzzy = False
+                if not is_bare_exact:
+                    f_hit = fuzzy_resolve_arabic_alias_match(norm_clean)
+                    if f_hit and f_hit[0] == norm_clean:
+                        is_bare_fuzzy = True
+                if is_bare_exact or is_bare_fuzzy:
+                    cand_key = build_analysis_cache_key(clean, market=market)
+                    if cand_key and cand_key.startswith("vip_stock_"):
+                        return True
+        except Exception:
+            pass
     return False
 
 
@@ -1210,7 +1274,7 @@ async def _run_agentic_chat_stream_impl(
     riyadh_day_ar = _ARABIC_WEEKDAYS[now_riyadh.weekday()]
     is_cairo_weekend = now_cairo.weekday() in (4, 5)
     session_day_note = (
-        f"اليوم ({cairo_day_ar}) عطلة نهاية الأسبوع الرسمية (الجمعة/السبت) في مصر والخليج."
+        f"اليوم ({cairo_day_ar}) عطلة نهاية الأسبوع الرسمية (الجمعة/السبت) في مصر والخليج — أول جلسة تداول قادمة هي يوم الأحد القادم الساعة 10:00 صباحاً (وليس الإثنين)."
         if is_cairo_weekend
         else f"تنبيه تقويمي: اليوم ({cairo_day_ar}) يوم عمل وتداول رسمي في البورصة المصرية وليس عطلة الجمعة/السبت — اعتمد تاريخ أحدث جلسة في الأدوات ولا تصف يوم {cairo_day_ar} بالعطلة."
     )
@@ -1385,8 +1449,8 @@ async def _run_agentic_chat_stream_impl(
 
         if vision_symbols:
             prompt_instruction = (
-                f"استدعِ فوراً الأدوات get_stock و get_stock_levels للرموز المستخرجة من الصورة: {', '.join(vision_symbols)} "
-                f"لجلب أسعار الإغلاق اللحظية ومستويات الدعم والمقاومة، لمقارنتها بأسعار الشراء وكميات المراكز المستخرجة من الصورة وتقديم تحليل مالي وفني متكامل."
+                f"استدعِ فوراً أداة get_stock فقط (ولا تستدعِ get_stock_levels المكررة) للرموز المستخرجة من الصورة: {', '.join(vision_symbols)} "
+                f"لجلب أسعار الإغلاق ومستويات الدعم والمقاومة ووقف الخسارة المدمجة، ومقارنتها بأسعار الشراء وكميات المراكز المستخرجة من الصورة لتقديم تحليل مالي وفني متكامل."
             )
             formatted_messages.append({"role": "system", "content": prompt_instruction})
     else:
@@ -1596,7 +1660,7 @@ async def _run_agentic_chat_stream_impl(
     # Canonical Market / Accumulation Preset Fast-Track (eliminates Round-1 LLM tool-selection overhead)
     elif (
         (
-            candidate_cache_key in ("vip_accumulation", "vip_market_summary")
+            candidate_cache_key in ("vip_accumulation", "vip_market_summary", "vip_top_stocks")
             or (
                 candidate_cache_key
                 in ("vip_market_pulse_and_recs", "vip_open_recommendations", "vip_open_recommendations_sharia")
@@ -1617,6 +1681,14 @@ async def _run_agentic_chat_stream_impl(
                 ("get_accumulation_stocks", {"market": preset_mkt_ui}),
                 ("get_technical_scan", {"preset": "momentum_and_volume", "market": preset_mkt_ui}),
             ]
+        elif candidate_cache_key == "vip_top_stocks":
+            preset_tool_specs = [
+                ("get_market", {"market": preset_mkt_ui}),
+                ("get_technical_scan", {"preset": "momentum_and_volume", "market": preset_mkt_ui}),
+                ("get_accumulation_stocks", {"market": preset_mkt_ui}),
+            ]
+            if allow_recommendations:
+                preset_tool_specs.append(("get_recommendations", {"status": "open", "market": preset_mkt_ui}))
         elif candidate_cache_key == "vip_open_recommendations":
             preset_tool_specs = [
                 ("get_recommendations", {"status": "open", "market": preset_mkt_ui}),
@@ -1708,7 +1780,7 @@ async def _run_agentic_chat_stream_impl(
                     "tools": active_tools_schema,
                     "tool_choice": "auto",
                     "temperature": 0.2,
-                    "max_tokens": 3000,
+                    "max_tokens": 4096,
                 }
 
                 t_turn1_start = time.time()
@@ -2100,7 +2172,7 @@ async def _run_agentic_chat_stream_impl(
                     "model": "deepseek-chat",
                     "messages": formatted_messages,
                     "temperature": 0.3,
-                    "max_tokens": 3000,
+                    "max_tokens": 4096,
                 }
                 if not used_fast_track:
                     synthesis_payload["tools"] = active_tools_schema

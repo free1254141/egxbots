@@ -877,14 +877,81 @@ def optimize_portfolio_or(
     risk_contribs = (actual_weights * (cov @ actual_weights)) / port_var
 
     fee_rate = market_fee_rate(exchange)
+    # Scale-safe dust threshold: prevents small portfolios (e.g. 250-5,000 EGP) from misclassifying
+    # a 39% rebalance sell as HOLD while preserving the 200 EGP dust floor on large portfolios.
+    dust_threshold = min(200.0, max(5.0, capital * 0.01))
     total_turnover_val = 0.0
     allocations: List[Dict[str, Any]] = []
     sector_breakdown: Dict[str, float] = {}
+    current_sector_breakdown: Dict[str, float] = {}
     execution_notes: List[str] = []
+
+    # First pass: determine actionable BUY/SELL/HOLD and snap sub-dust HOLD deltas to current shares
+    # so `allocatedValue`, `leftoverCash`, and `tradeSummary.totalSellValue` reconcile 100% identically!
+    final_shares: List[int] = [int(target_shares[i]) for i in range(len(valid_assets))]
+    final_actions: List[str] = []
+    for i, a in enumerate(valid_assets):
+        cur_sh = int(round(max(0.0, float(a.current_shares))))
+        tgt_sh = final_shares[i]
+        delta_sh = tgt_sh - cur_sh
+        trade_val = abs(delta_sh) * float(a.price)
+        is_excluded = a.max_weight_override is not None and float(a.max_weight_override) <= 0.0
+        if has_existing:
+            if not is_excluded and delta_sh > 0 and trade_val >= dust_threshold:
+                act = "BUY"
+            elif delta_sh < 0 and (trade_val >= dust_threshold or is_excluded):
+                act = "SELL"
+            else:
+                act = "HOLD"
+                # Keep current shares intact for HOLD rows so cash and trade totals reconcile exactly
+                final_shares[i] = cur_sh
+        else:
+            act = "BUY" if (tgt_sh > 0 and not is_excluded) else "SKIP"
+        final_actions.append(act)
+
+    # Enforce strict budget ceiling after HOLD snapping: if absorbing sub-dust SELLs into HOLD pushed
+    # total invested value above available capital, deterministically trim BUY rows down until
+    # sum(final_shares * price) <= capital + 1e-6 (converting any BUY falling below dust_threshold to HOLD).
+    if has_existing:
+        total_inv = sum(final_shares[i] * float(valid_assets[i].price) for i in range(len(valid_assets)))
+        if total_inv > capital + 1e-6:
+            for _ in range(10000):
+                if total_inv <= capital + 1e-6:
+                    break
+                buy_candidates = [
+                    i
+                    for i in range(len(valid_assets))
+                    if final_actions[i] == "BUY"
+                    and final_shares[i] > int(round(max(0.0, float(valid_assets[i].current_shares))))
+                ]
+                if not buy_candidates:
+                    break
+                pick_i = max(
+                    buy_candidates,
+                    key=lambda idx: (
+                        (final_shares[idx] * float(valid_assets[idx].price) / capital) - float(target_w[idx]),
+                        float(valid_assets[idx].price),
+                    ),
+                )
+                px_pick = float(valid_assets[pick_i].price)
+                cur_pick = int(round(max(0.0, float(valid_assets[pick_i].current_shares))))
+                final_shares[pick_i] -= 1
+                total_inv -= px_pick
+                rem_buy_val = (final_shares[pick_i] - cur_pick) * px_pick
+                if final_shares[pick_i] <= cur_pick or rem_buy_val < dust_threshold:
+                    total_inv -= max(0, final_shares[pick_i] - cur_pick) * px_pick
+                    final_shares[pick_i] = cur_pick
+                    final_actions[pick_i] = "HOLD"
+
+    actual_vals = np.array([final_shares[i] * float(valid_assets[i].price) for i in range(len(valid_assets))], dtype=float)
+    actual_weights = actual_vals / capital
+    leftover_cash = max(0.0, float(capital - float(np.sum(actual_vals))))
+    port_var = max(float(actual_weights @ cov @ actual_weights), 1e-12)
+    risk_contribs = (actual_weights * (cov @ actual_weights)) / port_var
 
     for i, a in enumerate(valid_assets):
         cur_sh = int(round(max(0.0, float(a.current_shares))))
-        tgt_sh = int(target_shares[i])
+        tgt_sh = final_shares[i]
         delta_sh = tgt_sh - cur_sh
         trade_val = abs(delta_sh) * float(a.price)
         if has_existing:
@@ -897,17 +964,10 @@ def optimize_portfolio_or(
         tgt_w_pct = round(float(target_w[i]) * 100.0, 1)
         sec_key = a.sector or "أخرى"
         sector_breakdown[sec_key] = round(sector_breakdown.get(sec_key, 0.0) + act_w_pct, 1)
+        if cur_w_pct > 0:
+            current_sector_breakdown[sec_key] = round(current_sector_breakdown.get(sec_key, 0.0) + cur_w_pct, 1)
 
-        is_excluded = a.max_weight_override is not None and float(a.max_weight_override) <= 0.0
-        if has_existing:
-            if not is_excluded and delta_sh > 0 and trade_val >= max(200.0, capital * 0.01):
-                action = "BUY"
-            elif delta_sh < 0 and (trade_val >= max(200.0, capital * 0.01) or is_excluded):
-                action = "SELL"
-            else:
-                action = "HOLD"
-        else:
-            action = "BUY" if (tgt_sh > 0 and not is_excluded) else "SKIP"
+        action = final_actions[i]
 
         px_f = float(a.price)
         px_dec = 4 if abs(px_f) < 2.0 else (3 if abs(px_f) < 10.0 else 2)
@@ -1027,6 +1087,11 @@ def optimize_portfolio_or(
         "metricsBefore": before_metrics,
         "metricsAfter": after_metrics,
         "volatilityChangePct": vol_delta,
+        "currentSectorBreakdown": [
+            {"sector": k, "weightPct": v}
+            for k, v in sorted(current_sector_breakdown.items(), key=lambda kv: kv[1], reverse=True)
+            if v > 0
+        ],
         "sectorBreakdown": [
             {"sector": k, "weightPct": v}
             for k, v in sorted(sector_breakdown.items(), key=lambda kv: kv[1], reverse=True)

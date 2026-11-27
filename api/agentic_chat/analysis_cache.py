@@ -1079,6 +1079,18 @@ def build_analysis_cache_key(
                 found_syms.append(sym)
                 if len(found_syms) >= 3:
                     break
+        if not found_syms and not is_comparison_query:
+            try:
+                from api.stock_aliases import fuzzy_resolve_arabic_alias_match
+                fuzzy_hit = fuzzy_resolve_arabic_alias_match(ar_scan_norm.strip())
+                if fuzzy_hit:
+                    f_gram, f_sym = fuzzy_hit
+                    f_gram_norm = _normalize_ar_for_cache(f_gram)
+                    if f_gram_norm and f" {f_gram_norm} " in ar_scan_norm:
+                        ar_scan_norm = ar_scan_norm.replace(f" {f_gram_norm} ", " ", 1)
+                        found_syms.append(f_sym)
+            except Exception:
+                pass
 
     if is_comparison_query:
         if len(found_syms) == 2 and _is_pure_single_stock_query(ar_scan_norm, found_syms, allow_comparison=True):

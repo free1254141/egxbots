@@ -1622,9 +1622,11 @@ def _detect_and_adjust_price_split(
     out_split_factor: Optional[float] = round(split_factor, 4) if (had_split_jump and split_factor < 0.45) else None
     recent_25 = asc_closes[-25:]
     max_25 = max(recent_25) if recent_25 else close
+    # Only treat DB EMAs as split-stale when >= 1.85x above the 25-session high (i.e. >= 2:1 unadjusted split).
+    # Normal bear-market drawdowns (e.g. -25% to -45% like KORA) MUST keep their true 200-session DB EMA!
     stale_ema = bool(
-        (ema_50 and max_25 > 0 and ema_50 > max_25 * 1.25)
-        or (ema_200 and max_25 > 0 and ema_200 > max_25 * 1.25)
+        (ema_50 and max_25 > 0 and ema_50 > max_25 * 1.85)
+        or (ema_200 and max_25 > 0 and ema_200 > max_25 * 1.85)
     )
     if (had_split_jump or stale_ema) and len(asc_closes) >= 20:
         def _ewm_span(vals: List[float], span: int) -> float:
@@ -5484,7 +5486,7 @@ def _sync_get_fair_value(
     except Exception as e:
         return {"status": "error", "message": f"تعذر حساب السعر العادل: {str(e)}"}
 
-    fv_syms_egx = [str(r.get("symbol")).upper() for r in rows[:320] if r.get("symbol")]
+    fv_syms_egx = list(dict.fromkeys(str(r.get("symbol")).upper() for r in rows[:320] if r.get("symbol")))
     fv_fund_egx: Dict[str, Dict[str, Any]] = {}
     if fv_syms_egx:
         try:
@@ -5502,6 +5504,27 @@ def _sync_get_fair_value(
         except Exception:
             pass
 
+    # For explicit specific-stock queries, run the exact same corporate split detector & 120-session window
+    # as get_stock so get_stock.fair_value and get_fair_value.fair_value ALWAYS share one single source of truth.
+    split_history_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    if symbols and 0 < len(fv_syms_egx) <= 15:
+        try:
+            p_hist_res = (
+                sb.from_("stock_prices")
+                .select("symbol,date,close")
+                .eq("exchange", "EGX")
+                .in_("symbol", fv_syms_egx)
+                .order("date", desc=True)
+                .limit(min(1800, len(fv_syms_egx) * 120))
+                .execute()
+            )
+            for pr in (p_hist_res.data or []):
+                psym = str(pr.get("symbol") or "").upper()
+                if psym:
+                    split_history_by_sym.setdefault(psym, []).append(pr)
+        except Exception:
+            split_history_by_sym = {}
+
     items = []
     seen = set()
     for r in rows:
@@ -5518,14 +5541,24 @@ def _sync_get_fair_value(
             continue
 
         vwap = _safe_price(r.get("vwap_20")) or close
-        ema = _safe_price(r.get("ema_50")) or close
-        ema200_egx = _safe_price(r.get("ema_200"))
+        ema_raw = _safe_price(r.get("ema_50"))
+        ema200_raw = _safe_price(r.get("ema_200"))
+        sym_up = str(sym).upper()
+        ema_adj, ema200_adj, fv_split_factor, _ = _detect_and_adjust_price_split(
+            split_history_by_sym.get(sym_up) or [],
+            ema_raw,
+            ema200_raw,
+            close,
+        )
+        ema = ema_adj or close
+        ema200_egx = ema200_adj
         fair_value, fv_model, fv_extra = _compute_fundamental_fair_value(
             close,
             vwap,
             ema,
-            fv_fund_egx.get(str(sym).upper()),
+            fv_fund_egx.get(sym_up),
             market="EGX",
+            split_factor=fv_split_factor,
             symbol=str(sym),
             ema_200=ema200_egx,
         )

@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
-import { hfAuthFetch } from "@/lib/hf-browser-client";
 import { 
     TrendingUp, 
     TrendingDown, 
@@ -349,45 +348,32 @@ export function StockCard({
         if (isSavingToPortfolio) return;
         setIsSavingToPortfolio(true);
 
-        // Optimistic UI update
-        setAddedToPortfolio(true);
-        setTimeout(() => setAddedToPortfolio(false), 4000);
-        if (onAddToPortfolio) {
-            onAddToPortfolio(symbol);
-        } else if (onSymbolClick) {
-            onSymbolClick(`أضف سهم ${symbol} لمحفظتي`);
-        }
-
         try {
-            const numPrice = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice : null;
-            const res = await hfAuthFetch("/api/portfolio", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    action: "add",
-                    symbol: symbol.toUpperCase(),
-                    quantity: 100,
-                    price: numPrice
-                })
-            }, { requireToken: true });
-
-            const resData = await res.json().catch(() => ({}));
-
-            if (res.ok && resData.ok) {
-                toast.success(`تمت إضافة سهم #${symbol} إلى محفظتك بنجاح ✅`);
-                // Dispatch portfolio-updated event so PortfolioContext, header chip, and profile update LIVE!
-                if (typeof window !== "undefined") {
-                    window.dispatchEvent(new Event("portfolio-updated"));
-                }
-            } else if (res.status === 401 || resData.requiresAuth) {
-                toast.error("يرجى تسجيل الدخول أولاً لإضافة السهم لمحفظتك");
-            } else if (resData.message?.includes("الخطة المجانية") || resData.message?.includes("الحد الأقصى")) {
-                toast.error(resData.message);
-            } else if (resData.message) {
-                toast.error(resData.message);
+            // Never silently insert a hardcoded dummy quantity (e.g. 100 shares) into the user's real DB portfolio.
+            // Inside AI Chat, route cleanly to the assistant so the user confirms their exact quantity and entry price.
+            if (onAddToPortfolio) {
+                setAddedToPortfolio(true);
+                setTimeout(() => setAddedToPortfolio(false), 3000);
+                onAddToPortfolio(symbol);
+                return;
             }
-        } catch (err: any) {
-            // Background fail is silent or toast
+            if (onSymbolClick) {
+                setAddedToPortfolio(true);
+                setTimeout(() => setAddedToPortfolio(false), 3000);
+                onSymbolClick(`أضف سهم ${symbol} لمحفظتي`);
+                return;
+            }
+
+            // Standalone StockCard outside chat: send user to Portfolio page to enter real quantity & entry price
+            const targetUrl = `/portfolio?add=${encodeURIComponent(symbol.toUpperCase())}`;
+            if (typeof window !== "undefined") {
+                try {
+                    router.push(targetUrl);
+                } catch {
+                    window.location.href = targetUrl;
+                }
+            }
+            toast.info(`أدخل عدد الأسهم وسعر الشراء الفعلي لإضافة #${symbol.toUpperCase()} إلى محفظتك`);
         } finally {
             setIsSavingToPortfolio(false);
         }
@@ -753,7 +739,7 @@ export function StockCard({
                         {addedToPortfolio ? (
                             <>
                                 <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                                <span>تمت الإضافة للمحفظة ✅</span>
+                                <span>أُرسل للمساعد ✅</span>
                             </>
                         ) : (
                             <>

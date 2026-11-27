@@ -1087,18 +1087,17 @@ def _within_edit_distance_one(a: str, b: str) -> bool:
     return True
 
 
-def _fuzzy_resolve_arabic_alias(norm_text: str) -> Optional[str]:
+def fuzzy_resolve_arabic_alias_match(norm_text: str) -> Optional[tuple[str, str]]:
     """
     Strict 1-edit-distance Arabic company name rescue for keyboard typos
-    (e.g. 'الماليه الصناغيه؟' -> EFIC, 'القاهره للزيةت؟' -> COSG).
-    Strips punctuation, excludes generic-prefix/share-class/ambiguous aliases,
-    and requires ALL edit-distance-1 hits to resolve to ONE unique stock symbol.
+    (e.g. 'الماليه الصناغيه؟' -> ('الماليه الصناغيه', 'EFIC'), 'بلم هيلز' -> ('بلم هيلز', 'PHDC')).
+    Returns (matched_gram, symbol) only when ALL edit-distance-1 hits resolve to ONE unique stock symbol.
     """
     cleaned = re.sub(r"[^\w\s]|_", " ", norm_text or "")
     words = [w for w in re.split(r"\s+", cleaned.strip()) if w]
     if not words:
         return None
-    matched_syms = set()
+    matched_syms: Dict[str, str] = {}
     n_words = len(words)
     for win in range(min(4, n_words), 0, -1):
         for start in range(0, n_words - win + 1):
@@ -1108,10 +1107,19 @@ def _fuzzy_resolve_arabic_alias(norm_text: str) -> Optional[str]:
                 continue
             for cand_norm, sym in _FUZZY_ARABIC_CANDIDATES:
                 if abs(glen - len(cand_norm)) <= 1 and _within_edit_distance_one(gram, cand_norm):
-                    matched_syms.add(sym)
+                    matched_syms.setdefault(sym, gram)
                     if len(matched_syms) > 1:
                         return None
-    return next(iter(matched_syms)) if len(matched_syms) == 1 else None
+    if len(matched_syms) == 1:
+        sym, gram = next(iter(matched_syms.items()))
+        return (gram, sym)
+    return None
+
+
+def _fuzzy_resolve_arabic_alias(norm_text: str) -> Optional[str]:
+    """Return unique 1-edit-distance rescued EGX stock symbol for Arabic typos, or None."""
+    hit = fuzzy_resolve_arabic_alias_match(norm_text)
+    return hit[1] if hit else None
 
 
 def _find_phrase_in_text(phrase: str, text: str) -> int:

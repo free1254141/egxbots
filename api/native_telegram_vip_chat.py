@@ -522,6 +522,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     early_cache_key: Optional[str] = None
     inflight_lock: Optional[threading.Lock] = None
     usage_stats: Optional[Dict[str, Any]] = None
+    guard_warnings_list: List[str] = []
     tg_market: str = "EGX"
     tg_is_cross: bool = False
     try:
@@ -614,6 +615,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     stream_cached = False
                     stream_cache_key = None
                     stream_usage = None
+                    stream_guard_warnings: List[str] = []
                     stream_error = None
                     async for sse_chunk in run_agentic_chat_stream(
                         message=query,
@@ -650,19 +652,22 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                                             stream_cache_key = ev.get("cache_key")
                                         if isinstance(ev.get("usage"), dict):
                                             stream_usage = ev.get("usage")
+                                        if isinstance(ev.get("guard_warnings"), list):
+                                            stream_guard_warnings = [str(w) for w in ev["guard_warnings"] if w]
                                 except Exception:
                                     pass
-                    return full, tbls, stream_cached, stream_cache_key, stream_usage, stream_error
+                    return full, tbls, stream_cached, stream_cache_key, stream_usage, stream_guard_warnings, stream_error
 
                 stream_error = None
+                guard_warnings_list: List[str] = []
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
-                        reply_text, tables, was_cached, used_cache_key, usage_stats, stream_error = _VIP_CHAT_EXECUTOR.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
+                        reply_text, tables, was_cached, used_cache_key, usage_stats, guard_warnings_list, stream_error = _VIP_CHAT_EXECUTOR.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
                     else:
-                        reply_text, tables, was_cached, used_cache_key, usage_stats, stream_error = loop.run_until_complete(_run_agentic())
+                        reply_text, tables, was_cached, used_cache_key, usage_stats, guard_warnings_list, stream_error = loop.run_until_complete(_run_agentic())
                 except RuntimeError:
-                    reply_text, tables, was_cached, used_cache_key, usage_stats, stream_error = asyncio.run(_run_agentic())
+                    reply_text, tables, was_cached, used_cache_key, usage_stats, guard_warnings_list, stream_error = asyncio.run(_run_agentic())
         except Exception as exc:
             logger.warning(f"[NATIVE_VIP_CHAT] Agentic pipeline error: {exc}")
             stream_error = str(exc)
@@ -732,6 +737,10 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
         usage_stats = _finalize_usage_cost(_new_usage_accumulator(), cached=True)
     if isinstance(usage_stats, dict) and usage_stats:
         common_meta["usage"] = usage_stats
+    if guard_warnings_list:
+        common_meta["guard_warnings"] = guard_warnings_list
+
+    logged_user_query = query if (query and query.strip()) else ("📷 صورة مرفقة للتحليل" if (images or image_storage_url) else "")
 
     # Record session & messages in Supabase for Admin Control Panel visibility (Support & AI tab)
     def _persist_admin_audit():
@@ -751,7 +760,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     "session_id": session_id,
                     "user_id": audit_user_id,
                     "role": "user",
-                    "content": query,
+                    "content": logged_user_query,
                     "image_url": image_storage_url,
                     "metadata": common_meta,
                     "created_at": user_now_iso,
@@ -780,8 +789,13 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
         new_daily_count = new_used
 
         chat_history = list(state_row.get("chat_history") or [])
-        chat_history.append({"role": "user", "content": query, "created_at": user_now_iso})
-        chat_history.append({"role": "assistant", "content": reply_text[:1600], "created_at": now_iso})
+        chat_history.append({"role": "user", "content": logged_user_query, "created_at": user_now_iso})
+        try:
+            from api.agentic_chat.pipeline import _compact_history_content
+            stored_assistant_hist = _compact_history_content(reply_text, is_recent=True, is_latest_turn=True)
+        except Exception:
+            stored_assistant_hist = reply_text[:4600]
+        chat_history.append({"role": "assistant", "content": stored_assistant_hist, "created_at": now_iso})
 
         def _persist_tg_state():
             _supabase_request(
