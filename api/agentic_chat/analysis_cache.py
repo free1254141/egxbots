@@ -978,6 +978,30 @@ def build_analysis_cache_key(
     ):
         return "vip_open_recommendations_sharia"
 
+    # Pure canonical Top/Most-Active Sectors query (exclude "قطاع" itself from scope constraints,
+    # while rejecting comparisons, dividend filters, custom timeframes, or analytical "why" modifiers)
+    non_sector_constraints = tuple(p for p in active_constraints if p != " قطاع ")
+    if (
+        not any(phrase in norm for phrase in non_sector_constraints)
+        and not re.search(r"\b[A-Za-z]{2,8}\b", query)
+        and not any(
+            tok in norm
+            for tok in (
+                " سهم ", " لسهم ", " شركه ", " لشركه ", " اسهم ", " تجميع ", " سيوله ",
+                " بين ", " قارن ", " مقارن", " توزيع", " كوبون", " ارباح ",
+                " خلال ", " شهر", " سنه", " ولماذا ", " وليه ", " لماذا ", " ليه ",
+            )
+        )
+        and any(
+            k in norm
+            for k in (
+                " اقوي القطاعات ", " افضل القطاعات ", " انشط قطاع ", " انشط القطاعات ",
+                " ما هو انشط قطاع ", " ايه انشط قطاع ", " اقوي قطاع ", " افضل قطاع ",
+            )
+        )
+    ):
+        return "vip_top_sectors"
+
     # Canonical Market-Wide Buttons & Direct Queries (only when NOT narrowed by OTC/Sharia/Saudi/sector/price filters)
     if not has_scope_constraint:
         if any(k in norm for k in (
@@ -1010,8 +1034,6 @@ def build_analysis_cache_key(
             return "vip_recs_this_week"
         if any(k in norm for k in (" توصيات الاسبوع الماضي ", " توصيات الاسبوع السابق ")):
             return "vip_recs_last_week"
-        if any(k in norm for k in (" اقوي القطاعات ", " افضل القطاعات ")):
-            return "vip_top_sectors"
 
     # Single or Two-Stock Comparison query
     is_comparison_query = bool(re.search(r"\b(?:قارن|مقارن|مقارنه|ايهما|مقابل|vs|versus)\b", norm))
@@ -1252,6 +1274,29 @@ def resolve_scoped_cache_key(
     return f"{scope_prefix}:{market_key}"
 
 
+def is_cached_reply_consistent_with_key(cache_key: str, reply: Optional[str]) -> bool:
+    """
+    Read- and Write-Time Sanity Guard: reject stale or cross-contaminated cached payloads.
+    Normalizes scoped prefixes (`std_recs:`, `b2b_norecs:`, `mkt_TADAWUL__`) before matching so
+    a mismatched row (e.g. a sector overview saved under `vip_accumulation`) is never written or served.
+    """
+    if not cache_key or not reply or is_uncacheable_error_reply(reply):
+        return False
+    base_key = str(cache_key).rsplit(":", 1)[-1].rsplit("__", 1)[-1]
+    head_norm = _normalize_ar_for_cache(reply[:260])
+    if base_key == "vip_accumulation":
+        if any(bad in head_norm for bad in ("انشط قطاع", "القطاعات الاكثر نشاط", "اقوي القطاعات")):
+            return False
+    if base_key == "vip_open_recommendations_sharia":
+        if any(bad in head_norm for bad in ("انشط قطاع", "القطاعات الاكثر نشاط")):
+            return False
+        if "غير متوافق مع الشريعه" in head_norm and not any(
+            ok in head_norm for ok in ("استبعاد", "استبعد", "تم استبعاد", "بدون اي سهم", "مستبعد")
+        ):
+            return False
+    return True
+
+
 def get_vip_analysis_cache(
     cache_key: str,
     user_id: Optional[str] = None,
@@ -1286,7 +1331,7 @@ def get_vip_analysis_cache(
             computed_at = mem.get("computed_at", 0.0)
             if resolve_cache_validity(computed_at, now_ts, market=exch, cache_key=cache_key):
                 reply = mem.get("reply", "")
-                if reply and len(reply) >= min_length:
+                if reply and len(reply) >= min_length and is_cached_reply_consistent_with_key(cache_key, reply):
                     logger.info(f"[analysis_cache] Tier 1 Memory Hit for key: {storage_key}")
                     target_sym = cache_key.replace("vip_stock_", "").split("_")[0] if cache_key.startswith("vip_stock_") else None
                     personalized = personalize_cached_analysis(reply, user_id, target_sym, telegram_user_id=telegram_user_id, market=exch)
@@ -1298,6 +1343,9 @@ def get_vip_analysis_cache(
                         "computed_at": computed_at,
                         "key": cache_key,
                     }
+                elif reply and not is_cached_reply_consistent_with_key(cache_key, reply):
+                    logger.warning(f"[analysis_cache] Evicting inconsistent Tier 1 cache entry for {storage_key}")
+                    _memory_cache.pop(storage_key, None)
             else:
                 _memory_cache.pop(storage_key, None)
 
@@ -1326,7 +1374,7 @@ def get_vip_analysis_cache(
 
                 if resolve_cache_validity(computed_at_ts, now_ts, market=exch, cache_key=cache_key):
                     reply = payload.get("reply", "")
-                    if reply and len(reply) >= min_length:
+                    if reply and len(reply) >= min_length and is_cached_reply_consistent_with_key(cache_key, reply):
                         logger.info(f"[analysis_cache] Tier 2 Supabase Hit for key: {storage_key}")
                         # Populate Tier 1 Memory
                         entry = {
@@ -1350,6 +1398,8 @@ def get_vip_analysis_cache(
                             "computed_at": computed_at_ts,
                             "key": cache_key,
                         }
+                    elif reply and not is_cached_reply_consistent_with_key(cache_key, reply):
+                        logger.warning(f"[analysis_cache] Rejecting inconsistent Tier 2 cache entry for {storage_key}")
     except Exception as err:
         logger.warning(f"[analysis_cache] Tier 2 query warning for {storage_key}: {err}")
 
@@ -1372,7 +1422,7 @@ def set_vip_analysis_cache(
     1. Tier 1: In-Memory RAM.
     2. Tier 2: Supabase `market_cache` table (persists permanently across restarts).
     """
-    if not cache_key or not reply or is_uncacheable_error_reply(reply):
+    if not cache_key or not reply or not is_cached_reply_consistent_with_key(cache_key, reply):
         return
     if not allow_recommendations and is_recommendation_cache_key(cache_key):
         return

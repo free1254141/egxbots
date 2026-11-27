@@ -170,13 +170,16 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     ? (isCommodities
       ? `سعر ${shortAr} (${symbol}) اليوم | التحليل الفني ومستويات الدعم والمقاومة`
       : isSaudi
-        ? `سعر سهم ${shortAr} (${symbol}) اليوم في تاسي | تحليل فني ودعم ومقاومة`
+        ? `سعر سهم ${shortAr} (${symbol}) اليوم في تاسي | تحليل فني ودعم ومقاومة | TASI BOTS`
         : isUae
-          ? `سعر سهم ${shortAr} (${symbol}) اليوم في سوق ${actualExchange === "DFM" ? "دبي" : "أبوظبي"} | تحليل فني`
+          ? `سعر سهم ${shortAr} (${symbol}) اليوم في سوق ${actualExchange === "DFM" ? "دبي" : "أبوظبي"} | تحليل فني ودعم ومقاومة`
           : isQatar
             ? `سعر سهم ${shortAr} (${symbol}) اليوم في بورصة قطر | تحليل فني ودعم ومقاومة`
             : `سعر سهم ${shortAr} (${symbol}) اليوم | تحليل فني ودعم ومقاومة`)
-    : `سعر وتحليل ${symbol} اليوم | نقاط الدعم والمقاومة`;
+    : (isSaudi
+      ? `سعر وتحليل سهم ${symbol} اليوم في تاسي | نقاط الدعم والمقاومة | TASI BOTS`
+      : `سعر وتحليل ${symbol} اليوم | نقاط الدعم والمقاومة`);
+  const useAbsoluteTitle = isSaudi || isUae || isQatar || isCommodities;
 
   const latest = (snapshot.latestPrice || null) as { close?: number | string; date?: string } | null;
   const lastClose = Number(latest?.close ?? 0);
@@ -210,7 +213,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     : `${pricePart}تعرف على سعر سهم ${nameAr} (${symbol}${nameEn !== symbol ? ` - ${nameEn}` : ""}) اليوم في ${marketAr}: مستويات الدعم والمقاومة، السعر العادل، ومؤشر الذكاء الاصطناعي AI Score.`;
 
   return {
-    title,
+    title: useAbsoluteTitle ? { absolute: title } : title,
     description,
     keywords: [
       symbol,
@@ -223,7 +226,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       `سعر ${symbol}`,
       `${symbol} price`,
       marketAr,
-      "EGX BOTS",
+      isSaudi ? "TASI BOTS" : isUae || isQatar ? "تحليل الأسهم الخليجية" : "EGX BOTS",
       "egxbots",
       actualExchange,
     ],

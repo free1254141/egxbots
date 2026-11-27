@@ -909,11 +909,13 @@ def optimize_portfolio_or(
         else:
             action = "BUY" if (tgt_sh > 0 and not is_excluded) else "SKIP"
 
+        px_f = float(a.price)
+        px_dec = 4 if abs(px_f) < 2.0 else (3 if abs(px_f) < 10.0 else 2)
         row_dict: Dict[str, Any] = {
             "symbol": a.symbol,
             "nameAr": a.name_ar or a.symbol,
             "sector": sec_key,
-            "price": round(float(a.price), 2),
+            "price": round(px_f, px_dec),
             "currentShares": cur_sh,
             "currentWeightPct": cur_w_pct,
             "targetWeightPct": tgt_w_pct,
@@ -1145,7 +1147,7 @@ def build_smart_dca_plan(
     if cur_p <= 0:
         return {"symbol": sym_u, "dca_allowed": False, "verdict_ar": "⚠️ تعذّر الحساب لعدم توفر السعر الحالي"}
 
-    dec = 3 if cur_p < 5.0 else 2
+    dec = 4 if abs(cur_p) < 2.0 else (3 if abs(cur_p) < 10.0 else 2)
     old_qty = max(float(old_shares or 100.0), 1.0)
     old_avg = float(old_avg_price or cur_p)
     current_loss_pct = round(((cur_p - old_avg) / old_avg) * 100.0, 2) if old_avg > 0 else 0.0

@@ -256,3 +256,188 @@ def test_answer_stages_persisted_and_reconstructed_on_reload() -> None:
     legacy_cached = _extract_message_answer_stages("assistant", {"engine": "deepseek-v3", "cached": True})
     assert legacy_cached is not None
     assert [s["id"] for s in legacy_cached] == ["understand", "fetch_data", "synthesize"]
+
+
+def test_audit_2026_11_27_eve_guard_false_positives_and_valuation_math() -> None:
+    # 1. Check E real-world [05] replay: healthy downtrend stocks (POUL/ABUK/ORHD) with shadda negation -> 0 false alarms!
+    opt_payload = {
+        "excludedFromBuying": [
+            {"symbol": "POUL", "reason": "السعر تحت EMA50 وEMA200 (اتجاه هابط — مراقبة دون تعزيز)"},
+            {"symbol": "ORHD", "reason": "اتجاه هابط تحت المتوسطات الرئيسية (HOLD_WATCH)"},
+            {"symbol": "ABUK", "reason": "تحت المتوسطات الرئيسية — مراقبة دون تعزيز"},
+            {"symbol": "PRCL", "reason": "حقوق ملكية سالبة — أولوية تصفية"},
+        ],
+        "positions": [
+            {"symbol": "POUL", "rotation_action": "HOLD_WATCH", "is_loss_making": False, "is_negative_equity": False, "is_illiquid": False},
+            {"symbol": "ORHD", "rotation_action": "HOLD_WATCH", "is_loss_making": False, "is_negative_equity": False, "is_illiquid": False},
+            {"symbol": "ABUK", "rotation_action": "HOLD_WATCH", "is_loss_making": False, "is_negative_equity": False, "is_illiquid": False},
+            {"symbol": "PRCL", "rotation_action": "EXIT_PRIORITY", "is_negative_equity": True},
+        ],
+    }
+    compliant_reply = (
+        "- **POUL** (93/100) و**ABUK** (73/100) و**ORHD** (86/100): **احتفظ بيهم ولا تعزّز** — "
+        "أساسياتهم ممتازة لكن السعر تحت EMA50 وEMA200، فالمحرك منع التعزيز التلقائي لحين استعادة الاتجاه."
+    )
+    res_ok = verify_and_guard_reply(compliant_reply, [opt_payload])
+    assert res_ok["warnings"] == []
+    assert "تنبيه اتساق المحفظة التلقائي" not in res_ok["reply"]
+
+    # Genuine buy cue on healthy downtrend POUL gets accurate technical banner (NEVER accused of losses/liquidation!)
+    bad_tech_buy = "نوصي بشراء وتعزيز POUL الآن بـ 5,000 ج.م."
+    res_tech = verify_and_guard_reply(bad_tech_buy, [opt_payload])
+    assert "downtrend_stock_buy_conflict:POUL" in res_tech["warnings"]
+    assert "excluded_stock_buy_conflict:POUL" not in res_tech["warnings"]
+    assert "خسائر صافية" not in res_tech["reply"]
+    assert "مراقبة دون تعزيز" in res_tech["reply"]
+
+    # Genuine buy cue on fundamental PRCL still triggers severe fundamental warning!
+    bad_fund_buy = "قم بشراء وتعزيز PRCL الآن."
+    res_fund = verify_and_guard_reply(bad_fund_buy, [opt_payload])
+    assert "excluded_stock_buy_conflict:PRCL" in res_fund["warnings"]
+    assert "تنبيه اتساق المحفظة التلقائي" in res_fund["reply"]
+
+    # QA Issue 1 regression: bare "مراقبة" / "احتفظ بـ" must NOT bypass genuine buy hallucinations on PRCL!
+    res_bypass1 = verify_and_guard_reply("نوصي بشراء PRCL الآن مع مراقبة الدعم 5.0", [opt_payload])
+    assert "excluded_stock_buy_conflict:PRCL" in res_bypass1["warnings"]
+    res_bypass2 = verify_and_guard_reply("احتفظ بـ PRCL وزود الكمية بشراء 500 سهم الآن", [opt_payload])
+    assert "excluded_stock_buy_conflict:PRCL" in res_bypass2["warnings"]
+
+    # QA Issue 1 regression: order-independence between positions and excludedFromBuying + weak_fund_downtrend stays fundamental!
+    from api.agentic_chat.output_guard import _classify_excluded_portfolio_symbols
+
+    pos_only = {"positions": [{"symbol": "POUL", "rotation_action": "HOLD_WATCH", "is_loss_making": False, "is_negative_equity": False, "is_illiquid": False}]}
+    excl_only = {"excludedFromBuying": [
+        {"symbol": "POUL", "reason": "مستبعد من الشراء"},
+        {"symbol": "WEAK", "reason": "تقييم مالي ضعيف (32/100) ومسار هابط تحت المتوسط 50 — مستبعد من الشراء أو التعزيز"},
+    ]}
+    f1, t1 = _classify_excluded_portfolio_symbols([excl_only, pos_only])
+    f2, t2 = _classify_excluded_portfolio_symbols([pos_only, excl_only])
+    assert f1 == f2 and t1 == t2
+    assert "POUL" in t1 and "POUL" not in f1
+    assert "WEAK" in f1 and "WEAK" not in t1
+
+    # 2. Check F real-world [22] COSG replay: colloquial negation ("مش رخيص ... عكس تماماً") -> 0 false alarms!
+    cosg_payload = {"symbol": "COSG", "close": 1.34, "fair_value": 0.55, "upside_pct": -58.96, "currency": "ج.م"}
+    cosg_compliant = (
+        "القيمة العادلة 0.55 ج.م والسعر 1.34 ج.م (أعلى منها بـ +143.6%).\n"
+        "السهم مش رخيص — هو غالي على شركة خاسرة. ده عكس تماماً فكرة «قيمته أقل من قيمته العادلة»."
+    )
+    res_cosg_ok = verify_and_guard_reply(cosg_compliant, [cosg_payload])
+    assert res_cosg_ok["warnings"] == []
+    assert "تدقيق التقييم الحتمي" not in res_cosg_ok["reply"]
+
+    # Genuine hallucination calling overvalued COSG cheap -> banner states EXACT +143.6% above FV (and 59.0% below price)!
+    cosg_halluc = "سهم COSG يعتبر سهم رخيص جداً وفرصة قيمة بخصم كبير."
+    res_cosg_bad = verify_and_guard_reply(cosg_halluc, [cosg_payload])
+    assert "valuation_direction_contradiction:COSG" in res_cosg_bad["warnings"]
+    assert "+143.6%" in res_cosg_bad["reply"]
+    assert "59.0%" in res_cosg_bad["reply"]
+
+    # QA Issue 2 regression: never emit "+-50.0%" when close<=fv or contradictory "+99.5%" when upside<=-99
+    res_edge1 = verify_and_guard_reply("سهم رخيص جداً", [{"symbol": "TEST", "close": 0.5, "fair_value": 1.0, "upside_pct": -50.0}])
+    assert "+-" not in res_edge1["reply"]
+    assert "+100.0%" in res_edge1["reply"]
+    res_edge2 = verify_and_guard_reply("سهم رخيص جداً", [{"symbol": "TEST", "close": 10.0, "upside_pct": -99.5}])
+    assert "+99.5%" not in res_edge2["reply"]
+    assert "99.5%" in res_edge2["reply"]
+
+
+def test_audit_2026_11_27_eve_cache_read_guard_penny_precision_dividends_and_dedupe() -> None:
+    import time as _t
+    import api.agentic_chat.analysis_cache as ac_mod
+    from api.agentic_chat.pipeline import _dedupe_redundant_levels_calls
+    from api.agentic_chat.tools_execution import _lookup_upcoming_dividend, _safe_price, _sync_get_dividends
+    from api.portfolio_or_optimizer import AssetInput, build_smart_dca_plan, optimize_portfolio_or
+
+    # 1. Read- & write-time sanity guard rejects poisoned payloads across ALL scoped keys
+    poisoned = "## 🧭 أنشط قطاع في البورصة المصرية — جلسة 2026-11-26\n" + ("تفاصيل قطاعية " * 30)
+    assert ac_mod.is_cached_reply_consistent_with_key("vip_accumulation", poisoned) is False
+    assert ac_mod.is_cached_reply_consistent_with_key("std_recs:vip_accumulation", poisoned) is False
+    assert ac_mod.is_cached_reply_consistent_with_key("b2b_norecs:vip_accumulation", poisoned) is False
+    assert ac_mod.is_cached_reply_consistent_with_key("mkt_TADAWUL__vip_open_recommendations_sharia", poisoned) is False
+    # Valid Sharia report mentioning exclusion of non-Sharia stocks must NOT be false-rejected
+    valid_sharia = "التوصيات الشرعية المفتوحة — تم استبعاد أي سهم غير متوافق مع الشريعة بالكامل.\n" + ("توصية " * 30)
+    assert ac_mod.is_cached_reply_consistent_with_key("vip_open_recommendations_sharia", valid_sharia) is True
+    assert ac_mod.is_cached_reply_consistent_with_key("vip_accumulation", "## 🔥 أقوى أسهم التجميع والسيولة الذكية\n" + ("أسهم " * 30)) is True
+
+    # Write-time defense-in-depth: set_vip_analysis_cache refuses poisoned payload
+    ac_mod.set_vip_analysis_cache("vip_accumulation", poisoned, market="EGX")
+    assert "vip_accumulation" not in ac_mod._memory_cache
+
+    with ac_mod._memory_lock:
+        ac_mod._memory_cache["vip_accumulation"] = {
+            "reply": poisoned,
+            "tables": [],
+            "recommendations": [],
+            "computed_at": _t.time(),
+            "key": "vip_accumulation",
+        }
+    assert ac_mod.get_vip_analysis_cache("vip_accumulation", market="EGX") is None
+    assert "vip_accumulation" not in ac_mod._memory_cache
+
+    # Pure sector query maps to vip_top_sectors; bespoke/comparison/dividend/timeframe/why modifiers stay None
+    assert build_analysis_cache_key("أنشط قطاع في البورصة المصرية", market="EGX") == "vip_top_sectors"
+    assert is_cache_write_intent_safe("أنشط قطاع في البورصة المصرية", "vip_top_sectors", market="EGX") is True
+    assert build_analysis_cache_key("ما هو أنشط قطاع بين البنوك والعقارات؟", market="EGX") is None
+    assert build_analysis_cache_key("أفضل قطاع توزيعات أرباح", market="EGX") is None
+    assert build_analysis_cache_key("أفضل قطاع خلال شهر", market="EGX") is None
+    assert build_analysis_cache_key("ما هو أنشط قطاع في البورصة المصرية حالياً ولماذا؟", market="EGX") is None
+
+    # 2. Penny-stock 4-decimal precision & finite guard preserved in optimizer, smart DCA & _safe_price
+    assert _safe_price(float("inf")) is None
+    assert _safe_price(float("nan")) is None
+    assert _safe_price(0.634) == 0.634
+    opt_res = optimize_portfolio_or(
+        assets=[
+            AssetInput(symbol="IEEC", price=0.634, current_shares=18771),
+            AssetInput(symbol="PHGC", price=0.077, current_shares=100000),
+        ],
+        total_capital=19600.81,
+        exchange="EGX",
+    )
+    by_sym = {row["symbol"]: row for row in opt_res.get("allocations", [])}
+    assert by_sym["IEEC"]["price"] == 0.634
+    assert by_sym["PHGC"]["price"] == 0.077
+
+    dca_res = build_smart_dca_plan(
+        symbol="IEEC",
+        current_price=0.634,
+        old_shares=18771,
+        old_avg_price=0.7277,
+        setup_regime="high_risk_avoid",
+        fund_score=39.0,
+    )
+    assert dca_res["current_price"] == 0.634
+    assert dca_res["old_avg_price"] == 0.7277
+
+    # 3. Expired dividend (pay_date < today) excluded in BOTH _lookup_upcoming_dividend and _sync_get_dividends;
+    #    paid row before newer upcoming row for SAME symbol does NOT prematurely break!
+    fake_cal = {
+        "dividends": [
+            {"symbol": "COMI", "exchange": "EGX", "amount": 1.00, "ex_date": "2026-03-01", "pay_date": "2026-03-10", "status": "paid"},
+            {"symbol": "COMI", "exchange": "EGX", "amount": 2.50, "ex_date": "2099-12-01", "pay_date": "2099-12-10", "status": "upcoming"},
+            {"symbol": "BIOC", "exchange": "EGX", "amount": 0.75, "ex_date": "2026-11-24", "pay_date": "2026-11-26", "status": "pending_pay"},
+            {"symbol": "FAIT", "exchange": "EGX", "amount": 2.00, "ex_date": "2099-12-01", "pay_date": "2099-12-10", "status": "upcoming"},
+        ]
+    }
+    with patch("api.agentic_chat.tools_execution._load_dividends_calendar_cached", return_value=fake_cal):
+        assert _lookup_upcoming_dividend("BIOC", "EGX") is None
+        comi_div = _lookup_upcoming_dividend("COMI", "EGX")
+        assert comi_div is not None and comi_div["amount"] == 2.50
+        fait_div = _lookup_upcoming_dividend("FAIT", "EGX")
+        assert fait_div is not None and fait_div["amount"] == 2.00
+        div_list = _sync_get_dividends(upcoming_only=True, market="EGX")
+        div_syms = [d["symbol"] for d in div_list["dividends"]]
+        assert "BIOC" not in div_syms and "COMI" in div_syms and "FAIT" in div_syms
+
+    # 4. Cross-round get_stock_levels dedupe: does NOT pre-mutate before execution & isolates markets (ADIB EGX vs ADX)!
+    covered: set = set()
+    active_r1, sc_r1 = _dedupe_redundant_levels_calls([(0, "get_stock", {"symbol": "ADIB", "market": "EGX"})], already_covered_syms=covered, default_market="EGX")
+    assert len(active_r1) == 1 and not sc_r1 and len(covered) == 0  # must NOT pre-mutate before execution!
+    # Simulate Round 1 EGX get_stock succeeded
+    covered.add(("EGX", "ADIB"))
+    # Round 2 ADIB on EGX is deduplicated, while ADIB on ADX is NOT blocked!
+    active_egx, sc_egx = _dedupe_redundant_levels_calls([(0, "get_stock_levels", {"symbol": "ADIB", "market": "EGX"})], already_covered_syms=covered, default_market="EGX")
+    assert len(active_egx) == 0 and 0 in sc_egx
+    active_adx, sc_adx = _dedupe_redundant_levels_calls([(0, "get_stock_levels", {"symbol": "ADIB", "market": "ADX"})], already_covered_syms=covered, default_market="EGX")
+    assert len(active_adx) == 1 and not sc_adx

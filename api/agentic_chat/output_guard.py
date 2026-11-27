@@ -12,7 +12,7 @@ Verifies model-synthesized replies against actual tool payloads before streaming
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 _STALE_MENTION_HINTS = ("موقوف", "قديم", "غير محدث", "غير محدّث", "تنبيه شفافية")
 _NUMERIC_EGP_RE = re.compile(r"\d[\d.,]*\s*ج\.م")
@@ -121,21 +121,51 @@ _AUTOMATION_QUOTA_CORRECTION_LINE = (
 )
 
 
+_AR_DIACRITICS_RE = re.compile(r"[\u0617-\u061A\u064B-\u0652\u0640]")
+
+
+def _norm_ar_guard(text: str) -> str:
+    """Strip Arabic diacritics/shadda/tatweel and normalize alef/yaa variants for reliable negation matching."""
+    s = _AR_DIACRITICS_RE.sub("", text or "")
+    s = s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ى", "ي")
+    return s
+
+
 _BUY_INCREASE_CUES_RE = re.compile(
-    r"(?:زيادة|تعزيز|شراء|زود|تزود|أضف|إضافة|التعزيز|الزيادة|ادخل|دخول|شراء\s+إضافي)"
+    r"(?:زيادة|تعزيز|شراء|زود|تزود|اضف|اضافة|التعزيز|الزيادة|ادخل|دخول|شراء\s+اضافي)"
 )
 _EXIT_OR_NEGATION_CUES_RE = re.compile(
-    r"(?:لا\s+تزيد|لا\s+ينصح|لا\s+أنصح|تجنب|ممنوع|مستبعد|مستبعدة|بيع|تصفية|تخارج|إلغاء|خروج|"
-    r"قبل\s+بيع|عوضاً\s+عن|بدلاً\s+من|عدم\s+الشراء|عدم\s+الزيادة|لا\s+تشتري|غير\s+مناسب|"
+    r"(?:لا\s+تزيد|لا\s+ينصح|لا\s+انصح|تجنب|ممنوع|مستبعد|مستبعدة|بيع|تصفية|تخارج|الغاء|خروج|"
+    r"قبل\s+بيع|عوضا\s+عن|بدلا\s+من|عدم\s+الشراء|عدم\s+الزيادة|لا\s+تشتري|غير\s+مناسب|"
     r"دون\s+زيادة|بدون\s+زيادة|بلا\s+زيادة|دون\s+تعزيز|بدون\s+تعزيز|بلا\s+تعزيز|"
-    r"دون\s+إضافة|بدون\s+إضافة|لا\s+إضافة|لا\s+مضاعفة|فلا\s+مضاعفة|"
-    r"سيخرج|ستخرج|يخرج|تخرج|يبقى\s+دون|لا\s+تشتر|لا\s+تعزز|لا\s+تزود)"
+    r"دون\s+اضافة|بدون\s+اضافة|لا\s+اضافة|لا\s+مضاعفة|فلا\s+مضاعفة|"
+    r"سيخرج|ستخرج|يخرج|تخرج|يبقي\s+دون|لا\s+تشتر|لا\s+تعزز|لا\s+تزود|"
+    r"ولا\s+تعزز|ولا\s+تزود|ولا\s+تشتر|ولا\s+تشتري|ولا\s+تضف|ولا\s+تضيف|"
+    r"منع\s+التعزيز|منع\s+الشراء|يمنع\s+التعزيز|يمنع\s+الشراء|امنع|غير\s+مسموح|مش\s+للشراء|"
+    r"مراقبة\s+(?:دون|بدون|بلا)\s+(?:تعزيز|شراء|زيادة)|مراقبة\s+فقط|"
+    r"احتفظ\s+ب[^\n]{0,25}(?:دون|بدون|فقط|ولا\s+تعزز|ولا\s+تزود))"
+)
+_FUNDAMENTAL_EXCLUSION_RE = re.compile(
+    r"(?:خسائر|خسار|خاسر|سالبة|سالب|منعدم|صفري|تصفية|خروج|ضعيف|متضخم|loss|negative|illiquid|zero|exit|ميتة|متعثر)",
+    re.IGNORECASE,
+)
+_TECHNICAL_ONLY_EXCLUSION_RE = re.compile(
+    r"(?:تحت\s+المتوسط|EMA|اتجاه\s+هابط|هابط|downtrend|HOLD_WATCH|فنيا|مراقبة)",
+    re.IGNORECASE,
 )
 
 
-def _collect_excluded_portfolio_symbols(tool_payloads: List[Dict[str, Any]]) -> Dict[str, str]:
-    """Collect symbols explicitly excluded from buying by optimizer or deterministic rotation matrix."""
-    excluded: Dict[str, str] = {}
+def _classify_excluded_portfolio_symbols(
+    tool_payloads: List[Dict[str, Any]],
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """
+    Split portfolio buy-restricted symbols (order-independently across all tool payloads) into:
+    1) fundamental_excluded: loss-making, negative equity, zero liquidity, weak fundamentals, or EXIT_PRIORITY.
+    2) technical_hold_only: financially healthy positions capped from buying solely due to technical downtrend (HOLD_WATCH).
+    """
+    hard_fundamental: Dict[str, str] = {}
+    excl_reasons: Dict[str, str] = {}
+    healthy_hold_positions: Dict[str, str] = {}
 
     def _visit(node: Any, depth: int) -> None:
         if depth > 4:
@@ -151,21 +181,34 @@ def _collect_excluded_portfolio_symbols(tool_payloads: List[Dict[str, Any]]) -> 
             for item in node["excludedFromBuying"]:
                 if isinstance(item, dict) and item.get("symbol"):
                     s = str(item["symbol"]).strip().upper()
-                    excluded.setdefault(s, str(item.get("reason") or "مستبعد من الشراء"))
+                    reason = str(item.get("reason") or "مستبعد من الشراء")
+                    excl_reasons.setdefault(s, reason)
 
         rot = node.get("portfolio_rotation_matrix")
         if isinstance(rot, dict) and isinstance(rot.get("exit_priority_symbols"), list):
             for raw_s in rot["exit_priority_symbols"]:
                 if isinstance(raw_s, str) and raw_s.strip():
-                    excluded.setdefault(raw_s.strip().upper(), "مصنّف كمستبعد/تصفية أولوية في مصفوفة المحفظة")
+                    hard_fundamental.setdefault(
+                        raw_s.strip().upper(),
+                        "مصنّف كمستبعد/تصفية أولوية في مصفوفة المحفظة",
+                    )
 
         if isinstance(node.get("positions"), list):
             for p in node["positions"]:
                 if isinstance(p, dict) and p.get("symbol"):
-                    if p.get("rotation_action") == "EXIT_PRIORITY" or (p.get("forbidden_to_buy") and (p.get("is_loss_making") or p.get("is_illiquid") or p.get("is_negative_equity"))):
-                        excluded.setdefault(
-                            str(p["symbol"]).strip().upper(),
+                    s = str(p["symbol"]).strip().upper()
+                    is_bad_fund = bool(
+                        p.get("is_loss_making") or p.get("is_illiquid") or p.get("is_negative_equity")
+                    )
+                    if p.get("rotation_action") == "EXIT_PRIORITY" or (p.get("forbidden_to_buy") and is_bad_fund):
+                        hard_fundamental.setdefault(
+                            s,
                             str(p.get("rotation_reason_ar") or "شركة خاسرة أو سيولة منعدمة — ممنوع التعزيز"),
+                        )
+                    elif p.get("rotation_action") in ("HOLD_WATCH", "HOLD_CORE") and not is_bad_fund:
+                        healthy_hold_positions.setdefault(
+                            s,
+                            str(p.get("rotation_reason_ar") or "مركز مراقبة دون تعزيز تحت المتوسطات الرئيسية"),
                         )
 
         for v in node.values():
@@ -174,7 +217,29 @@ def _collect_excluded_portfolio_symbols(tool_payloads: List[Dict[str, Any]]) -> 
 
     for payload in tool_payloads or []:
         _visit(payload, 0)
-    return excluded
+
+    fundamental: Dict[str, str] = dict(hard_fundamental)
+    technical: Dict[str, str] = {}
+    for s, reason in excl_reasons.items():
+        if s in fundamental:
+            continue
+        reason_norm = _norm_ar_guard(reason)
+        if _FUNDAMENTAL_EXCLUSION_RE.search(reason_norm):
+            fundamental[s] = reason
+        elif _TECHNICAL_ONLY_EXCLUSION_RE.search(reason_norm) or s in healthy_hold_positions:
+            technical[s] = healthy_hold_positions.get(s) or reason
+        else:
+            fundamental[s] = reason
+
+    return fundamental, technical
+
+
+def _collect_excluded_portfolio_symbols(tool_payloads: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Collect symbols explicitly excluded from buying by optimizer or deterministic rotation matrix."""
+    fundamental, technical = _classify_excluded_portfolio_symbols(tool_payloads)
+    combined = dict(technical)
+    combined.update(fundamental)
+    return combined
 
 
 def _collect_ground_truth(
@@ -409,16 +474,16 @@ _STATED_RES1_ROW_RE = re.compile(
     r"(?:^|\n)\s*\|\s*\*{0,2}(?:المقاومة\s+الأولى[^\n|]{0,25})\*{0,2}\s*\|\s*\*{0,2}(\d[\d,]*(?:\.\d+)?)"
 )
 _CHEAP_VALUATION_CUE_RE = re.compile(
-    r"(?:سهم\s+رخيص|رخيص\s+جداً|فرصة\s+قيمة\s+بخصم|أقل\s+من\s+قيمته\s+العادلة|تحت\s+القيمة\s+العادلة)"
+    r"(?:سهم\s+رخيص|رخيص\s+جدا|فرصة\s+قيمة\s+بخصم|اقل\s+من\s+قيمته\s+العادلة|تحت\s+القيمة\s+العادلة)"
 )
 _CHEAP_NEGATION_RE = re.compile(
-    r"(?:ليس|ليست|غير|لا\s+يُعد|أعلى\s+من|فوق\s+القيمة|مقارنة\s+ب)"
+    r"(?:ليس|ليست|غير|مش|لا\s+يعد|لا\s+تعد|لا\s+يعتبر|لا\s+تعتبر|عكس|بعيد|اعلي\s+من|فوق\s+القيم|متضخم|غالي|غالية|مبالغ|مقارنة\s+ب|تجاهل)"
 )
 _EXPENSIVE_VALUATION_CUE_RE = re.compile(
-    r"(?:سهم\s+متضخم\s+سعرياً|أعلى\s+من\s+قيمته\s+العادلة|فوق\s+القيمة\s+العادلة\s+بشكل\s+كبير)"
+    r"(?:سهم\s+متضخم\s+سعريا|اعلي\s+من\s+قيمته\s+العادلة|فوق\s+القيمة\s+العادلة\s+بشكل\s+كبير)"
 )
 _EXPENSIVE_NEGATION_RE = re.compile(
-    r"(?:ليس|ليست|غير|لا\s+يُعد|أقل\s+من|تحت\s+القيمة)"
+    r"(?:ليس|ليست|غير|مش|لا\s+يعد|لا\s+تعد|لا\s+يعتبر|لا\s+تعتبر|عكس|اقل\s+من|تحت\s+القيم|رخيص|بخصم|مقارنة\s+ب|تجاهل)"
 )
 _PHANTOM_DIV_RE = re.compile(r"🎁\s*كوبون\s+قادم\s*:")
 _MC_PROB_INVERSION_RE = re.compile(
@@ -523,32 +588,51 @@ def verify_and_guard_reply(
         warnings.append("automation_quota_misstatement_fixed")
         block_cache = True
 
-    # Check E: Portfolio Contradiction Guard (block recommending BUY/increase on excluded/loss-making stocks)
-    excluded_syms = _collect_excluded_portfolio_symbols(tool_payloads)
-    if excluded_syms:
-        conflict_syms: List[str] = []
+    # Check E: Portfolio Contradiction Guard
+    # Splits fundamental exclusions (loss-making/negative equity/zero liquidity/EXIT_PRIORITY)
+    # from technical downtrend hold-only caps (HOLD_WATCH) so healthy stocks are NEVER falsely accused of losses.
+    fundamental_excl, technical_hold_only = _classify_excluded_portfolio_symbols(tool_payloads)
+    if fundamental_excl or technical_hold_only:
+        fund_conflicts: List[str] = []
+        tech_conflicts: List[str] = []
         for raw_line in guarded.splitlines():
-            clean_line = raw_line.replace("*", "").replace("`", "")
+            clean_line = _norm_ar_guard(raw_line.replace("*", "").replace("`", ""))
             if not _BUY_INCREASE_CUES_RE.search(clean_line):
                 continue
             if _EXIT_OR_NEGATION_CUES_RE.search(clean_line):
                 continue
-            for sym in excluded_syms:
+            for sym in fundamental_excl:
                 if re.search(rf"(?<![A-Z0-9]){re.escape(sym)}(?![A-Z0-9])", clean_line):
-                    if sym not in conflict_syms:
-                        conflict_syms.append(sym)
-        if conflict_syms:
-            for sym in conflict_syms:
+                    if sym not in fund_conflicts:
+                        fund_conflicts.append(sym)
+            for sym in technical_hold_only:
+                if re.search(rf"(?<![A-Z0-9]){re.escape(sym)}(?![A-Z0-9])", clean_line):
+                    if sym not in tech_conflicts and sym not in fund_conflicts:
+                        tech_conflicts.append(sym)
+        if fund_conflicts:
+            for sym in fund_conflicts:
                 warnings.append(f"excluded_stock_buy_conflict:{sym}")
             block_cache = True
             prepended_warning = True
             banner = (
-                f"> ⚠️ **تنبيه اتساق المحفظة التلقائي:** الأسهم التالية (**{', '.join(conflict_syms)}**) "
+                f"> ⚠️ **تنبيه اتساق المحفظة التلقائي:** الأسهم التالية (**{', '.join(fund_conflicts)}**) "
                 "مصنّفة برمجياً كمراكز مستبعدة من الشراء أو التوسع لوجود خسائر صافية أو حقوق ملكية سالبة أو سيولة منعدمة — "
                 "تجاهل أي إشارة تعزيز لها وأولِ الأولوية للتصفية لصالح الأسهم السليمة مالياً."
             )
             if "تنبيه اتساق المحفظة التلقائي" not in guarded:
                 guarded = f"{banner}\n\n{guarded}"
+        if tech_conflicts:
+            for sym in tech_conflicts:
+                warnings.append(f"downtrend_stock_buy_conflict:{sym}")
+            block_cache = True
+            prepended_warning = True
+            tech_banner = (
+                f"> ⚠️ **تنبيه اتجاه المحفظة التلقائي:** الأسهم التالية (**{', '.join(tech_conflicts)}**) "
+                "مصنّفة فنياً كمراكز **مراقبة دون تعزيز** لوقوعها حالياً تحت المتوسطات الرئيسية (اتجاه هابط) رغم قوة أساسياتها — "
+                "يُفضّل عدم ضخ سيولة إضافية فيها قبل استعادة الاتجاه الصاعد."
+            )
+            if "تنبيه اتجاه المحفظة التلقائي" not in guarded:
+                guarded = f"{tech_banner}\n\n{guarded}"
 
     # Check F: Deterministic Single-Stock Close, Valuation, Dividend & Monte Carlo Fact-Checker
     single_truth, checked_dividends, has_any_upcoming_dividend = _extract_single_stock_truth(tool_payloads)
@@ -580,13 +664,13 @@ def verify_and_guard_reply(
             dir_conflict = False
             if upside_f <= -15.0:
                 for raw_ln in guarded.splitlines():
-                    cl_ln = raw_ln.replace("*", "").replace("`", "")
+                    cl_ln = _norm_ar_guard(raw_ln.replace("*", "").replace("`", ""))
                     if _CHEAP_VALUATION_CUE_RE.search(cl_ln) and not _CHEAP_NEGATION_RE.search(cl_ln):
                         dir_conflict = True
                         break
             elif upside_f >= 20.0:
                 for raw_ln in guarded.splitlines():
-                    cl_ln = raw_ln.replace("*", "").replace("`", "")
+                    cl_ln = _norm_ar_guard(raw_ln.replace("*", "").replace("`", ""))
                     if _EXPENSIVE_VALUATION_CUE_RE.search(cl_ln) and not _EXPENSIVE_NEGATION_RE.search(cl_ln):
                         dir_conflict = True
                         break
@@ -594,13 +678,30 @@ def verify_and_guard_reply(
                 warnings.append(f"valuation_direction_contradiction:{sym_f}")
                 block_cache = True
                 prepended_warning = True
-                val_banner = (
-                    f"> ⚠️ **تدقيق التقييم الحتمي ({sym_f}):** السهم يتداول حالياً **أعلى من قيمته العادلة** بنحو "
-                    f"`{abs(upside_f):.1f}%` وفق بيانات الأداة — تجاهل أي وصف معاكس له كسهم رخيص."
-                    if upside_f < 0
-                    else f"> ⚠️ **تدقيق التقييم الحتمي ({sym_f}):** السهم يتداول حالياً **أقل من قيمته العادلة** بنحو "
-                    f"`+{upside_f:.1f}%` وفق بيانات الأداة."
-                )
+                fv_f = rec_f.get("fair_value")
+                if upside_f < 0:
+                    premium_pct: Optional[float] = None
+                    if actual_close and fv_f and fv_f > 0 and actual_close > fv_f:
+                        premium_pct = ((actual_close - fv_f) / fv_f) * 100.0
+                    elif upside_f > -99.0:
+                        premium_pct = (-upside_f / (100.0 + upside_f)) * 100.0
+                    if premium_pct is not None:
+                        val_banner = (
+                            f"> ⚠️ **تدقيق التقييم الحتمي ({sym_f}):** السهم يتداول حالياً **أعلى من قيمته العادلة** بنحو "
+                            f"`+{premium_pct:.1f}%` (أي القيمة العادلة أقل من السعر الحالي بنحو `{abs(upside_f):.1f}%`) "
+                            "وفق بيانات الأداة — تجاهل أي وصف معاكس له كسهم رخيص."
+                        )
+                    else:
+                        val_banner = (
+                            f"> ⚠️ **تدقيق التقييم الحتمي ({sym_f}):** السهم يتداول حالياً **أعلى من قيمته العادلة بكثير** "
+                            f"(القيمة العادلة أقل من السعر الحالي بنحو `{abs(upside_f):.1f}%`) "
+                            "وفق بيانات الأداة — تجاهل أي وصف معاكس له كسهم رخيص."
+                        )
+                else:
+                    val_banner = (
+                        f"> ⚠️ **تدقيق التقييم الحتمي ({sym_f}):** السهم يتداول حالياً **أقل من قيمته العادلة** بفرصة صعود نحو "
+                        f"`+{upside_f:.1f}%` وفق بيانات الأداة."
+                    )
                 if "تدقيق التقييم الحتمي" not in guarded:
                     guarded = f"{val_banner}\n\n{guarded}"
 

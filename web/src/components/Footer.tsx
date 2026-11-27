@@ -610,6 +610,9 @@ export default function Footer() {
                   { href: "/markets/uae", ar: "🇦🇪 أسهم الإمارات (دبي DFM وأبوظبي ADX)", en: "🇦🇪 UAE Stocks (DFM & ADX)" },
                   { href: "/markets/qatar", ar: "🇶🇦 أسهم بورصة قطر (QSE)", en: "🇶🇦 Qatar Exchange (QSE)" },
                   { href: "/markets/gold-silver", ar: "🥇 الذهب والفضة (XAUUSD & XAGUSD)", en: "🥇 Gold & Silver (XAUUSD & XAGUSD)" },
+                  { href: "/dividends/tasi", ar: "💰 توزيعات أرباح تاسي", en: "💰 Saudi TASI Dividends" },
+                  { href: "/dividends/uae", ar: "💰 توزيعات أسهم الإمارات", en: "💰 UAE Dividends" },
+                  { href: "/dividends/qatar", ar: "💰 توزيعات بورصة قطر", en: "💰 Qatar Dividends" },
                 ].map((mkt) => (
                   <Link
                     key={mkt.href}

@@ -193,6 +193,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${baseUrl}/markets/uae`, changeFrequency: 'daily', priority: 0.90 },
     { url: `${baseUrl}/markets/qatar`, changeFrequency: 'daily', priority: 0.90 },
     { url: `${baseUrl}/markets/gold-silver`, changeFrequency: 'daily', priority: 0.90 },
+    { url: `${baseUrl}/dividends`, changeFrequency: 'daily', priority: 0.90 },
+    { url: `${baseUrl}/dividends/tasi`, changeFrequency: 'daily', priority: 0.90 },
+    { url: `${baseUrl}/dividends/uae`, changeFrequency: 'daily', priority: 0.90 },
+    { url: `${baseUrl}/dividends/qatar`, changeFrequency: 'daily', priority: 0.90 },
   ];
 
   const [stocks, tasiStocks, gccMetals] = await Promise.all([

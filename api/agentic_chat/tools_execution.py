@@ -749,7 +749,7 @@ def _safe_price(val: Any) -> Optional[float]:
         if val is None or val == "":
             return None
         f = float(val)
-        if f != f:
+        if f != f or abs(f) == float("inf"):
             return None
         return round(f, _price_decimals(f))
     except Exception:
@@ -5622,31 +5622,45 @@ def _dividend_entitlement_rule_ar(ex_date: Any, record_date: Any = None) -> str:
     )
 
 
+def _is_dividend_still_upcoming(item: Dict[str, Any], today_iso: str) -> bool:
+    """Return True only when a dividend is upcoming/pending_pay AND its payment/ex date has not already passed."""
+    if not isinstance(item, dict) or item.get("status") not in ("upcoming", "pending_pay"):
+        return False
+    ex_d = str(item.get("ex_date") or "")[:10]
+    pay_d = str(item.get("pay_date") or "")[:10]
+    if len(pay_d) == 10 and pay_d < today_iso:
+        return False
+    if len(pay_d) != 10 and len(ex_d) == 10 and ex_d < today_iso:
+        return False
+    return True
+
+
 def _lookup_upcoming_dividend(symbol: str, market: Optional[str] = "EGX") -> Optional[Dict[str, Any]]:
-    """Fast O(1) cached lookup for a stock's upcoming or pending-pay cash dividend."""
+    """Fast O(1) cached lookup for a stock's upcoming or pending-pay cash dividend (filtering out already-paid dates)."""
     if not symbol:
         return None
     sym_u = str(symbol).strip().upper().split(".")[0]
     mkey = _div_market_key(market)
     cal = _load_dividends_calendar_cached(mkey)
+    today_iso = datetime.now(CAIRO_TZ).date().isoformat()
     for item in cal.get("dividends") or []:
-        if str(item.get("symbol") or "").upper() == sym_u:
-            if item.get("status") in ("upcoming", "pending_pay"):
-                return {
-                    "symbol": sym_u,
-                    "exchange": item.get("exchange"),
-                    "amount": item.get("amount"),
-                    "currency": item.get("currency"),
-                    "currency_ar": item.get("currency_ar"),
-                    "ex_date": item.get("ex_date"),
-                    "record_date": item.get("record_date"),
-                    "pay_date": item.get("pay_date"),
-                    "yield_pct": item.get("yield_pct"),
-                    "days_until_ex": item.get("days_until_ex"),
-                    "status": item.get("status"),
-                    "entitlement_rule_ar": _dividend_entitlement_rule_ar(item.get("ex_date"), item.get("record_date")),
-                }
-            break
+        if str(item.get("symbol") or "").upper() != sym_u:
+            continue
+        if _is_dividend_still_upcoming(item, today_iso):
+            return {
+                "symbol": sym_u,
+                "exchange": item.get("exchange"),
+                "amount": item.get("amount"),
+                "currency": item.get("currency"),
+                "currency_ar": item.get("currency_ar"),
+                "ex_date": item.get("ex_date"),
+                "record_date": item.get("record_date"),
+                "pay_date": item.get("pay_date"),
+                "yield_pct": item.get("yield_pct"),
+                "days_until_ex": item.get("days_until_ex"),
+                "status": item.get("status"),
+                "entitlement_rule_ar": _dividend_entitlement_rule_ar(item.get("ex_date"), item.get("record_date")),
+            }
     return None
 
 
@@ -5695,8 +5709,9 @@ def _sync_get_dividends(
             "calendar_url": "/dividends" if mkey == "egx" else f"/dividends/{mkey}",
         }
 
+    today_iso = datetime.now(CAIRO_TZ).date().isoformat()
     filtered = (
-        [r for r in all_rows if r.get("status") in ("upcoming", "pending_pay")]
+        [r for r in all_rows if _is_dividend_still_upcoming(r, today_iso)]
         if upcoming_only
         else all_rows
     )
@@ -5931,7 +5946,7 @@ def _sync_calculate_position(
                         rsym = _resolve_symbol_and_market(str(row.get("symbol") or ""))[0]
                         if str(rsym or "").upper() == clean_sym:
                             rq = _safe_float(row.get("quantity")) or 0.0
-                            re_p = _safe_float(row.get("entry_price")) or 0.0
+                            re_p = _safe_price(row.get("entry_price")) or 0.0
                             if rq > 0:
                                 found_qty += rq
                                 if re_p > 0:
@@ -5949,7 +5964,7 @@ def _sync_calculate_position(
                     )
                     for row in (pos_res.data or []):
                         rq = _safe_float(row.get("quantity")) or 0.0
-                        re_p = _safe_float(row.get("entry_price")) or 0.0
+                        re_p = _safe_price(row.get("entry_price")) or 0.0
                         if rq > 0:
                             found_qty += rq
                             if re_p > 0:
@@ -5981,7 +5996,7 @@ def _sync_calculate_position(
                 .execute()
             )
             if res.data and res.data[0].get("close"):
-                close = _safe_float(res.data[0].get("close")) or 1.0
+                close = _safe_price(res.data[0].get("close")) or 1.0
             res_p = (
                 sb_sa.from_("stock_prices")
                 .select("high,low,close,date")
@@ -5998,7 +6013,7 @@ def _sync_calculate_position(
                 )
                 ohlcv_rows = merged_map.get(clean_sym, ohlcv_rows)
             if close == 1.0 and ohlcv_rows and ohlcv_rows[0].get("close"):
-                close = _safe_float(ohlcv_rows[0].get("close")) or 1.0
+                close = _safe_price(ohlcv_rows[0].get("close")) or 1.0
         except Exception:
             pass
     else:
@@ -6014,7 +6029,7 @@ def _sync_calculate_position(
                 .execute()
             )
             if res.data and res.data[0].get("close"):
-                close = _safe_float(res.data[0].get("close")) or 1.0
+                close = _safe_price(res.data[0].get("close")) or 1.0
             res_p = (
                 sb.from_("stock_prices")
                 .select("high,low,close,date")
@@ -6944,9 +6959,9 @@ def _build_portfolio_view_payload(
         val_i = item.get("market_value") if item.get("market_value") is not None else (item.get("cost_basis") or 0.0)
         w_pct = round((float(val_i) / float(denom_w)) * 100.0, 1) if denom_w > 0 and val_i is not None else 0.0
         item["weight_pct"] = w_pct
-        lp = _safe_float(item.get("last_price"))
-        e50 = _safe_float(item.get("ema_50"))
-        e200 = _safe_float(item.get("ema_200"))
+        lp = _safe_price(item.get("last_price"))
+        e50 = _safe_price(item.get("ema_50"))
+        e200 = _safe_price(item.get("ema_200"))
         below_both = bool(lp and e50 and e200 and lp < e50 and lp < e200)
         pe_v = _safe_float(item.get("pe_ratio"))
         fs_v = _safe_float(item.get("fund_score"))
@@ -7472,7 +7487,7 @@ def _sync_manage_portfolio(
                 {
                     "symbol": str(p.get("symbol", "")).upper(),
                     "name": p.get("name") or str(p.get("symbol", "")).upper(),
-                    "entry_price": _safe_float(p.get("entry_price")),
+                    "entry_price": _safe_price(p.get("entry_price")),
                     "source": p.get("source"),
                     "added_at": p.get("added_at"),
                 }
@@ -8005,7 +8020,7 @@ def _sync_optimize_portfolio(
             lst = price_rows_by_sym.setdefault(s_u, [])
             if len(lst) < 120:
                 lst.append(row)
-        c_val = _safe_float(row.get("close"))
+        c_val = _safe_price(row.get("close"))
         if s_u and c_val and c_val > 0 and s_u not in latest_close_map:
             latest_close_map[s_u] = c_val
 
@@ -8039,17 +8054,17 @@ def _sync_optimize_portfolio(
         meta = stock_meta.get(sym) or {}
         sf_row = fund_opt_map.get(sym) or {}
         raw_sf_data = sf_row.get("data") if isinstance(sf_row.get("data"), dict) else {}
-        price = _safe_float(ind.get("close")) or latest_close_map.get(sym)
+        price = _safe_price(ind.get("close")) or latest_close_map.get(sym)
         if not price or not _math.isfinite(price) or price <= 0:
             missing_syms.append(sym)
             continue
-        atr = _safe_float(ind.get("atr_14"))
+        atr = _safe_price(ind.get("atr_14"))
         fallback_vol = max(0.008, min(0.08, (atr / price) if (atr and price > 0) else 0.022))
 
         adj_ema50, adj_ema200, sp_factor, _ = _detect_and_adjust_price_split(
             price_rows_by_sym.get(sym) or [],
-            _safe_float(ind.get("ema_50")),
-            _safe_float(ind.get("ema_200")),
+            _safe_price(ind.get("ema_50")),
+            _safe_price(ind.get("ema_200")),
             price,
         )
         sf_data, _ = _normalize_split_adjusted_fundamentals(raw_sf_data, price, split_factor=sp_factor)

@@ -6,7 +6,7 @@ export const preferredRegion = "fra1";
 export const revalidate = 604800;
 
 export const metadata: Metadata = {
-  title: "دليل أسهم بورصة قطر (QSE) والتحليل الفني بالذكاء الاصطناعي | EGX BOTS",
+  title: { absolute: "دليل أسهم بورصة قطر (QSE) والتحليل الفني ومستويات الدعم والمقاومة بالذكاء الاصطناعي" },
   description:
     "تصفح جميع أسهم بورصة قطر (QSE) مثل بنك قطر الوطني QNBK ومصرف قطر الإسلامي QIBK وصناعات قطر IQCD وناقلات وأوريدو مع الأسعار ومؤشر RSI وتحليل الذكاء الاصطناعي.",
   keywords: [

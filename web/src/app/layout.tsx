@@ -73,7 +73,8 @@ export const metadata: Metadata = {
   creator: "EGX BOTS",
   openGraph: {
     type: "website",
-    locale: "ar_EG",
+    locale: "ar_AR",
+    alternateLocale: ["ar_SA", "ar_AE", "ar_QA", "ar_KW", "ar_EG"],
     url: "https://egxbots.com",
     title: "EGX BOTS | تحليل الأسهم المصرية والسعودية (EGX & TASI) بالذكاء الاصطناعي",
     description: "منصة EGX BOTS لتحليل أسهم البورصة المصرية (EGX) والسوق السعودي تداول (TASI) بالذكاء الاصطناعي: رادار الصفقات، تقييمات AI Score، المحاكاة التاريخية، ومستويات الدعم والمقاومة.",
@@ -159,8 +160,8 @@ export default function RootLayout({
                   "url": "https://egxbots.com",
                   "name": "EGX BOTS",
                   "alternateName": ["ARTORO", "ARTORO AI", "EGX AI Analyzer", "egxbots", "محلل الأسهم المصرية والسعودية بالذكاء الاصطناعي"],
-                  "description": "منصة تحليل الأسهم المصرية (EGX) والسعودية (تداول تاسي TASI) بتقييمات يومية، ماسح فني، ونتائج تاريخية.",
-                  "inLanguage": "ar-EG",
+                  "description": "منصة وشات الذكاء الاصطناعي لتحليل الأسهم المصرية (EGX)، السوق السعودي تداول (تاسي TASI)، أسهم الإمارات (DFM & ADX)، بورصة قطر (QSE)، والذهب والفضة.",
+                  "inLanguage": "ar",
                   "publisher": { "@id": "https://egxbots.com/#organization" },
                   "potentialAction": {
                     "@type": "SearchAction",
@@ -172,10 +173,12 @@ export default function RootLayout({
                   "@type": "Organization",
                   "@id": "https://egxbots.com/#organization",
                   "name": "EGX BOTS",
+                  "alternateName": ["TASI BOTS", "ARTORO AI"],
                   "url": "https://egxbots.com",
                   "logo": "https://egxbots.com/favicon_io/android-chrome-512x512.png",
                   "image": "https://egxbots.com/dashboard_preview.png",
-                  "description": "منصة لتحليل بيانات البورصة المصرية (EGX) والسوق السعودي تداول (TASI) باستخدام نماذج كمية وماسح فني ونتائج تاريخية.",
+                  "description": "منصة لتحليل بيانات البورصة المصرية (EGX) والأسواق الخليجية (السوق السعودي تداول TASI، سوق دبي DFM، سوق أبوظبي ADX، وبورصة قطر QSE) باستخدام الذكاء الاصطناعي والنماذج الكمية.",
+                  "areaServed": ["EG", "SA", "AE", "QA", "KW"],
                   "sameAs": [
                     "https://t.me/egxbots",
                     "https://www.facebook.com/egxbots"

@@ -10,7 +10,7 @@ export const preferredRegion = "fra1";
 export const revalidate = 604800;
 
 export const metadata: Metadata = {
-  title: "الأسواق العربية والخليجية والذهب (مصر، السعودية، الإمارات، قطر) | EGX BOTS",
+  title: { absolute: "الأسواق العربية والخليجية والذهب (السعودية، الإمارات، قطر، مصر) | تحليلات الذكاء الاصطناعي" },
   description:
     "دليل شامل لتحليل أسهم الأسواق العربية والخليجية بالذكاء الاصطناعي: البورصة المصرية (EGX)، السوق السعودي تاسي (TASI)، أسهم الإمارات (دبي DFM وأبوظبي ADX)، بورصة قطر (QSE)، والذهب والفضة (XAUUSD & XAGUSD).",
   keywords: [

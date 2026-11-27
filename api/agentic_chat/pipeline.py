@@ -569,33 +569,45 @@ def _normalize_sym_for_dedupe(raw_sym: Any) -> str:
 
 def _dedupe_redundant_levels_calls(
     prepared_calls: List[Tuple[int, str, Dict[str, Any]]],
+    already_covered_syms: Optional[set] = None,
+    *,
+    default_market: str = "EGX",
 ) -> Tuple[List[Tuple[int, str, Dict[str, Any]]], Dict[int, Dict[str, Any]]]:
     """
-    Eliminate duplicate get_stock_levels calls when get_stock covers the same symbol(s) in the round.
+    Eliminate duplicate get_stock_levels calls when get_stock covers the same (market, symbol)
+    in the current round OR an earlier succeeded round of the same turn.
     Preserves tool_call indices via short_circuit_results so DeepSeek tool_call_id protocol holds.
+    Does NOT mutate `already_covered_syms` before execution (caller records successes post-dispatch).
     """
-    covered_syms = set()
+    def _pair(raw_sym: Any, fn_args: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+        norm = _normalize_sym_for_dedupe(raw_sym)
+        if not norm:
+            return None
+        mkt = normalize_exchange_code(fn_args.get("market") or default_market)
+        return (mkt, norm)
+
+    covered_keys = set(already_covered_syms or ())
     for _, fn_name, fn_args in prepared_calls:
         if fn_name != "get_stock" or not isinstance(fn_args, dict):
             continue
         if isinstance(fn_args.get("symbol"), str):
-            norm = _normalize_sym_for_dedupe(fn_args["symbol"])
-            if norm:
-                covered_syms.add(norm)
+            p = _pair(fn_args["symbol"], fn_args)
+            if p:
+                covered_keys.add(p)
         if isinstance(fn_args.get("symbols"), list):
             for s in fn_args["symbols"]:
-                norm = _normalize_sym_for_dedupe(s)
-                if norm:
-                    covered_syms.add(norm)
+                p = _pair(s, fn_args)
+                if p:
+                    covered_keys.add(p)
 
-    if not covered_syms:
+    if not covered_keys:
         return list(prepared_calls), {}
 
     active_calls: List[Tuple[int, str, Dict[str, Any]]] = []
     short_circuits: Dict[int, Dict[str, Any]] = {}
     already_note = {
         "status": "already_included_in_get_stock",
-        "note": "Support, resistance, stop-loss, and exact distance percentages are already included inside get_stock in this round.",
+        "note": "Support, resistance, stop-loss, and exact distance percentages are already included inside get_stock in this turn.",
     }
 
     for idx, fn_name, fn_args in prepared_calls:
@@ -606,7 +618,7 @@ def _dedupe_redundant_levels_calls(
         raw_list = fn_args.get("symbols")
         raw_single = fn_args.get("symbol")
         if isinstance(raw_list, list) and raw_list:
-            remaining = [s for s in raw_list if _normalize_sym_for_dedupe(s) not in covered_syms]
+            remaining = [s for s in raw_list if _pair(s, fn_args) not in covered_keys]
             if not remaining:
                 short_circuits[idx] = already_note
             elif len(remaining) < len(raw_list):
@@ -614,7 +626,7 @@ def _dedupe_redundant_levels_calls(
             else:
                 active_calls.append((idx, fn_name, fn_args))
         elif isinstance(raw_single, str) and raw_single.strip():
-            if _normalize_sym_for_dedupe(raw_single) in covered_syms:
+            if _pair(raw_single, fn_args) in covered_keys:
                 short_circuits[idx] = already_note
             else:
                 active_calls.append((idx, fn_name, fn_args))
@@ -1681,6 +1693,7 @@ async def _run_agentic_chat_stream_impl(
         else [t for t in AGENTIC_TOOLS_SCHEMA if (t.get("function") or {}).get("name") != "get_recommendations"]
     )
 
+    fetched_stock_syms_turn: set = set()
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             while round_count < max_rounds:
@@ -1950,12 +1963,16 @@ async def _run_agentic_chat_stream_impl(
                         fn_args = apply_user_rules_to_tool_args(fn_name, fn_args, user_rules)
                     prepared_calls.append((idx, fn_name, fn_args))
 
-                active_prepared_calls, results_by_idx = _dedupe_redundant_levels_calls(prepared_calls)
+                tool_default_mkt = effective_market if not is_cross_market else ui_exch
+                active_prepared_calls, results_by_idx = _dedupe_redundant_levels_calls(
+                    prepared_calls,
+                    already_covered_syms=fetched_stock_syms_turn,
+                    default_market=tool_default_mkt,
+                )
                 pf_calls = [c for c in active_prepared_calls if c[1] == "manage_portfolio"]
                 if len(pf_calls) > 1:
                     # Run mutating manage_portfolio ops sequentially first, then read-only/view ops
                     pf_writes = [c for c in pf_calls if str(c[2].get("operation") or "view").strip().lower() not in ("view", "get")]
-                    tool_default_mkt = effective_market if not is_cross_market else ui_exch
                     pf_reads = [c for c in pf_calls if str(c[2].get("operation") or "view").strip().lower() in ("view", "get")]
                     other_calls = [c for c in active_prepared_calls if c[1] != "manage_portfolio"]
                     for idx, fn_name, fn_args in pf_writes:
@@ -1978,7 +1995,6 @@ async def _run_agentic_chat_stream_impl(
                             results_by_idx[idx] = res_item
                     tool_results = [results_by_idx[i] for i in range(len(prepared_calls))]
                 else:
-                    tool_default_mkt = effective_market if not is_cross_market else ui_exch
                     # Deduplicate identical read-only tool calls within the same round (e.g. duplicate get_accumulation_stocks)
                     sig_to_first_idx: Dict[str, int] = {}
                     unique_calls: List[Tuple[int, str, Dict[str, Any]]] = []
@@ -2017,11 +2033,23 @@ async def _run_agentic_chat_stream_impl(
                 t_tools = time.time() - t_tools_start
                 logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
-                for (_, fn_name, _), r in zip(prepared_calls, tool_results):
+                for (_, fn_name, fn_args), r in zip(prepared_calls, tool_results):
                     if isinstance(r, dict):
                         turn_tool_payloads.append(r)
-                    if fn_name == "get_stock" and _tool_result_has_missing_stock(r):
-                        has_missing_stock_data = True
+                    if fn_name == "get_stock":
+                        if _tool_result_has_missing_stock(r):
+                            has_missing_stock_data = True
+                        elif isinstance(r, dict) and r.get("status") != "error":
+                            ok_mkt = normalize_exchange_code((fn_args or {}).get("market") or tool_default_mkt)
+                            if isinstance((fn_args or {}).get("symbol"), str):
+                                n_ok = _normalize_sym_for_dedupe(fn_args["symbol"])
+                                if n_ok:
+                                    fetched_stock_syms_turn.add((ok_mkt, n_ok))
+                            if isinstance((fn_args or {}).get("symbols"), list):
+                                for raw_s in fn_args["symbols"]:
+                                    n_ok = _normalize_sym_for_dedupe(raw_s)
+                                    if n_ok:
+                                        fetched_stock_syms_turn.add((ok_mkt, n_ok))
                     if _tool_result_is_degraded_scan(fn_name, r):
                         has_degraded_scan_data = True
 

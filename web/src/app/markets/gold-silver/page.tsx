@@ -6,7 +6,7 @@ export const preferredRegion = "fra1";
 export const revalidate = 604800;
 
 export const metadata: Metadata = {
-  title: "سعر الذهب والفضة اليوم (XAUUSD & XAGUSD) والتحليل الفني بالذكاء الاصطناعي | EGX BOTS",
+  title: { absolute: "سعر الذهب والفضة اليوم (XAUUSD & XAGUSD) والتحليل الفني ومستويات الدعم والمقاومة" },
   description:
     "تابع سعر أونصة الذهب العالمي XAUUSD وسعر أونصة الفضة XAGUSD اليوم بالدولار الأمريكي مع التحليل الفني، مؤشر القوة النسبية RSI، ومستويات الدعم والمقاومة بالذكاء الاصطناعي.",
   keywords: [

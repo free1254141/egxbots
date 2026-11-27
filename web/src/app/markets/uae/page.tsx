@@ -6,7 +6,7 @@ export const preferredRegion = "fra1";
 export const revalidate = 604800;
 
 export const metadata: Metadata = {
-  title: "دليل أسهم الإمارات (دبي DFM وأبوظبي ADX) والتحليل بالذكاء الاصطناعي | EGX BOTS",
+  title: { absolute: "دليل أسهم الإمارات (سوق دبي DFM وسوق أبوظبي ADX) والتحليل الفني بالذكاء الاصطناعي" },
   description:
     "تصفح أسعار أسهم سوق دبي المالي (DFM) وسوق أبوظبي للأوراق المالية (ADX) مثل إعمار والدار وأدنوك وبنك أبوظبي الأول مع مؤشرات RSI والدعم والمقاومة وتحليل الشات بوت AI.",
   keywords: [
