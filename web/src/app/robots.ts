@@ -62,6 +62,7 @@ export default function robots(): MetadataRoute.Robots {
           'DataForSeoBot',
           'BLEXBot',
           'Meta-ExternalAgent',
+          'meta-webindexer',
           'anthropic-ai',
           'cohere-ai',
           'CCBot',
