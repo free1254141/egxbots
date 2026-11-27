@@ -126,8 +126,8 @@ test("floating launcher button is not rendered on /chart when closed so it does 
     chat.isOpen = true;
 });
 
-test("active chat chunks large message lists (20 messages) and loads older batches on demand", () => {
-    const testMessages = Array.from({ length: 35 }, (_, i) => ({
+test("active chat renders latest 4 messages and loads 6 older messages per demand", () => {
+    const testMessages = Array.from({ length: 12 }, (_, i) => ({
         id: `msg-${i + 1}`,
         role: i % 2 === 0 ? "user" : "assistant",
         content: `Message ${i + 1}`,
@@ -138,12 +138,106 @@ test("active chat chunks large message lists (20 messages) and loads older batch
 
     const loadOlderBtn = screen.getByRole("button", { name: "تحميل الرسائل السابقة" });
     expect(loadOlderBtn).toBeTruthy();
-    expect(loadOlderBtn.textContent).toContain("15 متبقية");
+    expect(loadOlderBtn.textContent).toContain("8 متبقية");
 
     fireEvent.click(loadOlderBtn);
 
+    const loadOlderBtnAfterFirst = screen.getByRole("button", { name: "تحميل الرسائل السابقة" });
+    expect(loadOlderBtnAfterFirst.textContent).toContain("2 متبقية");
+
+    fireEvent.click(loadOlderBtnAfterFirst);
     expect(screen.queryByRole("button", { name: "تحميل الرسائل السابقة" })).toBeNull();
     (chat as any).messages = [];
+});
+
+test("scrolling to top edge or clicking button triggers server-side lazy load when hasMoreHistory is true", async () => {
+    const { act } = await import("@testing-library/react");
+    jest.useFakeTimers();
+    try {
+        const loadOlderMessages = jest.fn().mockResolvedValue(4);
+        (chat as any).messages = [
+            { id: "m-7", role: "user", content: "Q4" },
+            { id: "m-8", role: "assistant", content: "A4" },
+            { id: "m-9", role: "user", content: "Q5" },
+            { id: "m-10", role: "assistant", content: "A5" },
+        ];
+        (chat as any).hasMoreHistory = true;
+        (chat as any).loadOlderMessages = loadOlderMessages;
+
+        const { container } = render(<ChatWidget />);
+        const btn = screen.getByRole("button", { name: "تحميل الرسائل السابقة" });
+        expect(btn.textContent).toContain("تحميل رسائل أقدم من التاريخ");
+
+        act(() => {
+            jest.advanceTimersByTime(450);
+        });
+
+        const scrollContainer = container.querySelector(".neobrutal-grid-bg") as HTMLDivElement;
+        Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 1000 });
+        Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 400 });
+        Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 12 });
+
+        await act(async () => {
+            fireEvent.scroll(scrollContainer);
+            await Promise.resolve();
+        });
+        expect(loadOlderMessages).toHaveBeenCalledTimes(1);
+    } finally {
+        (chat as any).messages = [];
+        (chat as any).hasMoreHistory = false;
+        delete (chat as any).loadOlderMessages;
+        jest.useRealTimers();
+    }
+});
+
+test("switching sessions while loadOlderMessages is in flight resets loading state and ignores stale resolution", async () => {
+    const { act } = await import("@testing-library/react");
+    let resolvePending!: (v: number) => void;
+    const loadOlderMessages = jest.fn(() => new Promise<number>(resolve => { resolvePending = resolve; }));
+
+    try {
+        (chat as any).activeSessionId = "sess-1";
+        (chat as any).messages = [
+            { id: "s1-1", role: "user", content: "S1 Q1" },
+            { id: "s1-2", role: "assistant", content: "S1 A1" },
+        ];
+        (chat as any).hasMoreHistory = true;
+        (chat as any).loadOlderMessages = loadOlderMessages;
+
+        const { rerender } = render(<ChatWidget />);
+        const btn1 = screen.getByRole("button", { name: "تحميل الرسائل السابقة" }) as HTMLButtonElement;
+        fireEvent.click(btn1);
+        expect(btn1.disabled).toBe(true);
+
+        // Switch to sess-2 (12 local messages -> initially shows 4 with 8 remaining) before sess-1 resolves
+        (chat as any).activeSessionId = "sess-2";
+        (chat as any).hasMoreHistory = false;
+        (chat as any).messages = Array.from({ length: 12 }, (_, i) => ({
+            id: `s2-${i + 1}`,
+            role: i % 2 === 0 ? "user" : "assistant",
+            content: `S2 Msg ${i + 1}`,
+        }));
+        rerender(<ChatWidget />);
+
+        const btn2Before = screen.getByRole("button", { name: "تحميل الرسائل السابقة" }) as HTMLButtonElement;
+        expect(btn2Before.disabled).toBe(false);
+        expect(btn2Before.textContent).toContain("8 متبقية");
+
+        // Stale sess-1 fetch resolves with 6 -> must NOT alter sess-2 visibleCount or stuck-lock button
+        await act(async () => {
+            resolvePending(6);
+            await Promise.resolve();
+        });
+
+        const btn2After = screen.getByRole("button", { name: "تحميل الرسائل السابقة" }) as HTMLButtonElement;
+        expect(btn2After.disabled).toBe(false);
+        expect(btn2After.textContent).toContain("8 متبقية");
+    } finally {
+        delete (chat as any).activeSessionId;
+        (chat as any).messages = [];
+        (chat as any).hasMoreHistory = false;
+        delete (chat as any).loadOlderMessages;
+    }
 });
 
 test("mobile layout container uses fixed inset-0 and touch-action pan-y on scroll container", () => {

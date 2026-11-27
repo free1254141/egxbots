@@ -4153,18 +4153,25 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             # Only shared site data and short-position monitoring run intraday.
             # Ordinary portfolio/recommendation lifecycle and LLM reports stay EOD.
             _finish_critical_prices()
+            phase_min_cov: Optional[float] = None
+            if phase == "morning":
+                try:
+                    raw_cov = float(os.getenv("PRICE_SYNC_MORNING_MIN_COVERAGE", "0.65"))
+                    phase_min_cov = min(1.0, max(0.05, raw_cov)) if raw_cov == raw_cov else 0.65
+                except (TypeError, ValueError):
+                    phase_min_cov = 0.65
             if _stage_needed('cache_revalidation'):
                 _start_step('cache_revalidation', 'Refresh successful intraday datasets')
                 try:
                     from api.cache_invalidation import invalidate_daily_cache
-                    cache_result = invalidate_daily_cache(steps_log) or {}
+                    cache_result = invalidate_daily_cache(steps_log, min_coverage=phase_min_cov) or {}
                     _record_step('cache_revalidation', not cache_result.get('error'),
                                  ('Skipped - cache refresh not configured/eligible' if cache_result.get('skipped') else (json.dumps(cache_result) if cache_result else 'Done')), 0)
                 except Exception as cache_error:
                     _record_step('cache_revalidation', False, str(cache_error)[:300])
             from api.price_sync_policy import price_sync_usable
             from api.daily_job_outcome import effective_daily_steps
-            essential_ok = all((price_sync_usable(step) if step.get("step") == "sync_prices" else step.get("status") == "success")
+            essential_ok = all((price_sync_usable(step, min_coverage=phase_min_cov) if step.get("step") == "sync_prices" else step.get("status") == "success")
                                for step in effective_daily_steps(steps_log)
                                if step.get("step") in {"sync_prices", "calculate_indicators"} and step.get("status") != "started")
             status = "completed" if essential_ok else "failed"

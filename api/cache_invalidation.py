@@ -76,14 +76,18 @@ def _latest_step_status(steps: Iterable[Dict[str, Any]]) -> Dict[str, str]:
     return latest
 
 
-def select_cache_tags(steps: List[Dict[str, Any]], changed_steps=None) -> List[str]:
+def select_cache_tags(
+    steps: List[Dict[str, Any]],
+    changed_steps=None,
+    min_coverage: Optional[float] = None,
+) -> List[str]:
     """Return the cache tags that a completed run may safely invalidate."""
     from api.daily_job_outcome import effective_daily_steps
     from api.price_sync_policy import price_sync_usable
     effective = effective_daily_steps(steps)
     latest = _latest_step_status(effective)
     sync = next((s for s in effective if s.get('step') == 'sync_prices'), None)
-    prices_usable = price_sync_usable(sync)
+    prices_usable = price_sync_usable(sync, min_coverage=min_coverage)
 
     for step in ESSENTIAL_STEPS:
         if not (prices_usable if step == 'sync_prices' else latest.get(step) == 'success'):
@@ -113,9 +117,14 @@ def _revalidate_endpoint() -> Optional[str]:
     return f"{origin}/api/revalidate"
 
 
-def invalidate_daily_cache(steps: List[Dict[str, Any]], timeout: float = 310.0, force: bool = False) -> Dict[str, Any]:
+def invalidate_daily_cache(
+    steps: List[Dict[str, Any]],
+    timeout: float = 310.0,
+    force: bool = False,
+    min_coverage: Optional[float] = None,
+) -> Dict[str, Any]:
     """Ask Vercel to invalidate the daily cache tags for a completed run."""
-    tags = select_cache_tags(steps)
+    tags = select_cache_tags(steps, min_coverage=min_coverage)
     if not tags:
         print("[CACHE] No cache tags to invalidate (essential step not successful).")
         return {"invalidated": [], "skipped": True}

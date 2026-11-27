@@ -203,3 +203,138 @@ test("does not erase a freshly completed local turn when a lagging server histor
   expect(chat.messages[1].content).toBe("سؤال جديد عن ABUK");
   expect(chat.messages[2].content).toContain("رد جديد عن ABUK");
 });
+
+test("fetches only latest 4 messages initially, lazy-loads older page via cursor, and preserves older messages on refresh", async () => {
+  const roomP = session("room-paginated", "2026-11-27T01:00:00Z");
+  const latestFour = [7, 8, 9, 10].map(i => ({
+    id: `m-${i}`,
+    role: i % 2 === 1 ? "user" : "assistant",
+    content: `Msg ${i}`,
+    timestamp: 1000 + i * 1000,
+    createdAt: `2026-11-27T00:0${i}:00Z`,
+  }));
+  const olderSix = [1, 2, 3, 4, 5, 6].map(i => ({
+    id: `m-${i}`,
+    role: i % 2 === 1 ? "user" : "assistant",
+    content: `Msg ${i}`,
+    timestamp: 1000 + i * 1000,
+    createdAt: `2026-11-27T00:0${i}:00Z`,
+  }));
+
+  (fetch as jest.Mock).mockImplementation((url: string) => {
+    if (url.includes("action=sessions")) {
+      return Promise.resolve(accessResponse([roomP]));
+    }
+    if (url.includes("before=")) {
+      return Promise.resolve(response({
+        history: olderSix,
+        has_more: false,
+        next_before: null,
+      }));
+    }
+    if (url.includes(`session_id=${roomP.id}`)) {
+      return Promise.resolve(response({
+        history: latestFour,
+        has_more: true,
+        next_before: "2026-11-27T00:07:00Z",
+      }));
+    }
+    return Promise.resolve(response({ ok: true }));
+  });
+
+  await act(async () => { render(tree()); });
+  await waitFor(() => expect(chat.messages).toHaveLength(4));
+
+  const initialHistoryCall = (fetch as jest.Mock).mock.calls.find(([u]) => String(u).includes(`session_id=${roomP.id}`));
+  expect(initialHistoryCall?.[0]).toContain("limit=4");
+  expect(chat.hasMoreHistory).toBe(true);
+
+  let added = 0;
+  await act(async () => {
+    added = await (chat.loadOlderMessages ? chat.loadOlderMessages() : Promise.resolve(0));
+  });
+
+  expect(added).toBe(6);
+  const olderCall = (fetch as jest.Mock).mock.calls.find(([u]) => String(u).includes("before="));
+  expect(olderCall?.[0]).toContain("limit=6");
+  expect(olderCall?.[0]).toContain("before=2026-11-27T00%3A07%3A00Z");
+  expect(chat.messages.map(m => m.id)).toEqual(["m-1", "m-2", "m-3", "m-4", "m-5", "m-6", "m-7", "m-8", "m-9", "m-10"]);
+  expect(chat.hasMoreHistory).toBe(false);
+
+  // Re-syncing session from server returns latest 4 only — must preserve already-loaded older messages
+  await act(async () => {
+    await chat.switchSession(roomP.id);
+  });
+
+  expect(chat.messages.map(m => m.id)).toEqual(["m-1", "m-2", "m-3", "m-4", "m-5", "m-6", "m-7", "m-8", "m-9", "m-10"]);
+  expect(chat.hasMoreHistory).toBe(false);
+});
+
+test("persists answerStages in localStorage and preserves them across close/reopen server history syncs", async () => {
+  const roomS = session("room-stages", "2026-11-27T01:55:00Z");
+  const serverStages = [
+    { id: "understand", label: "فهم السؤال وتحديد السهم والسوق", status: "done" },
+    { id: "fetch_data", label: "جلب البيانات الحية (الأسعار والمؤشرات)", status: "done" },
+    { id: "quant_verify", label: "تدقيق ومطابقة البيانات المالية والفنية المستخرجة", status: "done" },
+    { id: "synthesize", label: "صياغة التقرير النهائي ومراجعة الحارس الآلي", status: "done" },
+  ];
+
+  let historyCallCount = 0;
+  (fetch as jest.Mock).mockImplementation((url: string, init?: RequestInit) => {
+    if (url.includes("action=sessions")) {
+      return Promise.resolve(accessResponse([roomS]));
+    }
+    if (url.includes(`session_id=${roomS.id}`) && (!init || init.method !== "DELETE")) {
+      historyCallCount += 1;
+      if (historyCallCount === 1) {
+        return Promise.resolve(response({
+          history: [
+            {
+              id: "msg-a1",
+              role: "assistant",
+              content: "تحليل سهم COMI مكتمل",
+              timestamp: 2000,
+              createdAt: "2026-11-27T01:55:00Z",
+              answerStages: serverStages,
+            },
+          ],
+          has_more: false,
+          next_before: null,
+        }));
+      }
+      // Second sync simulates reopening chat against a server response without answerStages -> must preserve local stages!
+      return Promise.resolve(response({
+        history: [
+          {
+            id: "msg-a1",
+            role: "assistant",
+            content: "تحليل سهم COMI مكتمل",
+            timestamp: 2000,
+            createdAt: "2026-11-27T01:55:00Z",
+          },
+        ],
+        has_more: false,
+        next_before: null,
+      }));
+    }
+    return Promise.resolve(response({ ok: true }));
+  });
+
+  await act(async () => { render(tree()); });
+  await waitFor(() => expect(chat.messages).toHaveLength(1));
+
+  expect(chat.messages[0].answerStages).toEqual(serverStages);
+
+  // Saved in localStorage so page refresh / reopen keeps stages immediately
+  const rawStored = localStorage.getItem(`egxbots_msgs_${roomS.id}`);
+  expect(rawStored).toBeTruthy();
+  const parsedStored = JSON.parse(rawStored!);
+  expect(parsedStored[0].answerStages).toEqual(serverStages);
+
+  // Re-syncing session (e.g. closing & reopening chat drawer) must NOT wipe answerStages
+  await act(async () => {
+    await chat.switchSession(roomS.id);
+  });
+
+  expect(chat.messages[0].answerStages).toEqual(serverStages);
+});

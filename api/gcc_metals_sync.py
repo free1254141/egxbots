@@ -335,23 +335,35 @@ def _fetch_tv_missing(
     return out
 
 
+def _upload_storage_bytes_with_retry(
+    sb: Client, path: str, data: bytes, content_type: str, retries: int = 3
+) -> None:
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries):
+        try:
+            sb.storage.from_(STORAGE_BUCKET).upload(
+                path,
+                data,
+                {"content-type": content_type, "upsert": "true"},
+            )
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                time.sleep(0.4 * (attempt + 1))
+    if last_exc is not None:
+        raise last_exc
+
+
 def _upload_storage_json_gz(sb: Client, path: str, payload: Any) -> None:
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     gz = gzip.compress(raw, compresslevel=6)
-    sb.storage.from_(STORAGE_BUCKET).upload(
-        path,
-        gz,
-        {"content-type": "application/gzip", "upsert": "true"},
-    )
+    _upload_storage_bytes_with_retry(sb, path, gz, "application/gzip")
 
 
 def _upload_storage_json(sb: Client, path: str, payload: Any) -> None:
     raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-    sb.storage.from_(STORAGE_BUCKET).upload(
-        path,
-        raw,
-        {"content-type": "application/json", "upsert": "true"},
-    )
+    _upload_storage_bytes_with_retry(sb, path, raw, "application/json")
 
 
 def _merge_with_existing_storage_bars_checked(
@@ -658,10 +670,21 @@ def run_gcc_metals_sync(
     ) -> Tuple[str, List[Dict[str, Any]], bool, bool]:
         sym = it[0]
         bars = bars_map.get((sym, exch), [])
-        if not bars:
-            return sym, [], False, False
         worker_sb = _get_worker_sb()
         sym_path = f"prices/{exch}/symbols/{sym}.json.gz"
+        if not bars:
+            if daily_only and require_existing:
+                # Symbol did not trade today or provider skipped it; preserve its existing
+                # Storage history inside `exch_bars` so combined exchange coverage stays 100%.
+                try:
+                    existing_bars, _ = _merge_with_existing_storage_bars_checked(
+                        worker_sb, sym_path, [], require_existing=True
+                    )
+                    return sym, existing_bars, False, False
+                except Exception as dl_exc:
+                    print(f"[GCC-SYNC] Skipping Storage overwrite for {sym_path}: {dl_exc}")
+                    return sym, [], False, True
+            return sym, [], False, False
         if daily_only:
             try:
                 full_sym_bars, changed = _merge_with_existing_storage_bars_checked(
@@ -708,7 +731,7 @@ def run_gcc_metals_sync(
         prior_syms = int(prior_meta.get("symbols") or 0)
         req_existing = bool(daily_only and prior_rows > 0)
 
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        with ThreadPoolExecutor(max_workers=2) as pool:
             futs = [pool.submit(_process_symbol, exch, it, require_existing=req_existing) for it in exch_items]
             for fut in as_completed(futs):
                 sym, full_sym_bars, changed, failed_sym = fut.result()

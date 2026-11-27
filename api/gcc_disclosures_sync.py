@@ -118,8 +118,11 @@ _FOREIGN_MARKET_MARKERS: Dict[str, Tuple[str, ...]] = {
         "الشركات السعودية",
         "تاسي",
         "تداول السعودية",
-        "مصر",
+        "جنيه",
+        "بورصة مصر",
         "البورصة المصرية",
+        "هشام عز العرب",
+        "البنك التجاري الدولي",
         "الكويت",
         "جزائرية",
         "شيفرون",
@@ -130,14 +133,24 @@ _FOREIGN_MARKET_MARKERS: Dict[str, Tuple[str, ...]] = {
         "سعودية",
         "الشركات السعودية",
         "تاسي",
+        "جنيه",
+        "بورصة مصر",
         "البورصة المصرية",
+        "هشام عز العرب",
+        "بنك أبوظبي الأول مصر",
         "جزائرية",
     ),
 }
 
+_EGYPT_WORD_BOUNDARY_RE = re.compile(
+    r"(?<![a-z0-9\u0621-\u064a])(?:و?ب?مصر|المصري(?:ه|ون|ين)?|مصري(?:ه|ون|ين)?)(?![a-z0-9\u0621-\u064a])",
+    re.IGNORECASE,
+)
+
 _JUNK_TITLE_PATTERNS = re.compile(
     r"(stock\s+price|share\s+price|price\s+today|stock\s+quote|share\s+quote|price\s+forecast|stock\s+analysis|"
-    r"سعر\s+سهم|اخبار\s+سهم|توقعات\s+سهم|تحليل\s+سهم|معلومات\s+مباشر)",
+    r"سعر\s+سهم|اخبار\s+سهم|توقعات\s+سهم|تحليل\s+سهم|معلومات\s+مباشر|"
+    r"التحليل\s+الفني\s+لسهم|تحليل\s+فني\s+لسهم|لماذا\s+(?:تراجع|ارتفع|استقر|هبط)\s+سهم)",
     re.IGNORECASE,
 )
 
@@ -171,6 +184,8 @@ def _is_foreign_market_headline(title: str, market: str) -> bool:
     if not markers:
         return False
     norm_title = _normalize_ar(title)
+    if market in ("qatar", "uae") and _EGYPT_WORD_BOUNDARY_RE.search(norm_title):
+        return True
     return any(_normalize_ar(m) in norm_title for m in markers)
 
 

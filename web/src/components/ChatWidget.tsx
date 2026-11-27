@@ -10,11 +10,12 @@ import { playConnectionChime, cleanVoiceTranscript } from "@/lib/voice-utils";
 import { VoiceNotePlayer, primeAudioCache } from "@/components/chat/VoiceNotePlayer";
 import { useActiveVoicePlayback, formatVoiceTime } from "@/components/chat/VoicePlaybackContext";
 import { VoiceNoteRecorder } from "@/components/chat/VoiceNoteRecorder";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, memo } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { AnswerStagesChecklist } from "@/components/chat/AnswerStagesChecklist";
 import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
+import type { ChatMessage } from "@/contexts/ChatContext";
 import { ChatWallpaperModal } from "@/components/chat/ChatWallpaperModal";
 import { AutonomousRecsModal } from "@/components/chat/AutonomousRecsModal";
 import { getSavedWallpaperConfig, CHAT_WALLPAPERS, DEFAULT_WALLPAPER_ID, DEFAULT_WALLPAPER_OPACITY } from "@/lib/chat-wallpapers";
@@ -36,6 +37,139 @@ function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "
         </span>
     );
 }
+
+interface ChatMessageItemProps {
+    msg: ChatMessage;
+    originalIdx: number;
+    isLastMessage: boolean;
+    isWideView: boolean;
+    isChatAdmin: boolean;
+    sharingMessageId: string | null;
+    precedingUserQuery?: string;
+    onPreviewImage: (img: string) => void;
+    onStopResponding: () => void;
+    onButtonClick: (btnText: string) => void;
+    onShareAnswer: (messageIndex: number) => void;
+    language: string;
+}
+
+const ChatMessageItem = memo(function ChatMessageItem({
+    msg,
+    originalIdx,
+    isLastMessage,
+    isWideView,
+    isChatAdmin,
+    sharingMessageId,
+    precedingUserQuery,
+    onPreviewImage,
+    onStopResponding,
+    onButtonClick,
+    onShareAnswer,
+    language,
+}: ChatMessageItemProps) {
+    const shareKey = msg.id || String(originalIdx);
+    const handleShare = useCallback(() => {
+        onShareAnswer(originalIdx);
+    }, [onShareAnswer, originalIdx]);
+
+    return (
+        <div
+            className={`flex gap-1.5 sm:gap-4 w-full mx-auto min-w-0 transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}
+        >
+            <div className={`
+                h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 hidden sm:flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
+                ${msg.role === "user" ? "bg-zinc-100 dark:bg-black text-zinc-900 dark:text-white" : "bg-white dark:bg-black"}
+            `}>
+                {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" unoptimized />}
+            </div>
+            <div className={`
+                flex-1 rounded-xl sm:rounded-2xl border p-1.5 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
+                ${msg.role === "user"
+                    ? "bg-zinc-100 dark:bg-black border-zinc-300 dark:border-cyan-400/50 text-zinc-950 dark:text-cyan-100 dark:shadow-[4px_4px_0_0_#22d3ee]"
+                    : "bg-white dark:bg-black border-zinc-200 dark:border-white/20 text-zinc-950 dark:text-white dark:shadow-[4px_4px_0_0_#fff]"}
+            `}>
+                {/* Show image thumbnails if present */}
+                {((msg.images && msg.images.length > 0) || (msg.imageUrl && msg.imageUrl !== "[image]") || msg.imagePreviewUrl) && (
+                    <div className="mb-2.5 flex flex-wrap gap-2">
+                        {(msg.images || [msg.imagePreviewUrl || msg.imageUrl!]).filter(img => img && img !== "[image]").map((img, i) => (
+                            <div
+                                key={i}
+                                onClick={() => onPreviewImage(img)}
+                                className="relative group cursor-pointer overflow-hidden border-2 border-black dark:border-white shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#fff] hover:scale-[1.02] transition-all bg-black/5"
+                                title="انقر لتكبير وتحميل الصورة"
+                            >
+                                <img
+                                    src={img}
+                                    alt={`Attached ${i + 1}`}
+                                    className="max-w-[200px] max-h-44 object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
+                                    <ZoomIn className="w-4 h-4 text-[#FFE600]" />
+                                    <span>تكبير / تحميل</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                {msg.role === "assistant" && msg.answerStages && msg.answerStages.length > 0 && (
+                    <AnswerStagesChecklist
+                        stages={msg.answerStages}
+                        isStreaming={Boolean(msg.isStreaming)}
+                        onStop={msg.isStreaming && isLastMessage ? onStopResponding : undefined}
+                        language={language}
+                    />
+                )}
+                {((msg.isVoiceNote || msg.voiceAudioUrl) && (msg.role === "user" || (!msg.isStreaming && Boolean(msg.content && msg.content.trim())))) ? (
+                    <div className="space-y-2">
+                        <VoiceNotePlayer
+                            role={msg.role}
+                            audioUrl={msg.voiceAudioUrl}
+                            text={msg.content || ""}
+                            spokenText={msg.spokenText}
+                            durationSeconds={msg.voiceDuration}
+                            autoPlay={false}
+                            tables={msg.tables}
+                            hideTranscript={msg.role === "assistant"}
+                        />
+                        {msg.role === "assistant" && (
+                            <div className="pt-2 border-t border-zinc-200 dark:border-white/10">
+                                <FormattedChatMessage
+                                    content={msg.content || ""}
+                                    role={msg.role}
+                                    suggestedButtons={msg.suggestedButtons}
+                                    showSuggestedButtons={isLastMessage}
+                                    onButtonClick={onButtonClick}
+                                    isStreaming={msg.isStreaming}
+                                    tables={msg.tables}
+                                    showShareButton={isChatAdmin && isLastMessage}
+                                    onShare={handleShare}
+                                    sharing={sharingMessageId === shareKey}
+                                    latencyMs={msg.latencyMs}
+                                    userQuery={precedingUserQuery}
+                                />
+                            </div>
+                        )}
+                    </div>
+                ) : (!msg.answerStages?.length || Boolean(msg.content) || Boolean(msg.tables?.length) || Boolean(msg.isVoiceNote)) ? (
+                    <FormattedChatMessage 
+                        content={msg.content || msg.statusText || (msg.isVoiceNote ? "أرتورو يُسجل الرد الصوتي... 🎙️" : "")} 
+                        role={msg.role} 
+                        suggestedButtons={msg.suggestedButtons}
+                        showSuggestedButtons={isLastMessage}
+                        onButtonClick={onButtonClick}
+                        isStreaming={msg.isStreaming}
+                        tables={msg.tables}
+                        showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
+                        onShare={handleShare}
+                        sharing={sharingMessageId === shareKey}
+                        latencyMs={msg.latencyMs}
+                        userQuery={precedingUserQuery}
+                    />
+                ) : null}
+            </div>
+        </div>
+    );
+});
 
 export default function ChatWidget() {
     const { user } = useAuth();
@@ -67,7 +201,10 @@ export default function ChatWidget() {
         setIsSidebarOpen,
         autonomousRecommendations,
         setAutonomousRecommendations,
-        isAccessReady
+        isAccessReady,
+        hasMoreHistory = false,
+        isLoadingOlderHistory = false,
+        loadOlderMessages
     } = useChat();
 
     // Voice notes must never auto-play just because the user opened the chat or
@@ -310,12 +447,16 @@ export default function ChatWidget() {
     const [loadingStep, setLoadingStep] = useState<1 | 2 | 3>(1);
     const [sharingMessageId, setSharingMessageId] = useState<string | null>(null);
     const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
-    const INITIAL_VISIBLE_COUNT = 20;
-    const LOAD_MORE_STEP = 20;
+    const INITIAL_VISIBLE_COUNT = 4;
+    const LOAD_MORE_STEP = 6;
     const [visibleCount, setVisibleCount] = useState<number>(INITIAL_VISIBLE_COUNT);
     const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
     const isChatAdmin = isChatAdminEmail(user?.email);
     const activeVoice = useActiveVoicePlayback();
+
+    const handleSuggestedButtonClick = useCallback((btnText: string) => {
+        void sendMessage(btnText);
+    }, [sendMessage]);
 
     const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
         setIsRecordingVoiceNote(false);
@@ -534,43 +675,89 @@ export default function ChatWidget() {
     }, [modelMenuOpen]);
 
     const isInitialPositionedRef = useRef(false);
-    const hasMoreOlder = messages.length > visibleCount;
+    const suppressAutoScrollRef = useRef(false);
+    const pendingScrollAnchorRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null);
+    const lastBottomSigRef = useRef<string>("");
+    const loadGenerationRef = useRef<number>(0);
+
+    const hiddenLocalCount = Math.max(0, messages.length - visibleCount);
+    const hasMoreOlder = hiddenLocalCount > 0 || Boolean(hasMoreHistory);
+    const busyLoadingOlder = isLoadingOlder || Boolean(isLoadingOlderHistory);
+
     const visibleMessages = useMemo(() => {
         if (messages.length <= visibleCount) return messages;
         return messages.slice(messages.length - visibleCount);
     }, [messages, visibleCount]);
 
-    const handleLoadMoreOlder = useCallback(() => {
-        if (visibleCount >= messages.length || isLoadingOlder) return;
-        setIsLoadingOlder(true);
+    useLayoutEffect(() => {
+        const anchor = pendingScrollAnchorRef.current;
+        if (!anchor) return;
+        pendingScrollAnchorRef.current = null;
+        const container = scrollContainerRef.current;
+        if (container && anchor.prevScrollHeight > 0) {
+            const heightDiff = container.scrollHeight - anchor.prevScrollHeight;
+            if (heightDiff > 0) {
+                container.scrollTop = anchor.prevScrollTop + heightDiff;
+            }
+        }
+        setIsLoadingOlder(false);
+        requestAnimationFrame(() => {
+            suppressAutoScrollRef.current = false;
+        });
+    }, [visibleMessages.length, messages.length]);
+
+    const handleLoadMoreOlder = useCallback(async () => {
+        if (!hasMoreOlder || busyLoadingOlder) return;
+        const requestGen = loadGenerationRef.current;
         const container = scrollContainerRef.current;
         const prevScrollHeight = container ? container.scrollHeight : 0;
         const prevScrollTop = container ? container.scrollTop : 0;
 
-        setVisibleCount(prev => Math.min(messages.length, prev + LOAD_MORE_STEP));
+        pendingScrollAnchorRef.current = container ? { prevScrollHeight, prevScrollTop } : null;
+        suppressAutoScrollRef.current = true;
+        setIsLoadingOlder(true);
 
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                if (container && prevScrollHeight > 0) {
-                    const newScrollHeight = container.scrollHeight;
-                    const heightDiff = newScrollHeight - prevScrollHeight;
-                    if (heightDiff > 0) {
-                        container.scrollTop = prevScrollTop + heightDiff;
-                    }
+        let willRenderMore = false;
+        try {
+            if (hiddenLocalCount > 0) {
+                willRenderMore = true;
+                setVisibleCount(prev => Math.min(messages.length, prev + LOAD_MORE_STEP));
+            } else if (hasMoreHistory && loadOlderMessages) {
+                const added = await loadOlderMessages();
+                if (requestGen !== loadGenerationRef.current) {
+                    return;
                 }
-                setIsLoadingOlder(false);
-            });
-        });
-    }, [visibleCount, messages.length, isLoadingOlder]);
+                if (added > 0) {
+                    willRenderMore = true;
+                    setVisibleCount(prev => prev + added);
+                }
+            }
+        } finally {
+            if (!willRenderMore) {
+                if (requestGen === loadGenerationRef.current) {
+                    pendingScrollAnchorRef.current = null;
+                    suppressAutoScrollRef.current = false;
+                    setIsLoadingOlder(false);
+                }
+            }
+        }
+    }, [hasMoreOlder, busyLoadingOlder, hiddenLocalCount, messages.length, hasMoreHistory, loadOlderMessages]);
 
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
         const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-        setIsUserScrolledUp(!isAtBottom);
+        const scrolledUp = !isAtBottom;
+        setIsUserScrolledUp(scrolledUp);
 
-        // Only auto-trigger when initial positioning at bottom is complete and user deliberately scrolled to the top edge (< 40px)
-        if (isInitialPositionedRef.current && isUserScrolledUp && scrollTop < 40 && hasMoreOlder && !isLoadingOlder) {
-            handleLoadMoreOlder();
+        // Only auto-trigger when initial positioning at bottom is complete and user scrolled to top edge (< 48px)
+        if (
+            isInitialPositionedRef.current &&
+            scrollTop < 48 &&
+            hasMoreOlder &&
+            !busyLoadingOlder &&
+            (scrolledUp || scrollHeight > clientHeight + 20)
+        ) {
+            void handleLoadMoreOlder();
         }
     };
 
@@ -586,9 +773,15 @@ export default function ChatWidget() {
     }, []);
 
     useEffect(() => {
+        if (!isOpen && !isChatRoute) return;
+        loadGenerationRef.current += 1;
         setIsUserScrolledUp(false);
+        setIsLoadingOlder(false);
         setVisibleCount(INITIAL_VISIBLE_COUNT);
         isInitialPositionedRef.current = false;
+        pendingScrollAnchorRef.current = null;
+        suppressAutoScrollRef.current = false;
+        lastBottomSigRef.current = "";
 
         // Instant scroll to bottom so the container doesn't animate through top edge
         if (scrollContainerRef.current) {
@@ -600,12 +793,17 @@ export default function ChatWidget() {
             isInitialPositionedRef.current = true;
         }, 400);
         return () => clearTimeout(timer);
-    }, [activeSessionId]);
+    }, [activeSessionId, isOpen, isChatRoute]);
 
     useEffect(() => {
-        if (!isUserScrolledUp) {
-            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-        }
+        if (suppressAutoScrollRef.current || isUserScrolledUp) return;
+        const lastMsg = messages[messages.length - 1];
+        const tailSig = lastMsg
+            ? `${lastMsg.id || ""}|${lastMsg.role}|${lastMsg.content?.length || 0}|${lastMsg.statusText || ""}|${lastMsg.tables?.length || 0}|${isLoading ? 1 : 0}`
+            : `empty|${isLoading ? 1 : 0}`;
+        if (tailSig === lastBottomSigRef.current) return;
+        lastBottomSigRef.current = tailSig;
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages, isOpen, isLoading, isUserScrolledUp]);
 
     async function compressAndResizeImage(base64Str: string, maxDim = 1600, quality = 0.85): Promise<string> {
@@ -1211,21 +1409,31 @@ export default function ChatWidget() {
                                 <div className="flex justify-center py-2 shrink-0">
                                     <button
                                         type="button"
-                                        onClick={handleLoadMoreOlder}
-                                        disabled={isLoadingOlder}
+                                        onClick={() => { void handleLoadMoreOlder(); }}
+                                        disabled={busyLoadingOlder}
                                         className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black border border-zinc-300 dark:border-white/20 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 shadow-xs transition-all active:scale-95 cursor-pointer disabled:opacity-50"
                                         title="تحميل الرسائل السابقة"
                                         aria-label="تحميل الرسائل السابقة"
                                     >
-                                        {isLoadingOlder ? (
+                                        {busyLoadingOlder ? (
                                             <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />
                                         ) : (
                                             <ArrowUp className="h-3.5 w-3.5 text-amber-500" />
                                         )}
                                         <span>
-                                            {language === "ar"
-                                                ? `تحميل رسائل سابقة (${messages.length - visibleCount} متبقية)`
-                                                : `Load older messages (${messages.length - visibleCount} remaining)`
+                                            {busyLoadingOlder
+                                                ? (language === "ar" ? "جاري تحميل رسائل أقدم..." : "Loading older messages...")
+                                                : hiddenLocalCount > 0 && !hasMoreHistory
+                                                ? (language === "ar"
+                                                    ? `تحميل رسائل سابقة (${hiddenLocalCount} متبقية)`
+                                                    : `Load older messages (${hiddenLocalCount} remaining)`)
+                                                : hiddenLocalCount > 0 && hasMoreHistory
+                                                ? (language === "ar"
+                                                    ? `تحميل رسائل سابقة (${hiddenLocalCount}+ متبقية)`
+                                                    : `Load older messages (${hiddenLocalCount}+ remaining)`)
+                                                : (language === "ar"
+                                                    ? "تحميل رسائل أقدم من التاريخ"
+                                                    : "Load older messages from history")
                                             }
                                         </span>
                                     </button>
@@ -1235,104 +1443,31 @@ export default function ChatWidget() {
                             {visibleMessages.map((msg, vIdx) => {
                                 const originalIdx = messages.length <= visibleCount ? vIdx : (messages.length - visibleCount + vIdx);
                                 const isLastMessage = originalIdx === messages.length - 1;
+                                let precedingUserQuery: string | undefined;
+                                if (msg.role === "assistant") {
+                                    for (let k = originalIdx - 1; k >= 0; k--) {
+                                        if (messages[k]?.role === "user") {
+                                            precedingUserQuery = messages[k].content;
+                                            break;
+                                        }
+                                    }
+                                }
                                 return (
-                                <div
-                                    key={msg.id || `msg-${originalIdx}`}
-                                    className={`flex gap-1.5 sm:gap-4 w-full mx-auto min-w-0 transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}
-                                >
-                                    <div className={`
-                                        h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 hidden sm:flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
-                                        ${msg.role === "user" ? "bg-zinc-100 dark:bg-black text-zinc-900 dark:text-white" : "bg-white dark:bg-black"}
-                                    `}>
-                                        {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" unoptimized />}
-                                    </div>
-                                    <div className={`
-                                        flex-1 rounded-xl sm:rounded-2xl border p-1.5 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
-                                        ${msg.role === "user"
-                                            ? "bg-zinc-100 dark:bg-black border-zinc-300 dark:border-cyan-400/50 text-zinc-950 dark:text-cyan-100 dark:shadow-[4px_4px_0_0_#22d3ee]"
-                                            : "bg-white dark:bg-black border-zinc-200 dark:border-white/20 text-zinc-950 dark:text-white dark:shadow-[4px_4px_0_0_#fff]"}
-                                    `}>
-                                        {/* Show image thumbnails if present */}
-                                        {((msg.images && msg.images.length > 0) || (msg.imageUrl && msg.imageUrl !== "[image]") || msg.imagePreviewUrl) && (
-                                            <div className="mb-2.5 flex flex-wrap gap-2">
-                                                {(msg.images || [msg.imagePreviewUrl || msg.imageUrl!]).filter(img => img && img !== "[image]").map((img, i) => (
-                                                    <div
-                                                        key={i}
-                                                        onClick={() => setPreviewModalImage(img)}
-                                                        className="relative group cursor-pointer overflow-hidden border-2 border-black dark:border-white shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#fff] hover:scale-[1.02] transition-all bg-black/5"
-                                                        title="انقر لتكبير وتحميل الصورة"
-                                                    >
-                                                        <img
-                                                            src={img}
-                                                            alt={`Attached ${i + 1}`}
-                                                            className="max-w-[200px] max-h-44 object-cover"
-                                                        />
-                                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
-                                                            <ZoomIn className="w-4 h-4 text-[#FFE600]" />
-                                                            <span>تكبير / تحميل</span>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {msg.role === "assistant" && msg.answerStages && msg.answerStages.length > 0 && (
-                                            <AnswerStagesChecklist
-                                                stages={msg.answerStages}
-                                                isStreaming={Boolean(msg.isStreaming)}
-                                                onStop={msg.isStreaming && isLastMessage ? stopResponding : undefined}
-                                                language={language}
-                                            />
-                                        )}
-                                        {((msg.isVoiceNote || msg.voiceAudioUrl) && (msg.role === "user" || (!msg.isStreaming && Boolean(msg.content && msg.content.trim())))) ? (
-                                            <div className="space-y-2">
-                                                <VoiceNotePlayer
-                                                    role={msg.role}
-                                                    audioUrl={msg.voiceAudioUrl}
-                                                    text={msg.content || ""}
-                                                    spokenText={msg.spokenText}
-                                                    durationSeconds={msg.voiceDuration}
-                                                    autoPlay={false}
-                                                    tables={msg.tables}
-                                                    hideTranscript={msg.role === "assistant"}
-                                                />
-                                                {msg.role === "assistant" && (
-                                                    <div className="pt-2 border-t border-zinc-200 dark:border-white/10">
-                                                        <FormattedChatMessage
-                                                            content={msg.content || ""}
-                                                            role={msg.role}
-                                                            suggestedButtons={msg.suggestedButtons}
-                                                            showSuggestedButtons={isLastMessage}
-                                                            onButtonClick={(btnText) => sendMessage(btnText)}
-                                                            isStreaming={msg.isStreaming}
-                                                            tables={msg.tables}
-                                                            showShareButton={isChatAdmin && isLastMessage}
-                                                            onShare={() => shareAnswer(originalIdx)}
-                                                            sharing={sharingMessageId === (msg.id || String(originalIdx))}
-                                                            latencyMs={msg.latencyMs}
-                                                            userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
-                                                        />
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ) : (!msg.answerStages?.length || Boolean(msg.content) || Boolean(msg.tables?.length) || Boolean(msg.isVoiceNote)) ? (
-                                            <FormattedChatMessage 
-                                                content={msg.content || msg.statusText || (msg.isVoiceNote ? "أرتورو يُسجل الرد الصوتي... 🎙️" : "")} 
-                                                role={msg.role} 
-                                                suggestedButtons={msg.suggestedButtons}
-                                                showSuggestedButtons={isLastMessage}
-                                                onButtonClick={(btnText) => sendMessage(btnText)}
-                                                isStreaming={msg.isStreaming}
-                                                tables={msg.tables}
-                                                showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
-                                                onShare={() => shareAnswer(originalIdx)}
-                                                sharing={sharingMessageId === (msg.id || String(originalIdx))}
-                                                latencyMs={msg.latencyMs}
-                                                userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
-                                            />
-                                        ) : null}
-
-                                    </div>
-                                </div>
+                                    <ChatMessageItem
+                                        key={msg.id || `msg-${originalIdx}`}
+                                        msg={msg}
+                                        originalIdx={originalIdx}
+                                        isLastMessage={isLastMessage}
+                                        isWideView={isWideView}
+                                        isChatAdmin={isChatAdmin}
+                                        sharingMessageId={sharingMessageId}
+                                        precedingUserQuery={precedingUserQuery}
+                                        onPreviewImage={setPreviewModalImage}
+                                        onStopResponding={stopResponding}
+                                        onButtonClick={handleSuggestedButtonClick}
+                                        onShareAnswer={shareAnswer}
+                                        language={language}
+                                    />
                                 );
                             })}
 

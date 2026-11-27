@@ -75,8 +75,23 @@ class _FakeQuery:
         self._payload = payload
         return self
 
+    def delete(self):
+        self._op = "delete"
+        return self
+
     def execute(self):
         rows = self.tables.setdefault(self.table_name, [])
+        if self._op == "delete":
+            kept = [
+                r for r in rows
+                if not (
+                    all(r.get(c) == v for c, v in self._filters)
+                    and all(r.get(c) in vs for c, vs in self._in_filters)
+                )
+            ]
+            deleted = [r for r in rows if r not in kept]
+            rows[:] = kept
+            return _FakeResponse(deleted)
         if self._op == "insert":
             items = self._payload if isinstance(self._payload, list) else [self._payload]
             next_id = max([int(r.get("id") or 0) for r in rows] + [0]) + 1
@@ -107,6 +122,21 @@ class _FakeQuery:
                 for item in items:
                     rows[:] = [r for r in rows if r.get("id") != item.get("id")]
                     rows.append(dict(item))
+            elif self.table_name == "stocks":
+                next_id = max([int(r.get("id") or 0) for r in rows] + [0]) + 1
+                for item in items:
+                    existing = next(
+                        (r for r in rows if r.get("symbol") == item.get("symbol") and r.get("exchange") == item.get("exchange")),
+                        None,
+                    )
+                    copy_item = dict(item)
+                    if existing is not None:
+                        copy_item.setdefault("id", existing.get("id"))
+                        rows[:] = [r for r in rows if not (r.get("symbol") == item.get("symbol") and r.get("exchange") == item.get("exchange"))]
+                    if copy_item.get("id") is None:
+                        copy_item["id"] = next_id
+                        next_id += 1
+                    rows.append(copy_item)
             else:
                 rows.extend([dict(i) for i in items])
             return _FakeResponse(items)
@@ -1498,3 +1528,154 @@ def test_saudi_scanner_blocks_panic_and_dedups_cross_system_symbols(monkeypatch)
         assert res_reg["ok"] is True
         assert res_reg["new_signals"] == 0
         assert res_reg["active_count"] == 0
+
+
+def test_gcc_metals_sync_preserves_storage_for_untraded_symbol(monkeypatch):
+    """When one GCC symbol has 0 new bars in daily_only mode, run_gcc_metals_sync
+    preserves its existing Storage bars so combined archive & metadata.json still update."""
+    import gzip
+    import json
+    from api import gcc_metals_sync as gms
+
+    ihc_old = [{"symbol": "IHC", "exchange": "ADX", "date": "2026-11-25", "open": 400.0, "high": 405.0, "low": 399.0, "close": 402.0, "volume": 1000}]
+    palms_old = [{"symbol": "PALMS", "exchange": "ADX", "date": "2026-11-24", "open": 7.8, "high": 7.9, "low": 7.7, "close": 7.84, "volume": 500}]
+    prior_meta = {"exchange": "ADX", "rows": 2, "symbols": 2, "first_date": "2026-11-24", "last_date": "2026-11-25"}
+
+    store = {
+        "prices/ADX/symbols/IHC.json.gz": gzip.compress(json.dumps(ihc_old).encode("utf-8")),
+        "prices/ADX/symbols/PALMS.json.gz": gzip.compress(json.dumps(palms_old).encode("utf-8")),
+        "prices/ADX/metadata.json": json.dumps(prior_meta).encode("utf-8"),
+    }
+
+    class _Bucket:
+        def download(self, path):
+            if path in store:
+                return store[path]
+            raise RuntimeError("404 not found")
+
+        def upload(self, path, data, _opts=None):
+            store[path] = data
+
+    fake_sb = _FakeSaudiSupabase({
+        "stocks": [
+            {"id": 1, "symbol": "IHC", "exchange": "ADX", "is_active": True},
+            {"id": 2, "symbol": "PALMS", "exchange": "ADX", "is_active": True},
+        ],
+        "stock_prices": [],
+        "stock_technical_indicators": [],
+        "market_index": [],
+    })
+    fake_sb.storage = type("S", (), {"from_": lambda _s, _b: _Bucket()})()
+
+    monkeypatch.setattr(gms, "_get_saudi_supabase", lambda: fake_sb)
+    monkeypatch.setattr(gms, "_compute_and_upsert_indicators", lambda *_a, **_kw: 1)
+    monkeypatch.setattr(gms, "_sync_market_index", lambda *_a, **_kw: 1)
+    monkeypatch.setattr(gms, "_sync_recent_stock_prices", lambda *_a, **_kw: 1)
+    monkeypatch.setattr(gms, "GCC_AND_METALS_UNIVERSE", [
+        ("IHC", "ADX", "UAE", "AED", "IHC.AD", "IHC", "ADX", "IHC", "العالمية", "Conglomerate"),
+        ("PALMS", "ADX", "UAE", "AED", "PALMS.AD", "PALMS", "ADX", "Palms Sports", "بالمز", "Consumer"),
+    ])
+    # Only IHC returns a new bar; PALMS returns 0 bars (untraded session)
+    monkeypatch.setattr(gms, "_fetch_yahoo_bulk", lambda _items, period="30d": {
+        ("IHC", "ADX"): [{"symbol": "IHC", "exchange": "ADX", "date": "2026-11-26", "open": 402.0, "high": 406.0, "low": 401.0, "close": 405.0, "volume": 1200}],
+    })
+    monkeypatch.setattr(gms, "_fetch_tv_missing", lambda *_a, **_kw: {})
+
+    res = gms.run_gcc_metals_sync(exchanges=["ADX"], daily_only=True)
+    assert res["ok"] is True
+    assert res["summary"]["ADX"]["symbols_synced"] == 2
+    assert res["summary"]["ADX"]["storage_total_rows"] == 3
+    meta_out = json.loads(store["prices/ADX/metadata.json"].decode("utf-8"))
+    assert meta_out["symbols"] == 2
+    assert meta_out["rows"] == 3
+    assert meta_out["last_date"] == "2026-11-26"
+
+
+def test_saudi_scan_results_uses_4_both_pos40_consensus_and_5m_liquidity(monkeypatch):
+    """_build_scan_results_and_backtest enforces 4/4 dual-model consensus (k_pass & t_pass),
+    5M SAR 20d turnover, and 4_BOTH_POS40 thresholds without blocking on feat_sector_rel_strength."""
+    import numpy as np
+    import pandas as pd
+    from scripts import saudi_pipeline_bootstrap as spb
+
+    # 160 healthy uptrend sessions so EMA/SMA/52w/healthy_mkt_dates all qualify
+    dates = pd.bdate_range("2025-09-01", periods=160)
+    mkt_close = np.linspace(3500.0, 4200.0, len(dates))
+    market_df = pd.DataFrame({
+        "open": mkt_close * 0.998,
+        "high": mkt_close * 1.005,
+        "low": mkt_close * 0.995,
+        "close": mkt_close,
+        "volume": np.full(len(dates), 1e8),
+    }, index=dates)
+
+    def _make_bars(avg_turnover_sar: float) -> pd.DataFrame:
+        close = np.linspace(40.0, 52.0, len(dates))
+        vol = np.full(len(dates), avg_turnover_sar / 50.0)
+        return pd.DataFrame({
+            "Open": close * 0.995,
+            "High": close * 1.015,
+            "Low": close * 0.985,
+            "Close": close,
+            "Volume": vol,
+        }, index=dates)
+
+    bars_by_symbol = {
+        "1120": _make_bars(10_000_000.0),  # 4/4 consensus + >5M turnover + 4_BOTH_POS40 -> ACCEPTED
+        "2222": _make_bars(10_000_000.0),  # only k_pass (t_pass=False) -> REJECTED by k_pass & t_pass
+        "3003": _make_bars(3_000_000.0),   # 4/4 consensus but turnover 3M < 5M -> REJECTED
+    }
+
+    target_date = dates[135].strftime("%Y-%m-%d")
+    base_feat = {
+        "EMA_50_Ratio": 0.03,
+        "SMA_50_Ratio": 0.03,
+        "feat_52w_position": 0.41,          # >= 0.40 (previously blocked at 0.45)
+        "ADX_14": 22.0,
+        "RSI": 55.0,
+        "CMF_20": 0.05,
+        "MM_Distribution": 0.10,
+        "feat_rel_strength": 0.008,         # >= 0.005 (previously blocked at 0.015)
+        "feat_sector_rel_strength": -0.02,  # negative sector RS allowed now
+        "R_VOL": 0.92,                      # >= 0.90 (previously blocked at 1.0)
+    }
+    rows = []
+    for sym in ("1120", "2222", "3003"):
+        rows.append({"symbol": sym, "Date": dates[135], "date_str": target_date, **base_feat})
+    df_all = pd.DataFrame(rows)
+
+    def _fake_score(art, df_w, return_components=True):
+        name = art.get("name")
+        probs = np.array([0.8, 0.8 if name == "K" else 0.1, 0.8], dtype=float)
+        metas = np.array([0.8, 0.8 if name == "K" else 0.1, 0.8], dtype=float)
+        return probs, probs, metas
+
+    monkeypatch.setattr(spb, "_score_meta_system_df", _fake_score)
+    monkeypatch.setattr(spb, "load_price_adjusting_action_dates", lambda *_a, **_kw: {})
+    monkeypatch.setattr(spb.StrategyEngine, "check_technical_filters", staticmethod(lambda *_a, **_kw: (True, "ok")))
+    monkeypatch.setattr(spb, "get_distribution_gate", lambda *_a, **_kw: {"blocked": False})
+    monkeypatch.setattr(spb, "calculate_acceleration_score", lambda *_a, **_kw: 85)
+    monkeypatch.setattr(spb, "_saudi_swing_levels", lambda *_a, **_kw: (60.0, 48.0))
+
+    meta_by_sym = {
+        sym: {"Code": sym, "Symbol": sym, "Name": f"Co {sym}", "NameAr": f"شركة {sym}", "Sector": "Banks", "Industry": "Banks"}
+        for sym in bars_by_symbol
+    }
+    fake_sb = _FakeSaudiSupabase({"scan_results": []})
+    king_art = {"name": "K", "optimal_threshold": 0.5, "meta_threshold": 0.5}
+    tad_art = {"name": "T", "optimal_threshold": 0.5, "meta_threshold": 0.5}
+
+    out = spb._build_scan_results_and_backtest(
+        sb=fake_sb,
+        df_all=df_all,
+        market_df=market_df,
+        bars_by_symbol=bars_by_symbol,
+        meta_by_sym=meta_by_sym,
+        ind_by_sym={},
+        king_artifact=king_art,
+        tadawul_artifact=tad_art,
+        latest_date=dates[-1].strftime("%Y-%m-%d"),
+        now_iso="2026-11-26T15:00:00+00:00",
+    )
+    assert [r["symbol"] for r in out] == ["1120"]
+    assert out[0]["consensus_ratio"] == "4/4"

@@ -54,6 +54,7 @@ from api.agentic_chat.market_registry import (
 )
 from api.agentic_chat.analysis_cache import (
     get_vip_analysis_cache,
+    is_cache_write_intent_safe,
     is_recommendation_cache_key,
     is_uncacheable_error_reply,
     set_vip_analysis_cache,
@@ -145,22 +146,52 @@ def _finalize_usage_cost(acc: Dict[str, Any], cached: bool = False) -> Dict[str,
 _ARABIC_WEEKDAYS = ("الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد")
 
 
-def _compact_history_content(content: Any, *, is_recent: bool) -> str:
+_HISTORY_INDICATOR_STOPWORDS = frozenset({
+    "EGX", "TASI", "RSI", "MACD", "EMA", "SMA", "VWAP", "ATR", "ADX", "OBV", "CMF",
+    "ROE", "ROA", "ROIC", "EPS", "EGP", "SAR", "USD", "AED", "QAR", "KWD", "DCA",
+    "HRP", "CVAR", "PDF", "VIP", "PRO", "AI", "BUY", "SELL", "HOLD",
+})
+
+
+def _compact_history_content(
+    content: Any,
+    *,
+    is_recent: bool,
+    is_latest_turn: bool = False,
+) -> str:
     """
     Preserve BOTH head and tail of truncated history messages so ARTORO never forgets
-    numbered questions or conclusions at the bottom of its previous reply, while keeping
-    older turns compact to cut multi-turn uncached prompt token costs.
+    numbered questions, recommended tickers, or conclusions at the bottom of its previous reply.
+    - Latest turn (`is_latest_turn=True`): keeps up to 4,600 chars intact so 3-5 stock lists
+      never get chopped mid-table.
+    - Never emits bare `...` separators that could trick the LLM into thinking a message was
+      truncated in transit.
     """
     text = str(content or "")
-    max_len = 2200 if is_recent else 550
+    if is_latest_turn:
+        max_len = 4600
+    elif is_recent:
+        max_len = 2200
+    else:
+        max_len = 550
     if len(text) <= max_len:
         return text
-    if is_recent:
+    if is_latest_turn:
+        head_len, tail_len = 2600, 1800
+        seen_syms: List[str] = []
+        for tok in re.findall(r"\b[A-Z]{3,6}\b", text):
+            if tok not in _HISTORY_INDICATOR_STOPWORDS and tok not in seen_syms:
+                seen_syms.append(tok)
+                if len(seen_syms) >= 12:
+                    break
+        syms_note = f"؛ الرموز المذكورة: {', '.join(seen_syms)}" if seen_syms else ""
+        sep = f"\n[ملخص سياق داخلي — الرد الأصلي وصل للمستخدم كاملاً دون بتر{syms_note}]\n"
+    elif is_recent:
         head_len, tail_len = 1200, 950
-        sep = "\n[...تم اختصار الوسط للاحتفاظ ببداية ونهاية الرد...]\n"
+        sep = "\n[ملخص سياق داخلي — الرد الأصلي وصل للمستخدم كاملاً]\n"
     else:
-        head_len, tail_len = 330, 200
-        sep = "\n...\n"
+        head_len, tail_len = 300, 180
+        sep = "\n[ملخص سياق سابق مكتمل]\n"
     return f"{text[:head_len].rstrip()}{sep}{text[-tail_len:].lstrip()}"
 
 
@@ -937,6 +968,10 @@ _CANONICAL_BUTTON_INPUTS = frozenset({
     "أقوى أسهم التجميع والسيولة الذكية اليوم",
     "📈 ترشيح فرص بديلة",
     "ترشيح فرص بديلة",
+    "التوصيات الشرعية",
+    "التوصيات الشريعة",
+    "التوصيات الشرعيه",
+    "التوصيات الشريعه",
     "هات كل التوصيات المفتوحة حالياً",
     "التوصيات المفتوحة حالياً",
     "التوصيات المفتوحة حاليا",
@@ -1207,9 +1242,14 @@ async def _run_agentic_chat_stream_impl(
             content = msg.get("content", "")
             img_url = msg.get("image_url") or msg.get("imageUrl")
             is_recent_turn = h_idx >= n_hist - 2
+            is_latest_turn = h_idx == n_hist - 1
             if role in ("user", "assistant") and (content or img_url):
                 has_conversation_history = True
-                compact_text = _compact_history_content(content, is_recent=is_recent_turn) if content else ""
+                compact_text = (
+                    _compact_history_content(content, is_recent=is_recent_turn, is_latest_turn=is_latest_turn)
+                    if content
+                    else ""
+                )
                 if role == "user" and img_url:
                     formatted_messages.append({
                         "role": "user",
@@ -1546,7 +1586,8 @@ async def _run_agentic_chat_stream_impl(
         (
             candidate_cache_key in ("vip_accumulation", "vip_market_summary")
             or (
-                candidate_cache_key in ("vip_market_pulse_and_recs", "vip_open_recommendations")
+                candidate_cache_key
+                in ("vip_market_pulse_and_recs", "vip_open_recommendations", "vip_open_recommendations_sharia")
                 and allow_recommendations
             )
         )
@@ -1569,6 +1610,12 @@ async def _run_agentic_chat_stream_impl(
                 ("get_recommendations", {"status": "open", "market": preset_mkt_ui}),
                 ("get_accumulation_stocks", {"market": preset_mkt_ui}),
                 ("get_technical_scan", {"preset": "momentum_and_volume", "market": preset_mkt_ui}),
+            ]
+        elif candidate_cache_key == "vip_open_recommendations_sharia":
+            preset_tool_specs = [
+                ("get_recommendations", {"status": "open", "sharia_only": True, "market": preset_mkt_ui}),
+                ("get_accumulation_stocks", {"sharia_only": True, "market": preset_mkt_ui}),
+                ("get_technical_scan", {"preset": "momentum_and_volume", "sharia_only": True, "market": preset_mkt_ui}),
             ]
         elif candidate_cache_key == "vip_market_pulse_and_recs":
             preset_tool_specs = [
@@ -1796,7 +1843,9 @@ async def _run_agentic_chat_stream_impl(
                     and (not images or len(images) == 0)
                 ):
                     dynamic_key = resolve_tool_calls_to_cache_key(cache_tool_calls)
-                    if not dynamic_key:
+                    if not dynamic_key or not is_cache_write_intent_safe(
+                        message, dynamic_key, market=effective_market
+                    ):
                         candidate_cache_key = None
                         model_confirmed_standalone = False
                     else:
@@ -2369,6 +2418,7 @@ async def _run_agentic_chat_stream_impl(
         )
         if (
             effective_key
+            and is_cache_write_intent_safe(message, effective_key, market=effective_market)
             and not is_uncacheable_error_reply(accumulated_reply)
             and not (not allow_recommendations and is_recommendation_cache_key(effective_key))
         ):

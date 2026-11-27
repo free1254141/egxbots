@@ -6999,7 +6999,14 @@ def _build_portfolio_view_payload(
 
         if forbidden and sym_u not in do_not_buy_syms:
             do_not_buy_syms.append(sym_u)
+        _ROT_AR_LABELS = {
+            "EXIT_PRIORITY": "أولوية خروج 🔴",
+            "TRIM_EXCESS": "تخفيف التركّز 🟠",
+            "HOLD_CORE": "احتفاظ أساسي 🟢",
+            "HOLD_WATCH": "مراقبة دون تعزيز 🟡",
+        }
         item["rotation_action"] = rot_act
+        item["rotation_action_ar"] = _ROT_AR_LABELS.get(rot_act, "مراقبة")
         item["rotation_reason_ar"] = " — ".join(reasons)
         item["forbidden_to_buy"] = forbidden
 
@@ -8475,20 +8482,55 @@ def _sync_manage_automations(
                 norm_times.append(nt)
 
         try:
-            existing_res = sb.from_("scheduled_chat_automations").select("id,scheduled_time").eq("user_id", user_id).limit(6).execute()
+            existing_res = (
+                sb.from_("scheduled_chat_automations")
+                .select("id,name,prompt,scheduled_time,days_of_week,is_active")
+                .eq("user_id", user_id)
+                .limit(6)
+                .execute()
+            )
             existing_rows = existing_res.data or []
         except Exception as e:
             return {"status": "error", "message": f"تعذر فحص المهام الحالية: {str(e)}"}
 
+        existing_active_times = set()
+        for r in existing_rows:
+            if r.get("is_active") is not False and r.get("scheduled_time"):
+                nt_ex = _normalize_hhmm(str(r.get("scheduled_time") or ""))
+                if nt_ex:
+                    existing_active_times.add(nt_ex)
+        already_exists_times = [t for t in norm_times if t in existing_active_times]
+        to_create_times = [t for t in norm_times if t not in existing_active_times]
+
         remaining = max(0, 5 - len(existing_rows))
-        if len(norm_times) > remaining:
+        if not to_create_times:
+            return {
+                "status": "already_exists",
+                "operation": "create",
+                "created_count": 0,
+                "already_exists_times": already_exists_times,
+                "total_count": len(existing_rows),
+                "max_allowed": 5,
+                "remaining_slots": remaining,
+                "active_automations": existing_rows,
+                "skip_followup_list": True,
+                "message": (
+                    f"المواعيد المطلوبة ({', '.join(already_exists_times)}) مسجلة ومفعّلة بالفعل في حسابك "
+                    f"({len(existing_rows)} من 5) — لم يتم تكرارها أو استهلاك خانات إضافية."
+                ),
+            }
+
+        if len(to_create_times) > remaining:
             return {
                 "status": "limit_exceeded",
                 "existing_count": len(existing_rows),
                 "remaining_slots": remaining,
+                "already_exists_times": already_exists_times,
+                "active_automations": existing_rows,
+                "skip_followup_list": True,
                 "message": (
                     f"لديك حالياً {len(existing_rows)} مهام مجدولة من الحد الأقصى (5 مهام)، المتبقي {remaining} خانات فقط "
-                    f"بينما طلبت إضافة {len(norm_times)} مواعيد. احذف مهمة قديمة أو قلّل عدد المواعيد."
+                    f"بينما طلبت إضافة {len(to_create_times)} مواعيد جديدة. احذف مهمة قديمة أو قلّل عدد المواعيد."
                 ),
             }
 
@@ -8499,8 +8541,8 @@ def _sync_manage_automations(
             base_name = f"استشارة: {snippet[:35]}..." if len(snippet) > 35 else f"استشارة: {snippet}"
 
         rows_to_insert = []
-        for idx, t_str in enumerate(norm_times):
-            row_name = f"{base_name} ({t_str})" if len(norm_times) > 1 else base_name
+        for idx, t_str in enumerate(to_create_times):
+            row_name = f"{base_name} ({t_str})" if len(to_create_times) > 1 else base_name
             rows_to_insert.append({
                 "user_id": user_id,
                 "name": row_name[:80],
@@ -8521,18 +8563,26 @@ def _sync_manage_automations(
                 pass
             total_after = len(existing_rows) + len(created)
             remaining_after = max(0, 5 - total_after)
+            dup_note = (
+                f" (مع تخطي المواعيد المفعّلة مسبقاً: {', '.join(already_exists_times)})"
+                if already_exists_times
+                else ""
+            )
             return {
                 "status": "success",
                 "operation": "create",
                 "created_count": len(created),
+                "already_exists_times": already_exists_times,
                 "total_count": total_after,
                 "max_allowed": 5,
                 "remaining_slots": remaining_after,
-                "scheduled_times": norm_times,
+                "scheduled_times": to_create_times,
                 "days_of_week": eff_days,
                 "automations": created,
+                "active_automations": existing_rows + created,
+                "skip_followup_list": True,
                 "message": (
-                    f"تمت جدولة {len(created)} مهمة أتمتة بنجاح بتوقيت القاهرة ({', '.join(norm_times)}) "
+                    f"تمت جدولة {len(created)} مهمة أتمتة بنجاح بتوقيت القاهرة ({', '.join(to_create_times)}){dup_note} "
                     f"وسيتم إرسال التقارير تلقائياً إلى تليجرام. "
                     f"إجمالي المهام في حسابك الآن: {total_after} من 5 (المتبقي {remaining_after})."
                 ),

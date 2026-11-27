@@ -11,6 +11,7 @@ import TrialWelcomePrompt from "@/components/TrialWelcomePrompt";
 import TrialSuccessModal from "@/components/TrialSuccessModal";
 import MarketWelcomeDialog from "@/components/MarketWelcomeDialog";
 import TelegramOnboardingDialog from "@/components/TelegramOnboardingDialog";
+import { Analytics } from "@vercel/analytics/react";
 import type { Metadata, Viewport } from "next";
 
 export const viewport: Viewport = {
@@ -249,6 +250,7 @@ export default function RootLayout({
           <TrialSuccessModal />
           <MarketWelcomeDialog />
           <TelegramOnboardingDialog />
+          <Analytics />
         </Providers>
       </body>
     </html>

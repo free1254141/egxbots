@@ -1123,7 +1123,7 @@ def _build_scan_results_and_backtest(
     df_win["t_meta"] = t_meta_probs
     df_win["k_pass"] = (k_probs >= k_th) & (k_meta_probs >= k_mth)
     df_win["t_pass"] = (t_probs >= t_th) & (t_meta_probs >= t_mth)
-    df_win["consensus_pass"] = df_win["k_pass"] | df_win["t_pass"]
+    df_win["consensus_pass"] = df_win["k_pass"] & df_win["t_pass"]
     df_win["blend_prob"] = 0.55 * df_win["k_prob"] + 0.45 * df_win["t_prob"]
 
     mkt_ohlcv = market_df.rename(
@@ -1175,8 +1175,7 @@ def _build_scan_results_and_backtest(
             if sym in cooldown_until and cooldown_until[sym] >= d_str:
                 continue
 
-            rs_req = 0.005 if is_recent else 0.015
-            sec_req = 0.0 if is_recent else 0.005
+            rs_req = 0.005
             ema50r = float(_clean_num(row.get("EMA_50_Ratio"), 0.0) or 0.0)
             sma50r = float(_clean_num(row.get("SMA_50_Ratio"), 0.0) or 0.0)
             pos52 = float(_clean_num(row.get("feat_52w_position"), 0.0) or 0.0)
@@ -1185,20 +1184,18 @@ def _build_scan_results_and_backtest(
             cmf_v = float(_clean_num(row.get("CMF_20"), 0.0) or 0.0)
             mmd_v = float(_clean_num(row.get("MM_Distribution"), 0.0) or 0.0)
             rs_v = float(_clean_num(row.get("feat_rel_strength"), 0.0) or 0.0)
-            sec_v = float(_clean_num(row.get("feat_sector_rel_strength"), 0.0) or 0.0)
             rvol_v = float(_clean_num(row.get("R_VOL"), 0.0) or 0.0)
 
             if not (
                 ema50r > 0.0
                 and sma50r > 0.0
-                and pos52 >= 0.45
+                and pos52 >= 0.40
                 and adx_v >= 18.0
                 and 35.0 <= rsi_v <= 70.0
                 and cmf_v >= 0.0
                 and mmd_v <= 0.30
                 and rs_v >= rs_req
-                and sec_v >= sec_req
-                and rvol_v >= 1.0
+                and rvol_v >= 0.90
             ):
                 continue
 
@@ -1210,7 +1207,7 @@ def _build_scan_results_and_backtest(
             sub_bars = raw_df.iloc[max(0, pos - 250) : pos + 1].copy()
             avg_turn = float((sub_bars["Close"] * sub_bars["Volume"]).tail(20).mean())
             entry_close = float(sub_bars["Close"].iloc[-1])
-            if entry_close <= 0 or avg_turn < 2_000_000:
+            if entry_close <= 0 or avg_turn < 5_000_000:
                 continue
 
             ok_tf, reason_tf = StrategyEngine.check_technical_filters(

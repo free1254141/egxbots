@@ -79,7 +79,10 @@ def _build_stock_matcher(sb: Client) -> List[Tuple[str, str, List[str]]]:
                 continue
             for part in re.split(r"[,،|/()]", str(candidate)):
                 clean = _normalize_ar(part)
-                if len(clean) >= 3 and clean not in {"شركه", "الشركه", "السعوديه", "القابضه", "مجموعه", "للاستثمار", "التجاريه", "الصناعيه"}:
+                if len(clean) >= 3 and clean not in {
+                    "شركه", "الشركه", "السعوديه", "القابضه", "مجموعه", "للاستثمار", "التجاريه", "الصناعيه",
+                    "انتاج", "الانتاج", "التجاري", "الوطني", "الدولي",
+                }:
                     aliases.append(clean)
         # Prioritize longer / more specific aliases first
         aliases = sorted(set(aliases), key=len, reverse=True)
@@ -339,10 +342,34 @@ def _enrich_with_deepseek(items: List[Dict[str, Any]], ds_key: str) -> None:
 
 
 _NON_SAUDI_KEYWORDS = (
-    "جنيه", "البورصة المصرية", "egx", "القاهرة للدواجن", "الرقابة المالية",
+    "جنيه", "جنيه مصري", "البورصة المصرية", "بورصة مصر", "بورصه مصر", "egx",
+    "القاهرة للدواجن", "مدينة الإنتاج الإعلامي", "مدينة الانتاج الاعلامي",
+    "لجنة قيد البورصة", "بنك أبوظبي الأول مصر", "هشام عز العرب", "الرقابة المالية",
     "الصناعات التحويلية", "بورصة الكويت", "سوق دبي", "سوق أبوظبي", "بورصة قطر",
     "مسقط", "دينار", "درهم",
 )
+
+_NON_DISCLOSURE_ARTICLE_RE = re.compile(
+    r"(?:التحليل\s+الفني\s+لسهم|تحليل\s+فني\s+لسهم|"
+    r"لماذا\s+(?:تراجع|ارتفع|استقر|هبط)\s+سهم|"
+    r"توقعات\s+سهم|تحليل\s+سهم|سعر\s+سهم\s+.*\s+اليوم)",
+    re.IGNORECASE,
+)
+
+
+def _is_excluded_saudi_headline(title: str) -> bool:
+    """Return True if headline is foreign-market news or an SEO technical-analysis article."""
+    clean = (title or "").strip()
+    if not clean:
+        return True
+    lower = clean.lower()
+    norm = _normalize_ar(clean)
+    if any(
+        _normalize_ar(bad) in norm or bad.lower() in lower
+        for bad in _NON_SAUDI_KEYWORDS
+    ):
+        return True
+    return bool(_NON_DISCLOSURE_ARTICLE_RE.search(clean) or _NON_DISCLOSURE_ARTICLE_RE.search(norm))
 
 
 def run_saudi_disclosures_sync(days_back: int = 30) -> Dict[str, Any]:
@@ -393,8 +420,7 @@ def run_saudi_disclosures_sync(days_back: int = 30) -> Dict[str, Any]:
                 except Exception:
                     pass
 
-            raw_title_lower = raw_title.lower()
-            if any(bad in raw_title_lower for bad in _NON_SAUDI_KEYWORDS):
+            if _is_excluded_saudi_headline(raw_title):
                 continue
 
             sym, company_name = _match_symbol(raw_title, matcher)

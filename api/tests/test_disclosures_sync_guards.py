@@ -6,7 +6,12 @@ from api.saudi_disclosures_sync import (
     _classify_disclosure,
     _clean_saudi_title,
     _is_duplicate_saudi_event,
+    _is_excluded_saudi_headline,
     _match_symbol,
+)
+from api.gcc_disclosures_sync import (
+    _is_foreign_market_headline,
+    _is_junk_disclosure_title,
 )
 
 
@@ -112,3 +117,49 @@ def test_saudi_event_deduplication_blocks_cross_outlet_duplicates():
         "source_url": "https://other-outlet.com/news/101",
     }
     assert _is_duplicate_saudi_event(distinct_contract, existing) is False
+
+
+@pytest.mark.parametrize(
+    "headline,expected_excluded",
+    [
+        ('بورصة مصر تقرر قيد أسهم زيادة رأسمال "مدينة الإنتاج الإعلامي"', True),
+        ("لجنة قيد البورصة توافق على زيادة رأس المال المصدر لمدينة الإنتاج الإعلامي", True),
+        ("التحليل الفني لسهم مصرف الراجحي اليوم: لماذا تراجع سهم مصرف الراجحي؟", True),
+        ("التحليل الفني لسهم سابك: لماذا استقر سهم سابك عند 48.68 ريال", True),
+        ("أرامكو السعودية تقرر توزيع أرباح نقدية بقيمة 82.07 مليار ريال عن الربع الثالث", False),
+        ('"اتحاد اتصالات" تتوقع الخضوع لضريبة الحد الأدنى المحلية', False),
+    ],
+)
+def test_saudi_excluded_headlines_blocks_egyptian_and_seo_articles(headline, expected_excluded):
+    assert _is_excluded_saudi_headline(headline) is expected_excluded
+
+
+def test_gcc_disclosure_guards_reject_egypt_and_analysis_articles():
+    assert _is_foreign_market_headline(
+        "أرباح بنك أبوظبي الأول مصر تقفز إلى 13.3 مليار جنيه خلال 9 أشهر", "uae"
+    ) is True
+    assert _is_foreign_market_headline(
+        "هشام عز العرب يقود البنك التجاري الدولي نحو 85 مليار جنيه أرباح سنوية", "qatar"
+    ) is True
+    assert _is_foreign_market_headline(
+        "بنك دبي التجاري يفتتح فرعاً جديداً في مصر", "uae"
+    ) is True
+    # Regression guard: "مصرف" / "المصرف" (Islamic banks) must NEVER collide with "مصر"
+    assert _is_foreign_market_headline(
+        "مصرف قطر الإسلامي يعلن أرباح الربع الثالث", "qatar"
+    ) is False
+    assert _is_foreign_market_headline(
+        "مصرف الريان يوصي بتوزيع أرباح نقدية", "qatar"
+    ) is False
+    assert _is_foreign_market_headline(
+        "مصرف أبوظبي الإسلامي يعلن ارتفاع صافي الأرباح", "uae"
+    ) is False
+    assert _is_foreign_market_headline(
+        "صناعات قطر تعلن توزيع أرباح نقدية بقيمة 0.43 ريال قطري للسهم", "qatar"
+    ) is False
+    assert _is_junk_disclosure_title(
+        "التحليل الفني لسهم إعمار العقارية اليوم: مستويات الدعم والمقاومة"
+    ) is True
+    assert _is_junk_disclosure_title(
+        "إعمار العقارية تعلن ارتفاع صافي الأرباح 18% خلال الربع الثالث"
+    ) is False

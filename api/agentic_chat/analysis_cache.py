@@ -57,8 +57,47 @@ _VALID_LATIN_TICKERS = frozenset(
         "ABUK", "MOSC", "RKAZ", "AIDC", "FTNS", "CNFN", "AMER",
         "CPME", "ICFC", "FERC", "HRHO", "ESRS", "ETEL", "EAST",
         "OCDI", "EMFD", "ADIB", "QNBA", "ISPH", "CLHO", "DSCW",
+        "VLMRA", "VLMR", "HALN", "BONY", "AMII", "LUTS", "ACAP",
     }
 )
+
+_DYNAMIC_TICKERS_LOCK = threading.Lock()
+_DYNAMIC_TICKERS_SET: frozenset[str] = _VALID_LATIN_TICKERS
+_DYNAMIC_TICKERS_AT: float = 0.0
+_DYNAMIC_TICKERS_TTL = 6 * 3600
+_DYNAMIC_TICKERS_RETRY_BACKOFF = 5 * 60
+
+
+def _get_valid_latin_tickers() -> frozenset[str]:
+    """Return static + DB-synced EGX Latin ticker whitelist (cached 6h in RAM; 5m retry backoff on error)."""
+    global _DYNAMIC_TICKERS_SET, _DYNAMIC_TICKERS_AT
+    now_ts = time.time()
+    if (now_ts - _DYNAMIC_TICKERS_AT) < _DYNAMIC_TICKERS_TTL or is_test_environment():
+        return _DYNAMIC_TICKERS_SET
+    with _DYNAMIC_TICKERS_LOCK:
+        now_ts = time.time()
+        if (now_ts - _DYNAMIC_TICKERS_AT) < _DYNAMIC_TICKERS_TTL:
+            return _DYNAMIC_TICKERS_SET
+        merged = set(_VALID_LATIN_TICKERS)
+        fetched_ok = False
+        try:
+            from api.stock_ai import _init_supabase, supabase
+            _init_supabase()
+            if supabase is not None:
+                res = supabase.table("stocks").select("symbol").limit(600).execute()
+                rows = res.data or []
+                for row in rows:
+                    sym = str(row.get("symbol") or "").strip().upper().replace(".CA", "")
+                    if sym and re.fullmatch(r"[A-Z0-9]{2,10}", sym):
+                        merged.add(sym)
+                fetched_ok = True
+        except Exception:
+            fetched_ok = False
+        _DYNAMIC_TICKERS_SET = frozenset(merged)
+        _DYNAMIC_TICKERS_AT = (
+            now_ts if fetched_ok else (now_ts - _DYNAMIC_TICKERS_TTL + _DYNAMIC_TICKERS_RETRY_BACKOFF)
+        )
+        return _DYNAMIC_TICKERS_SET
 
 logger = logging.getLogger("agentic_chat.cache")
 
@@ -68,6 +107,7 @@ LIVE_EOD_SCAN_TTL_SECONDS = 60 * 60  # 60 minutes intraday for EOD-driven scans 
 _EOD_SCAN_CACHE_KEYS = frozenset({
     "vip_accumulation",
     "vip_open_recommendations",
+    "vip_open_recommendations_sharia",
     "vip_disclosures",
     "vip_price_traps",
 })
@@ -914,6 +954,30 @@ def build_analysis_cache_key(
     )
     has_scope_constraint = any(phrase in norm for phrase in active_constraints)
 
+    # Pure canonical Sharia recommendations query (no sector/OTC/price/stock constraints)
+    _sharia_scope_phrases = {
+        _normalize_ar_for_cache(p)
+        for p in (" شرعي", " الشرعي", " الشريعة", " شريعة", " حلال", " إسلامي", " الإسلامي", " sharia ")
+    }
+    non_sharia_constraints = tuple(p for p in active_constraints if p not in _sharia_scope_phrases)
+    if (
+        not any(phrase in norm for phrase in non_sharia_constraints)
+        and not re.search(r"\b[A-Za-z]{2,8}\b", query)
+        and not any(tok in norm for tok in (" سهم ", " لسهم ", " شركه ", " لشركه "))
+        and any(
+            k in norm
+            for k in (
+                " التوصيات الشرعيه ",
+                " التوصيات الشريعه ",
+                " توصيات شرعيه ",
+                " توصيات حلال ",
+                " اسهم شرعيه للشراء ",
+                " افضل اسهم شرعيه ",
+            )
+        )
+    ):
+        return "vip_open_recommendations_sharia"
+
     # Canonical Market-Wide Buttons & Direct Queries (only when NOT narrowed by OTC/Sharia/Saudi/sector/price filters)
     if not has_scope_constraint:
         if any(k in norm for k in (
@@ -928,7 +992,9 @@ def build_analysis_cache_key(
             return "vip_accumulation"
         if any(k in norm for k in (" المسح الفني ", " مسح فني ", " الماسح الذكي ", " tech screener ")):
             return "vip_tech_screener"
-        if any(k in norm for k in (" اقوي الاسهم ", " افضل الاسهم ", " top stocks ")) and not any(k in norm for k in ("تجميع", "تجمع", "بتجمع", "سيوله", "قطاع", "فني", "مسح")):
+        if any(k in norm for k in (
+            " اقوي الاسهم ", " افضل الاسهم ", " افضل اسهم السوق ", " اقوي اسهم السوق ", " top stocks ",
+        )) and not any(k in norm for k in ("تجميع", "تجمع", "بتجمع", "سيوله", "قطاع", "فني", "مسح")):
             return "vip_top_stocks"
         if any(k in norm for k in (
             " اخبار البورصه ", " اخبار السوق ", " افصاحات السوق ", " اخبار السوق الان ",
@@ -951,10 +1017,11 @@ def build_analysis_cache_key(
     is_comparison_query = bool(re.search(r"\b(?:قارن|مقارن|مقارنه|ايهما|مقابل|vs|versus)\b", norm))
     latin_matches = re.findall(r"\b[A-Za-z]{2,8}\b", query)
     stopwords = {"THE", "AND", "FOR", "BUY", "SELL", "BOT", "EGX", "VIP", "AI", "CHAT", "RSI", "MACD", "VS"}
+    valid_tickers = _get_valid_latin_tickers()
     found_syms: List[str] = []
     for tok in latin_matches:
         u = tok.upper()
-        if u not in stopwords and u in _VALID_LATIN_TICKERS:
+        if u not in stopwords and u in valid_tickers:
             res = resolve_stock_symbol(u)
             sym_clean = (res or u).strip().upper().replace(".CA", "")
             if sym_clean and sym_clean not in found_syms:
@@ -1092,10 +1159,78 @@ def is_recommendation_cache_key(cache_key: Optional[str]) -> bool:
         cache_key
         and (
             cache_key == "vip_open_recommendations"
+            or cache_key == "vip_open_recommendations_sharia"
             or cache_key == "vip_market_pulse_and_recs"
             or cache_key.startswith("vip_recs_")
         )
     )
+
+
+_COMPATIBLE_MARKET_KEY_PAIRS = frozenset({
+    ("vip_open_recommendations", "vip_market_pulse_and_recs"),
+    ("vip_market_pulse_and_recs", "vip_open_recommendations"),
+    ("vip_market_summary", "vip_market_and_screener"),
+    ("vip_top_stocks", "vip_market_and_screener"),
+    ("vip_top_stocks", "vip_market_pulse_and_recs"),
+})
+
+_ENTITY_CACHE_BLOCK_PHRASES = tuple(
+    _normalize_ar_for_cache(p)
+    for p in (
+        " ابيع على ", " ابيع علي ", " ابيع بكام ", " ادني هبوط ", " ادنى هبوط ",
+        " مرجح صعود ", " خلال شهر ", " خلال 10 ", " خلال ١٠ ", " افضل سعر لدخول ",
+        " انشط قطاع ", " اقوي قطاع ", " أقوى قطاع ", " تعويض الخسارة ", " يعوض فيها ",
+    )
+)
+
+
+_MARKET_WIDE_FAIR_VALUE_KEYS = frozenset({
+    "vip_fair_value_undervalued",
+    "vip_fair_value_overvalued",
+    "vip_fair_value_screen",
+})
+
+
+def is_cache_write_intent_safe(
+    query: str,
+    cache_key: Optional[str],
+    *,
+    market: str = "EGX",
+) -> bool:
+    """
+    Strict Write-Intent Parity Gate preventing cache cross-contamination across intents.
+    - Market-wide shared buckets (`vip_accumulation`, `vip_market_summary`, `vip_open_recommendations`,
+      `vip_fair_value_undervalued`, ...):
+      ONLY allow writing when `build_analysis_cache_key(query)` explicitly classifies to the SAME bucket
+      (or an allowlisted compatible market pair). Bespoke/sector/analytical questions (`query_key=None`)
+      can NEVER overwrite a shared market bucket.
+    - Entity buckets (`vip_stock_*`, `vip_compare_*`, `vip_news_*`, `vip_fair_value_<SYM>`, `vip_traps_*`):
+      strip punctuation/spaces identically to `build_analysis_cache_key` and reject bespoke personal,
+      dialogue, or conditional trading queries.
+    """
+    if not cache_key:
+        return False
+
+    is_entity_key = (
+        cache_key not in _MARKET_WIDE_FAIR_VALUE_KEYS
+        and cache_key.startswith(("vip_stock_", "vip_compare_", "vip_news_", "vip_fair_value_", "vip_traps_"))
+    )
+    if not is_entity_key:
+        q_key = build_analysis_cache_key(query or "", market=market)
+        if not q_key:
+            return False
+        return q_key == cache_key or (q_key, cache_key) in _COMPATIBLE_MARKET_KEY_PAIRS
+
+    cleaned_norm = re.sub(r"[^\w\s]|_", " ", _normalize_ar_for_cache(query or ""))
+    norm = " " + re.sub(r"\s+", " ", cleaned_norm).strip() + " "
+    words = set(norm.split())
+    if any(w in words or w in norm for w in PERSONAL_WORDS):
+        return False
+    if words & DIALOGUE_WORDS:
+        return False
+    if any(phrase in norm for phrase in _ENTITY_CACHE_BLOCK_PHRASES):
+        return False
+    return True
 
 
 def resolve_scoped_cache_key(

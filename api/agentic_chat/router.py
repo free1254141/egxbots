@@ -17,7 +17,7 @@ from fastapi import APIRouter, Request, Header
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from api.agentic_chat.pipeline import run_agentic_chat_stream
+from api.agentic_chat.pipeline import run_agentic_chat_stream, _build_tools_stage_label
 from api.agentic_chat.tools_execution import _normalize_market_code, _ui_market_label
 from api.agentic_chat.auth_guard import (
     get_authenticated_user,
@@ -67,6 +67,156 @@ async def health_check():
     }
 
 
+_VALID_STAGE_IDS = ("understand", "fetch_data", "quant_verify", "synthesize")
+_RAW_STAGE_STATUS_CODES = frozenset({
+    "thinking", "vision", "executing_tools", "quant_engine", "generating", "cached",
+})
+
+
+def _default_answer_stages(*, has_images: bool = False) -> List[Dict[str, str]]:
+    return [
+        {
+            "id": "understand",
+            "label": "قراءة الصورة وفهم سياق السؤال" if has_images else "فهم السؤال وتحديد السهم والسوق",
+            "status": "in_progress",
+        },
+        {"id": "fetch_data", "label": "جلب البيانات الحية من أدوات السوق", "status": "pending"},
+        {"id": "quant_verify", "label": "التحليل الكمي ومحاكاة مونت كارلو وحسم التعارض", "status": "pending"},
+        {"id": "synthesize", "label": "صياغة التقرير النهائي ومراجعة الحارس الآلي", "status": "pending"},
+    ]
+
+
+def _resolve_stage_id_from_event(event: Dict[str, Any]) -> Optional[str]:
+    sid = event.get("step_id")
+    if sid in _VALID_STAGE_IDS:
+        return sid
+    st = str(event.get("status") or "").strip()
+    if st in ("thinking", "vision"):
+        return "understand"
+    if st in ("executing_tools", "cached"):
+        return "fetch_data"
+    if st == "quant_engine":
+        return "quant_verify"
+    if st == "generating":
+        return "synthesize"
+    return None
+
+
+def _build_persisted_answer_stages(
+    status_events: List[Dict[str, Any]],
+    *,
+    has_images: bool = False,
+    tools_used: Optional[List[str]] = None,
+    cached: bool = False,
+) -> List[Dict[str, str]]:
+    """Replay SSE status events into finalized compact answerStages matching ChatContext.tsx."""
+    stages = _default_answer_stages(has_images=has_images)
+    for ev in status_events or []:
+        if not isinstance(ev, dict):
+            continue
+        raw_msg = str(ev.get("message") or ev.get("content") or "").strip()
+        human_label = raw_msg if (raw_msg and raw_msg not in _RAW_STAGE_STATUS_CODES) else ""
+        if str(ev.get("status") or "").strip() == "cached":
+            by_id = {s["id"]: s for s in stages}
+            defaults = {s["id"]: s for s in _default_answer_stages(has_images=has_images)}
+            u = dict(by_id.get("understand") or defaults["understand"])
+            f = dict(by_id.get("fetch_data") or defaults["fetch_data"])
+            sy = dict(by_id.get("synthesize") or defaults["synthesize"])
+            u["status"] = "done"
+            f["label"] = human_label or "تم استرجاع التحليل الموثق من الذاكرة"
+            f["status"] = "done"
+            sy["status"] = "in_progress"
+            stages = [u, f, sy]
+            continue
+
+        target_id = _resolve_stage_id_from_event(ev)
+        if not target_id:
+            continue
+        target_idx = next((i for i, s in enumerate(stages) if s["id"] == target_id), -1)
+        if target_idx < 0:
+            prev_map = {s["id"]: s for s in stages}
+            stages = [dict(prev_map.get(s["id"], s)) for s in _default_answer_stages(has_images=has_images)]
+            target_idx = next((i for i, s in enumerate(stages) if s["id"] == target_id), -1)
+        if target_idx < 0:
+            continue
+
+        next_stages: List[Dict[str, str]] = []
+        for idx, stage in enumerate(stages):
+            item = dict(stage)
+            if idx < target_idx:
+                item["status"] = "done"
+            elif idx == target_idx:
+                if human_label:
+                    item["label"] = human_label
+                item["status"] = "in_progress"
+            else:
+                item["status"] = "pending"
+            next_stages.append(item)
+        stages = next_stages
+
+    has_tools = isinstance(tools_used, list) and len(tools_used) > 0
+    finalized: List[Dict[str, str]] = []
+    for s in stages:
+        sid = s.get("id")
+        if (
+            sid in ("understand", "synthesize")
+            or s.get("status") in ("done", "in_progress")
+            or (has_tools and not cached)
+        ):
+            label = str(s.get("label") or "").strip()[:180]
+            if sid in _VALID_STAGE_IDS and label:
+                finalized.append({"id": str(sid), "label": label, "status": "done"})
+    return finalized
+
+
+def _normalize_persisted_answer_stages(raw: Any) -> Optional[List[Dict[str, str]]]:
+    if not isinstance(raw, list) or not raw:
+        return None
+    out: List[Dict[str, str]] = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("id") or "").strip()
+        label = str(item.get("label") or "").strip()[:180]
+        if sid in _VALID_STAGE_IDS and label and sid not in seen:
+            seen.add(sid)
+            out.append({"id": sid, "label": label, "status": "done"})
+    return out or None
+
+
+def _extract_message_answer_stages(role: Optional[str], meta: Dict[str, Any]) -> Optional[List[Dict[str, str]]]:
+    """Return stored answer_stages from metadata, or reconstruct accurately for historical assistant rows."""
+    if role != "assistant" or not isinstance(meta, dict):
+        return None
+    stored = _normalize_persisted_answer_stages(meta.get("answer_stages") or meta.get("answerStages"))
+    if stored:
+        return stored
+    if not (meta.get("engine") or meta.get("usage") or meta.get("cached") is True or meta.get("latency_ms")):
+        return None
+    if meta.get("cached") is True:
+        return [
+            {"id": "understand", "label": "فهم السؤال وتحديد السهم والسوق", "status": "done"},
+            {"id": "fetch_data", "label": "تم استرجاع التحليل الموثق من الذاكرة", "status": "done"},
+            {"id": "synthesize", "label": "صياغة التقرير النهائي ومراجعة الحارس الآلي", "status": "done"},
+        ]
+    usage = meta.get("usage") if isinstance(meta.get("usage"), dict) else {}
+    tools_used = usage.get("tools_used") if isinstance(usage.get("tools_used"), list) else []
+    has_tables = isinstance(meta.get("tables"), list) and len(meta.get("tables")) > 0
+    if tools_used or has_tables:
+        fetch_label = _build_tools_stage_label(tools_used) if tools_used else "جلب البيانات الحية من أدوات السوق"
+        return [
+            {"id": "understand", "label": "فهم السؤال وتحديد السهم والسوق", "status": "done"},
+            {"id": "fetch_data", "label": fetch_label, "status": "done"},
+            {"id": "quant_verify", "label": "تدقيق ومطابقة البيانات المالية والفنية المستخرجة", "status": "done"},
+            {"id": "synthesize", "label": "صياغة التقرير النهائي ومراجعة الحارس الآلي", "status": "done"},
+        ]
+    return [
+        {"id": "understand", "label": "فهم السؤال وتحديد السهم والسوق", "status": "done"},
+        {"id": "synthesize", "label": "صياغة التقرير النهائي ومراجعة الحارس الآلي", "status": "done"},
+    ]
+
+
 def _persist_message_background(
     session_id: str,
     user_id: Optional[str],
@@ -80,6 +230,7 @@ def _persist_message_background(
     tables: Optional[List[Any]] = None,
     usage: Optional[Dict[str, Any]] = None,
     guard_warnings: Optional[List[str]] = None,
+    answer_stages: Optional[List[Dict[str, Any]]] = None,
 ):
     """Save user and assistant messages to ai_chat_messages in background."""
     if user_id == "00000000-0000-0000-0000-000000000000" or not session_id:
@@ -120,6 +271,9 @@ def _persist_message_background(
             meta["usage"] = usage
         if isinstance(guard_warnings, list) and guard_warnings:
             meta["guard_warnings"] = guard_warnings
+        clean_stages = _normalize_persisted_answer_stages(answer_stages)
+        if clean_stages:
+            meta["answer_stages"] = clean_stages
         user_row = {
             "session_id": session_id,
             "user_id": user_id,
@@ -154,12 +308,14 @@ async def get_chat_root(
     request: Request,
     action: Optional[str] = None,
     session_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    before: Optional[str] = None,
 ):
     """
     Handle GET /api/ai-chat requests:
     - ?action=sessions
     - ?action=settings
-    - ?session_id=...
+    - ?session_id=...&limit=...&before=...
     """
     try:
         _init_supabase()
@@ -218,19 +374,55 @@ async def get_chat_root(
 
     target_sid = session_id or request.query_params.get("session_id") or request.query_params.get("sessionId")
     if target_sid:
+        raw_limit = limit if limit is not None else request.query_params.get("limit")
+        page_limit = 50
+        if raw_limit is not None:
+            try:
+                page_limit = max(1, min(int(raw_limit), 50))
+            except (TypeError, ValueError):
+                page_limit = 50
+
+        raw_before = before if before is not None else request.query_params.get("before")
+        before_cursor: Optional[str] = None
+        if isinstance(raw_before, str):
+            stripped_before = raw_before.strip()
+            if stripped_before:
+                if stripped_before.isdigit():
+                    try:
+                        before_cursor = datetime.fromtimestamp(
+                            int(stripped_before) / 1000.0, tz=timezone.utc
+                        ).isoformat()
+                    except Exception:
+                        before_cursor = None
+                elif "T" in stripped_before or "-" in stripped_before:
+                    before_cursor = stripped_before
+
         messages = []
+        has_more = False
+        next_before: Optional[str] = None
         if user_id:
             try:
-                res = (
+                query = (
                     supabase.from_("ai_chat_messages")
                     .select("id, role, content, image_url, created_at, latency_ms, metadata")
                     .eq("session_id", target_sid)
                     .eq("user_id", user_id)
-                    .order("created_at", desc=False)
-                    .limit(50)
+                )
+                if before_cursor:
+                    query = query.lt("created_at", before_cursor)
+                res = (
+                    query
+                    .order("created_at", desc=True)
+                    .limit(page_limit + 1)
                     .execute()
                 )
-                for m in (res.data or []):
+                raw_rows = res.data or []
+                has_more = len(raw_rows) > page_limit
+                page_rows = list(reversed(raw_rows[:page_limit]))
+                if has_more and page_rows:
+                    next_before = page_rows[0].get("created_at")
+
+                for m in page_rows:
                     created_at_val = m.get("created_at")
                     ts = int(time.time() * 1000)
                     if created_at_val:
@@ -240,6 +432,7 @@ async def get_chat_root(
                             pass
                     meta = m.get("metadata") if isinstance(m.get("metadata"), dict) else {}
                     msg_tables = meta.get("tables") if isinstance(meta.get("tables"), list) else None
+                    msg_answer_stages = _extract_message_answer_stages(m.get("role"), meta)
                     msg_item: Dict[str, Any] = {
                         "id": m.get("id"),
                         "role": m.get("role"),
@@ -248,15 +441,23 @@ async def get_chat_root(
                         "imageUrl": m.get("image_url"),
                         "latencyMs": m.get("latency_ms"),
                     }
+                    if created_at_val:
+                        msg_item["createdAt"] = created_at_val
                     if msg_tables:
                         msg_item["tables"] = msg_tables
+                    if msg_answer_stages:
+                        msg_item["answerStages"] = msg_answer_stages
                     messages.append(msg_item)
             except Exception as e:
                 logger.warning(f"[agentic_chat] Error fetching session messages: {e}")
                 messages = []
+                has_more = False
+                next_before = None
         return JSONResponse({
             "history": messages,
             "messages": messages,
+            "has_more": has_more,
+            "next_before": next_before,
         })
 
     return JSONResponse({
@@ -448,6 +649,7 @@ async def chat_stream_endpoint(
             used_cache_key: Optional[str] = None
             usage_stats: Optional[Dict[str, Any]] = None
             guard_warnings: Optional[List[str]] = None
+            status_events: List[Dict[str, Any]] = []
             t_req_start = time.time()
             async for sse_chunk in run_agentic_chat_stream(
                 message=user_msg,
@@ -468,7 +670,9 @@ async def chat_stream_endpoint(
                     if data_part != "[DONE]":
                         try:
                             event = json.loads(data_part)
-                            if event.get("type") == "done":
+                            if event.get("type") == "status":
+                                status_events.append(event)
+                            elif event.get("type") == "done":
                                 final_reply = event.get("reply", "")
                                 if isinstance(event.get("tables"), list):
                                     final_tables = event.get("tables") or []
@@ -485,6 +689,18 @@ async def chat_stream_endpoint(
 
             if not latency_ms:
                 latency_ms = int((time.time() - t_req_start) * 1000)
+
+            usage_tools = (
+                usage_stats.get("tools_used")
+                if isinstance(usage_stats, dict) and isinstance(usage_stats.get("tools_used"), list)
+                else None
+            )
+            final_answer_stages = _build_persisted_answer_stages(
+                status_events,
+                has_images=has_attached_images,
+                tools_used=usage_tools,
+                cached=was_cached,
+            )
 
             # Persist after stream completes (skip for benchmark load tests)
             if final_reply and session_id and verified_user_id != "00000000-0000-0000-0000-000000000000":
@@ -503,6 +719,7 @@ async def chat_stream_endpoint(
                         tables=final_tables or None,
                         usage=usage_stats,
                         guard_warnings=guard_warnings,
+                        answer_stages=final_answer_stages or None,
                     )
                 )
 
@@ -525,6 +742,7 @@ async def chat_stream_endpoint(
         used_cache_key: Optional[str] = None
         usage_stats: Optional[Dict[str, Any]] = None
         guard_warnings: Optional[List[str]] = None
+        status_events: List[Dict[str, Any]] = []
         t_req_start = time.time()
         async for sse_chunk in run_agentic_chat_stream(
             message=user_msg,
@@ -545,7 +763,9 @@ async def chat_stream_endpoint(
                 if data_part != "[DONE]":
                     try:
                         event = json.loads(data_part)
-                        if event.get("type") == "token":
+                        if event.get("type") == "status":
+                            status_events.append(event)
+                        elif event.get("type") == "token":
                             full_reply += event.get("token", "")
                         elif event.get("type") == "done":
                             full_reply = event.get("reply", full_reply)
@@ -563,6 +783,18 @@ async def chat_stream_endpoint(
         if not latency_ms:
             latency_ms = int((time.time() - t_req_start) * 1000)
 
+        usage_tools = (
+            usage_stats.get("tools_used")
+            if isinstance(usage_stats, dict) and isinstance(usage_stats.get("tools_used"), list)
+            else None
+        )
+        final_answer_stages = _build_persisted_answer_stages(
+            status_events,
+            has_images=has_attached_images,
+            tools_used=usage_tools,
+            cached=was_cached,
+        )
+
         if full_reply and session_id and verified_user_id != "00000000-0000-0000-0000-000000000000":
             asyncio.create_task(
                 asyncio.to_thread(
@@ -579,6 +811,7 @@ async def chat_stream_endpoint(
                     tables=tables or None,
                     usage=usage_stats,
                     guard_warnings=guard_warnings,
+                    answer_stages=final_answer_stages or None,
                 )
             )
 
@@ -587,6 +820,7 @@ async def chat_stream_endpoint(
             "session_id": session_id,
             "market": active_market,
             "tables": tables,
+            "answer_stages": final_answer_stages,
             "latency_ms": latency_ms,
             "is_pro": user_is_pro,
             "remaining_quota": remaining_quota,

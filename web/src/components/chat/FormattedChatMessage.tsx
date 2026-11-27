@@ -1313,7 +1313,7 @@ function ExportableTable({ headers, rows }: { headers?: string[]; rows?: string[
     );
 }
 
-export function FormattedChatMessage({
+function FormattedChatMessageInner({
     content,
     role,
     suggestedButtons,
@@ -2302,3 +2302,6 @@ export function FormattedChatMessage({
         </div>
     );
 }
+
+export const FormattedChatMessage = React.memo(FormattedChatMessageInner);
+FormattedChatMessage.displayName = "FormattedChatMessage";

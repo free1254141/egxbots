@@ -506,6 +506,7 @@ ARABIC_STOCK_MAPPINGS: Dict[str, str] = {
     "العربية الهندسية": "EEII",
     "عربية صناعات هندسية": "EEII",
     "المالية والصناعية": "EFIC",
+    "المالية الصناعية": "EFIC",
     "المالية والصناعية المصرية": "EFIC",
     "كفر الزيات للمالية": "EFIC",
     "غاز مصر": "EGAS",
@@ -793,6 +794,11 @@ ARABIC_STOCK_MAPPINGS: Dict[str, str] = {
     "كوم امبو": "WKOL",
     "وادي كوم امبو": "WKOL",
     "وادي كوم أمبو": "WKOL",
+    "فالمور أ": "VLMRA",
+    "فالمور الفئة أ": "VLMRA",
+    "فالمور القابضة أ": "VLMRA",
+    "VLMRA": "VLMRA",
+    "vlmra": "VLMRA",
     "الزيوت المستخلصة": "ZEOT",
     "مستخلصة زيوت": "ZEOT",
     "زهراء المعادى": "ZMID",
@@ -1025,6 +1031,104 @@ _TICKER_IGNORE_WORDS = {
     "HELP", "NEWS", "CHART", "TEST", "HTTP", "HTTPS", "COM", "EGXBOTS",
 }
 
+_FUZZY_SKIP_PREFIXES = ("سهم ", "لسهم ", "شركه ", "لشركه ")
+
+
+def _is_safe_fuzzy_candidate(norm_p: str) -> bool:
+    if len(norm_p) < 8 or norm_p.isascii():
+        return False
+    if norm_p.startswith(_FUZZY_SKIP_PREFIXES):
+        return False
+    if "حالا" in norm_p:
+        return False
+    # Exclude share-class aliases containing a 1-char standalone token (e.g. "فالمور ا" vs "فالمور ب")
+    if any(len(tok) == 1 for tok in norm_p.split()):
+        return False
+    return True
+
+
+_FUZZY_ARABIC_CANDIDATES: List[tuple[str, str]] = [
+    (norm_p, sym)
+    for norm_p, sym in _NORMALIZED_PHRASES
+    if _is_safe_fuzzy_candidate(norm_p)
+]
+
+
+def _within_edit_distance_one(a: str, b: str) -> bool:
+    """Exact O(n) check whether two strings are within Levenshtein distance <= 1."""
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        diffs = 0
+        for ca, cb in zip(a, b):
+            if ca != cb:
+                diffs += 1
+                if diffs > 1:
+                    return False
+        return diffs == 1
+    # Ensure a is the shorter string
+    if la > lb:
+        a, b = b, a
+        la, lb = lb, la
+    i = j = 0
+    skipped = False
+    while i < la and j < lb:
+        if a[i] == b[j]:
+            i += 1
+            j += 1
+        elif not skipped:
+            skipped = True
+            j += 1
+        else:
+            return False
+    return True
+
+
+def _fuzzy_resolve_arabic_alias(norm_text: str) -> Optional[str]:
+    """
+    Strict 1-edit-distance Arabic company name rescue for keyboard typos
+    (e.g. 'الماليه الصناغيه؟' -> EFIC, 'القاهره للزيةت؟' -> COSG).
+    Strips punctuation, excludes generic-prefix/share-class/ambiguous aliases,
+    and requires ALL edit-distance-1 hits to resolve to ONE unique stock symbol.
+    """
+    cleaned = re.sub(r"[^\w\s]|_", " ", norm_text or "")
+    words = [w for w in re.split(r"\s+", cleaned.strip()) if w]
+    if not words:
+        return None
+    matched_syms = set()
+    n_words = len(words)
+    for win in range(min(4, n_words), 0, -1):
+        for start in range(0, n_words - win + 1):
+            gram = " ".join(words[start : start + win])
+            glen = len(gram)
+            if glen < 8:
+                continue
+            for cand_norm, sym in _FUZZY_ARABIC_CANDIDATES:
+                if abs(glen - len(cand_norm)) <= 1 and _within_edit_distance_one(gram, cand_norm):
+                    matched_syms.add(sym)
+                    if len(matched_syms) > 1:
+                        return None
+    return next(iter(matched_syms)) if len(matched_syms) == 1 else None
+
+
+def _find_phrase_in_text(phrase: str, text: str) -> int:
+    """Return match start index or -1, enforcing end-of-word boundary when phrase ends with a 1-char token."""
+    idx = text.find(phrase)
+    if idx == -1:
+        return -1
+    last_tok = phrase.rsplit(None, 1)[-1]
+    if len(last_tok) == 1:
+        while idx != -1:
+            end = idx + len(phrase)
+            if end >= len(text) or not text[end].isalnum():
+                return idx
+            idx = text.find(phrase, idx + 1)
+        return -1
+    return idx
+
 
 def resolve_stock_symbol(text: str) -> Optional[str]:
     """Extract and resolve an EGX stock symbol from English or Arabic input."""
@@ -1039,14 +1143,19 @@ def resolve_stock_symbol(text: str) -> Optional[str]:
 
     # 2. Check for exact matches with longest original phrase first
     for phrase in _SORTED_ORIGINAL_PHRASES:
-        if phrase in clean_text:
+        if _find_phrase_in_text(phrase, clean_text) != -1:
             return ARABIC_STOCK_MAPPINGS[phrase]
 
     # 2b. Normalized Arabic fallback (أ/إ/آ -> ا, ة -> ه, ى -> ي, diacritics stripped)
     norm_text = _normalize_arabic_text(clean_text)
     for norm_phrase, sym in _NORMALIZED_PHRASES:
-        if len(norm_phrase) >= 3 and norm_phrase in norm_text:
+        if len(norm_phrase) >= 3 and _find_phrase_in_text(norm_phrase, norm_text) != -1:
             return sym
+
+    # 2c. Strict 1-edit-distance fuzzy Arabic rescue for 1-letter keyboard typos (unique match only)
+    fuzzy_sym = _fuzzy_resolve_arabic_alias(norm_text)
+    if fuzzy_sym:
+        return fuzzy_sym
 
     # 3. Check for English ticker symbols (#COMI, COMI, TMGH, etc.)
     tokens = re.findall(r"[A-Za-z]{2,8}", clean_text)
@@ -1071,7 +1180,7 @@ def extract_all_stock_symbols(text: str) -> List[str]:
     matched_norm_phrases = []
 
     for phrase in _SORTED_ORIGINAL_PHRASES:
-        start = clean_text.find(phrase)
+        start = _find_phrase_in_text(phrase, clean_text)
         if start != -1:
             end = start + len(phrase)
             overlap = any(s < end and start < e for s, e in matched_regions)
@@ -1087,7 +1196,7 @@ def extract_all_stock_symbols(text: str) -> List[str]:
     for norm_phrase, sym in _NORMALIZED_PHRASES:
         if len(norm_phrase) < 3 or any(norm_phrase in mp for mp in matched_norm_phrases):
             continue
-        start = norm_text.find(norm_phrase)
+        start = _find_phrase_in_text(norm_phrase, norm_text)
         if start != -1:
             end = start + len(norm_phrase)
             overlap = any(s < end and start < e for s, e in norm_regions)

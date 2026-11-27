@@ -150,6 +150,24 @@ export function finalizeAnswerStages(
     return filtered.map((s) => ({ ...s, status: "done" }));
 }
 
+const _VALID_ANSWER_STAGE_IDS = new Set<AnswerStageId>(["understand", "fetch_data", "quant_verify", "synthesize"]);
+
+export function normalizePersistedAnswerStages(raw: unknown): AnswerStageItem[] | undefined {
+    if (!Array.isArray(raw) || raw.length === 0) return undefined;
+    const seen = new Set<AnswerStageId>();
+    const normalized: AnswerStageItem[] = [];
+    for (const item of raw) {
+        if (!item || typeof item !== "object") continue;
+        const rec = item as Record<string, unknown>;
+        const id = typeof rec.id === "string" ? (rec.id.trim() as AnswerStageId) : null;
+        const label = typeof rec.label === "string" ? rec.label.trim() : "";
+        if (!id || !_VALID_ANSWER_STAGE_IDS.has(id) || !label || seen.has(id)) continue;
+        seen.add(id);
+        normalized.push({ id, label, status: "done" });
+    }
+    return normalized.length > 0 ? normalized : undefined;
+}
+
 export type ChatMessage = {
 
     id?: string;
@@ -159,6 +177,8 @@ export type ChatMessage = {
     content: string;
 
     timestamp: number;
+
+    createdAt?: string;
 
     imageUrl?: string;
 
@@ -557,13 +577,21 @@ interface ChatContextType {
 
     isAccessReady: boolean;
 
+    hasMoreHistory?: boolean;
+
+    isLoadingOlderHistory?: boolean;
+
+    loadOlderMessages?: () => Promise<number>;
+
 }
 
 
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
-
+export const INITIAL_HISTORY_LIMIT = 4;
+export const OLDER_HISTORY_PAGE_SIZE = 6;
+const MAX_STORED_MESSAGES_PER_SESSION = 12;
 
 // Local Storage Persistence Helpers
 export function isTelegramSessionMeta(title?: string): boolean {
@@ -635,19 +663,25 @@ function saveStoredMessagesSync(sessionId: string, msgs: ChatMessage[]) {
 
     try {
 
-        // Preserve attached image preview URLs so user uploads persist across page refreshes
+        // Cap localStorage per session to recent messages & keep compact finalized answerStages
+        const tailMsgs = msgs.length > MAX_STORED_MESSAGES_PER_SESSION
+            ? msgs.slice(msgs.length - MAX_STORED_MESSAGES_PER_SESSION)
+            : msgs;
 
-        const cleanMsgs = msgs.map(m => ({
-
-            ...m,
-
-            imagePreviewUrl: m.imagePreviewUrl || (m.imageUrl && m.imageUrl !== "[image]" ? m.imageUrl : undefined),
-
-            imageUrl: m.imageUrl,
-
-            images: m.images
-
-        }));
+        // Preserve attached image preview URLs and finalized thinking stages across close/reopen & page refreshes
+        const cleanMsgs = tailMsgs.map(m => {
+            const persistedStages = !m.isStreaming
+                ? normalizePersistedAnswerStages(m.answerStages)
+                : undefined;
+            const { answerStages: _rawStages, ...rest } = m;
+            return {
+                ...rest,
+                ...(persistedStages ? { answerStages: persistedStages } : {}),
+                imagePreviewUrl: m.imagePreviewUrl || (m.imageUrl && m.imageUrl !== "[image]" ? m.imageUrl : undefined),
+                imageUrl: m.imageUrl,
+                images: m.images
+            };
+        });
 
         localStorage.setItem(`egxbots_msgs_${sessionId}`, JSON.stringify(cleanMsgs));
 
@@ -680,6 +714,17 @@ function cleanChatText(text: string): string {
 }
 
 
+
+function _msgStableKey(m: ChatMessage): string {
+    if (m.id) return `id:${m.id}`;
+    const normContent = cleanChatText(m.content || "").trim().slice(0, 120);
+    return `${m.role}|${m.createdAt || m.timestamp || 0}|${normContent}`;
+}
+
+function _msgLooseKey(m: ChatMessage): string {
+    const normContent = cleanChatText(m.content || "").trim().slice(0, 120);
+    return `${m.role}|${normContent}`;
+}
 
 export function ChatProvider({ children }: { children: ReactNode }) {
 
@@ -919,6 +964,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const sessionMutationVersionRef = useRef<Record<string, number>>({});
     const lastLocalTurnAtRef = useRef<Record<string, number>>({});
     const lastSubmitRef = useRef<{ sessionId: string; text: string; ts: number } | null>(null);
+    const sessionPaginationRef = useRef<Record<string, { hasMore: boolean; nextBefore: string | null }>>({});
+    const sessionLoadedOlderRef = useRef<Record<string, boolean>>({});
+    const olderFetchesRef = useRef<Record<string, Promise<number>>>({});
+    const [hasMoreHistory, setHasMoreHistory] = useState<boolean>(false);
+    const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState<boolean>(false);
 
     const activeSessionIdRef = useRef<string | null>(activeSessionId);
 
@@ -926,7 +976,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const saveTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
 
-
+    const syncActivePagination = useCallback((sid: string | null) => {
+        if (!sid) {
+            setHasMoreHistory(false);
+            setIsLoadingOlderHistory(false);
+            return;
+        }
+        setHasMoreHistory(Boolean(sessionPaginationRef.current[sid]?.hasMore));
+        setIsLoadingOlderHistory(Boolean(olderFetchesRef.current[sid]));
+    }, []);
 
     const setActiveSessionId = useCallback((id: string | null) => {
 
@@ -934,7 +992,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         setActiveSessionIdState(id);
 
-    }, []);
+        syncActivePagination(id);
+
+    }, [syncActivePagination]);
 
 
 
@@ -1168,7 +1228,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
             try {
 
-                const res = await hfAuthFetch(`/api/ai-chat?session_id=${encodeURIComponent(sessionId)}`, {
+                const res = await hfAuthFetch(`/api/ai-chat?session_id=${encodeURIComponent(sessionId)}&limit=${INITIAL_HISTORY_LIMIT}`, {
                     headers: { ...getAuthHeaders() },
                 }, { requireToken: true });
 
@@ -1176,101 +1236,77 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 const data = await res.json();
 
-                if (!Array.isArray(data.history) || data.history.length === 0) return;
+                if (!Array.isArray(data.history) || data.history.length === 0) {
+                    if (Array.isArray(data.history) && data.history.length === 0) {
+                        sessionPaginationRef.current[sessionId] = { hasMore: false, nextBefore: null };
+                        if (activeSessionIdRef.current === sessionId) syncActivePagination(sessionId);
+                    }
+                    return;
+                }
 
                 if (loadingSessionIds.current[sessionId] || (sessionMutationVersionRef.current[sessionId] || 0) !== fetchStartVersion) {
                     return;
                 }
 
-
-
                 const existing = sessionMessagesCache.current[sessionId] || getStoredMessages(sessionId);
 
-                const localImageMap = new Map<number, { imageUrl?: string; imagePreviewUrl?: string; images?: string[] }>();
-                const localVoiceMap = new Map<number, { voiceAudioUrl?: string; voiceDuration?: number; spokenText?: string; isVoice?: boolean; isVoiceNote?: boolean }>();
-                const localTablesMap = new Map<number, ChatTable[]>();
+                const localImageMap = new Map<string, { imageUrl?: string; imagePreviewUrl?: string; images?: string[] }>();
+                const localVoiceMap = new Map<string, { voiceAudioUrl?: string; voiceDuration?: number; spokenText?: string; isVoice?: boolean; isVoiceNote?: boolean }>();
+                const localTablesMap = new Map<string, ChatTable[]>();
+                const localStagesMap = new Map<string, AnswerStageItem[]>();
 
-                existing.forEach((m, idx) => {
-
+                existing.forEach((m) => {
+                    const keys = [_msgStableKey(m), _msgLooseKey(m)];
                     if (Array.isArray(m.tables) && m.tables.length > 0) {
-
-                        localTablesMap.set(idx, m.tables);
-
+                        keys.forEach((k) => { if (!localTablesMap.has(k)) localTablesMap.set(k, m.tables!); });
                     }
-
+                    const existingStages = normalizePersistedAnswerStages(m.answerStages);
+                    if (existingStages && existingStages.length > 0) {
+                        keys.forEach((k) => { if (!localStagesMap.has(k)) localStagesMap.set(k, existingStages); });
+                    }
                     if (m.imageUrl || m.imagePreviewUrl || m.images) {
-
-                        localImageMap.set(idx, {
-
-                            imageUrl: m.imageUrl,
-
-                            imagePreviewUrl: m.imagePreviewUrl,
-
-                            images: m.images
-
-                        });
-
+                        const imgVal = { imageUrl: m.imageUrl, imagePreviewUrl: m.imagePreviewUrl, images: m.images };
+                        keys.forEach((k) => { if (!localImageMap.has(k)) localImageMap.set(k, imgVal); });
                     }
-
                     if (m.voiceAudioUrl || m.isVoiceNote || m.voiceDuration) {
-
-                        localVoiceMap.set(idx, {
-
+                        const voiceVal = {
                             voiceAudioUrl: m.voiceAudioUrl,
-
                             voiceDuration: m.voiceDuration,
-
                             isVoice: m.isVoice,
-
                             isVoiceNote: m.isVoiceNote,
-
-                            spokenText: m.spokenText
-
-                        });
-
+                            spokenText: m.spokenText,
+                        };
+                        keys.forEach((k) => { if (!localVoiceMap.has(k)) localVoiceMap.set(k, voiceVal); });
                     }
-
                 });
 
-
-
-                const mergedHistory: ChatMessage[] = orderChatMessages(data.history.map((srvMsg: ChatMessage, idx: number) => {
-
-                    const localImg = localImageMap.get(idx);
-                    const localVoice = localVoiceMap.get(idx);
-                    const localTables = localTablesMap.get(idx);
+                const mergedLatest: ChatMessage[] = orderChatMessages(data.history.map((srvMsg: ChatMessage) => {
+                    const stableK = _msgStableKey(srvMsg);
+                    const looseK = _msgLooseKey(srvMsg);
+                    const localImg = localImageMap.get(stableK) || localImageMap.get(looseK);
+                    const localVoice = localVoiceMap.get(stableK) || localVoiceMap.get(looseK);
+                    const localTables = localTablesMap.get(stableK) || localTablesMap.get(looseK);
+                    const srvStages = normalizePersistedAnswerStages(
+                        srvMsg.answerStages ?? (srvMsg as ChatMessage & { answer_stages?: unknown }).answer_stages
+                    );
+                    const localStages = localStagesMap.get(stableK) || localStagesMap.get(looseK);
 
                     return {
-
                         ...srvMsg,
-
                         content: cleanChatText(srvMsg.content || ""),
-
                         tables: Array.isArray(srvMsg.tables) && srvMsg.tables.length > 0 ? srvMsg.tables : localTables,
-
+                        answerStages: srvStages || localStages,
                         suggestedButtons: srvMsg.suggestedButtons?.map(cleanChatText).filter(Boolean),
-
                         imagePreviewUrl: srvMsg.imagePreviewUrl || localImg?.imagePreviewUrl || srvMsg.imageUrl || localImg?.imageUrl,
-
                         imageUrl: srvMsg.imageUrl || localImg?.imageUrl,
-
                         images: srvMsg.images || localImg?.images,
-
                         voiceAudioUrl: srvMsg.voiceAudioUrl || localVoice?.voiceAudioUrl,
-
                         voiceDuration: srvMsg.voiceDuration ?? localVoice?.voiceDuration,
-
                         isVoice: srvMsg.isVoice ?? localVoice?.isVoice,
-
                         isVoiceNote: srvMsg.isVoiceNote ?? localVoice?.isVoiceNote,
-
                         spokenText: srvMsg.spokenText ?? localVoice?.spokenText
-
                     };
-
                 }));
-
-
 
                 const latestExisting = sessionMessagesCache.current[sessionId] || getStoredMessages(sessionId);
 
@@ -1278,12 +1314,30 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                     return;
                 }
 
-                if (Date.now() - (lastLocalTurnAtRef.current[sessionId] || 0) < 15_000 && latestExisting.length > mergedHistory.length) {
-                    const newestServerTs = mergedHistory.reduce((mx, m) => Math.max(mx, m.timestamp || 0), 0);
+                if (Date.now() - (lastLocalTurnAtRef.current[sessionId] || 0) < 15_000 && latestExisting.length > mergedLatest.length) {
+                    const newestServerTs = mergedLatest.reduce((mx, m) => Math.max(mx, m.timestamp || 0), 0);
                     const newestLocalTs = latestExisting.reduce((mx, m) => Math.max(mx, m.timestamp || 0), 0);
                     if (newestLocalTs > newestServerTs) {
                         return;
                     }
+                }
+
+                let mergedHistory: ChatMessage[] = mergedLatest;
+                if (sessionLoadedOlderRef.current[sessionId] && latestExisting.length > 0) {
+                    const latestKeys = new Set(mergedLatest.map(_msgStableKey));
+                    const oldestLatestTs = mergedLatest[0]?.timestamp ?? Infinity;
+                    const preservedOlder = latestExisting.filter(
+                        (m) => !latestKeys.has(_msgStableKey(m)) && (m.timestamp || 0) <= oldestLatestTs
+                    );
+                    if (preservedOlder.length > 0) {
+                        mergedHistory = orderChatMessages([...preservedOlder, ...mergedLatest]);
+                    }
+                } else {
+                    const fallbackCursor = mergedLatest[0]?.createdAt ?? null;
+                    sessionPaginationRef.current[sessionId] = {
+                        hasMore: Boolean(data.has_more),
+                        nextBefore: typeof data.next_before === "string" && data.next_before ? data.next_before : fallbackCursor,
+                    };
                 }
 
                 // Keep an in-flight optimistic turn (both user question and streaming assistant bubble) visible while syncing history.
@@ -1322,8 +1376,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 }
 
-
-
                 // setSessionMessages updates the visible state only if this room is
 
                 // still active, so a late response cannot replace another room.
@@ -1332,6 +1384,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 flushStoredMessages(sessionId, mergedHistory);
 
+                if (activeSessionIdRef.current === sessionId) {
+                    syncActivePagination(sessionId);
+                }
+
             } catch (e) {
 
                 console.error("Failed to load session messages from server:", e);
@@ -1339,8 +1395,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             }
 
         })();
-
-
 
         sessionFetchesRef.current[sessionId] = request;
 
@@ -1356,7 +1410,102 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         return request;
 
-    }, [setSessionMessages, flushStoredMessages]);
+    }, [setSessionMessages, flushStoredMessages, syncActivePagination]);
+
+    const loadOlderMessages = useCallback(async (): Promise<number> => {
+        const sid = activeSessionIdRef.current;
+        if (!sid) return 0;
+
+        const existingPending = olderFetchesRef.current[sid];
+        if (existingPending) return existingPending;
+
+        const pageInfo = sessionPaginationRef.current[sid];
+        if (!pageInfo?.hasMore) return 0;
+
+        const currentMsgs = sessionMessagesCache.current[sid] || [];
+        const cursor =
+            pageInfo.nextBefore ||
+            currentMsgs[0]?.createdAt ||
+            (currentMsgs[0]?.timestamp ? new Date(currentMsgs[0].timestamp).toISOString() : null);
+
+        if (!cursor) {
+            sessionPaginationRef.current[sid] = { hasMore: false, nextBefore: null };
+            syncActivePagination(sid);
+            return 0;
+        }
+
+        let task!: Promise<number>;
+        task = (async (): Promise<number> => {
+            if (activeSessionIdRef.current === sid) {
+                setIsLoadingOlderHistory(true);
+            }
+            try {
+                const res = await hfAuthFetch(
+                    `/api/ai-chat?session_id=${encodeURIComponent(sid)}&limit=${OLDER_HISTORY_PAGE_SIZE}&before=${encodeURIComponent(cursor)}`,
+                    { headers: { ...getAuthHeaders() } },
+                    { requireToken: true }
+                );
+                if (!res.ok) return 0;
+
+                const data = await res.json();
+                const rawOlder: ChatMessage[] = Array.isArray(data.history) ? data.history : [];
+                const cleanedOlder: ChatMessage[] = rawOlder.map((srvMsg) => ({
+                    ...srvMsg,
+                    content: cleanChatText(srvMsg.content || ""),
+                    answerStages: normalizePersistedAnswerStages(
+                        srvMsg.answerStages ?? (srvMsg as ChatMessage & { answer_stages?: unknown }).answer_stages
+                    ),
+                    suggestedButtons: srvMsg.suggestedButtons?.map(cleanChatText).filter(Boolean),
+                    imagePreviewUrl: srvMsg.imagePreviewUrl || srvMsg.imageUrl,
+                }));
+
+                const latestCache = sessionMessagesCache.current[sid] || [];
+                const seenKeys = new Set(latestCache.map(_msgStableKey));
+                const uniqueOlder: ChatMessage[] = [];
+                for (const item of cleanedOlder) {
+                    const k = _msgStableKey(item);
+                    if (!seenKeys.has(k)) {
+                        seenKeys.add(k);
+                        uniqueOlder.push(item);
+                    }
+                }
+
+                const nextCursor =
+                    typeof data.next_before === "string" && data.next_before
+                        ? data.next_before
+                        : (uniqueOlder[0]?.createdAt ?? null);
+                const hasMoreNext =
+                    Boolean(data.has_more) &&
+                    uniqueOlder.length > 0 &&
+                    Boolean(nextCursor) &&
+                    nextCursor !== cursor;
+
+                sessionPaginationRef.current[sid] = {
+                    hasMore: hasMoreNext,
+                    nextBefore: hasMoreNext ? nextCursor : null,
+                };
+
+                if (uniqueOlder.length > 0) {
+                    sessionLoadedOlderRef.current[sid] = true;
+                    const merged = orderChatMessages([...uniqueOlder, ...latestCache]);
+                    setSessionMessages(sid, merged);
+                }
+
+                return uniqueOlder.length;
+            } catch (e) {
+                console.error("Failed to load older chat messages:", e);
+                return 0;
+            } finally {
+                if (olderFetchesRef.current[sid] === task) {
+                    delete olderFetchesRef.current[sid];
+                }
+                syncActivePagination(activeSessionIdRef.current);
+            }
+        })();
+
+        olderFetchesRef.current[sid] = task;
+        return task;
+    }, [getAuthHeaders, setSessionMessages, syncActivePagination]);
 
 
 
@@ -1737,6 +1886,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         delete loadingSessionIds.current[sessionId];
         delete sessionMutationVersionRef.current[sessionId];
         delete lastLocalTurnAtRef.current[sessionId];
+        delete sessionPaginationRef.current[sessionId];
+        delete sessionLoadedOlderRef.current[sessionId];
+        delete olderFetchesRef.current[sessionId];
 
         if (typeof window !== "undefined") {
 
@@ -1805,6 +1957,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         if (!userId) {
 
+            sessionPaginationRef.current = {};
+
+            sessionLoadedOlderRef.current = {};
+
+            olderFetchesRef.current = {};
+
+            syncActivePagination(null);
+
             setAccessState({ status: "loading" });
 
             setRemainingQuota(10);
@@ -1815,7 +1975,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         void fetchSessions(userId);
 
-    }, [authLoading, userId, fetchSessions]);
+    }, [authLoading, userId, fetchSessions, syncActivePagination]);
 
 
 
@@ -2297,10 +2457,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 assistantMsg.statusText = undefined;
 
-                assistantMsg.answerStages = finalizeAnswerStages(assistantMsg.answerStages, {
-                    toolsUsed: Array.isArray(data.usage?.tools_used) ? data.usage.tools_used : undefined,
-                    cached: Boolean(data.cached),
-                });
+                assistantMsg.answerStages =
+                    normalizePersistedAnswerStages(data.answer_stages ?? data.answerStages) ||
+                    finalizeAnswerStages(assistantMsg.answerStages, {
+                        toolsUsed: Array.isArray(data.usage?.tools_used) ? data.usage.tools_used : undefined,
+                        cached: Boolean(data.cached),
+                    });
 
                 updateAssistantMsgInState(assistantMsg);
 
@@ -2800,7 +2962,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
             setAutonomousRecommendations,
 
-            isAccessReady: accessState.status === "ready"
+            isAccessReady: accessState.status === "ready",
+
+            hasMoreHistory,
+
+            isLoadingOlderHistory,
+
+            loadOlderMessages
 
         }}>
 
